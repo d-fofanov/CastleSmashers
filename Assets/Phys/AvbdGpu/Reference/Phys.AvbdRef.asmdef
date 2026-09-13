@@ -1,0 +1,17 @@
+{
+    "name": "Phys.AvbdRef",
+    "rootNamespace": "Phys.AvbdRef",
+    "references": [
+        "Unity.Mathematics",
+        "Phys.AvbdGpu.Scenes"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}
