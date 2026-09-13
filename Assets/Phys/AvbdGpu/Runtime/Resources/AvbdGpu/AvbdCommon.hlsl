@@ -160,7 +160,8 @@ float3 qrotate(float4 q, float3 v)
 
 float3 qtransform(float3 p, float4 q, float3 v) { return qrotate(q, v) + p; }
 
-// Row-major rotation matrix (rows as in the reference maths.h)
+// Rotation matrix R with mul(R, v) == qrotate(q, v): the columns are the rotated body axes, row i holds the i-th
+// world components of those axes (so the world AABB extent is dot(abs(R[i]), half)).
 float3x3 qmatrix(float4 q)
 {
     float x = q.x, y = q.y, z = q.z, w = q.w;
@@ -168,9 +169,9 @@ float3x3 qmatrix(float4 q)
     float xy = x * y, xz = x * z, yz = y * z;
     float wx = w * x, wy = w * y, wz = w * z;
     return float3x3(
-        1.0 - 2.0 * (yy + zz), 2.0 * (xy + wz), 2.0 * (xz - wy),
-        2.0 * (xy - wz), 1.0 - 2.0 * (xx + zz), 2.0 * (yz + wx),
-        2.0 * (xz + wy), 2.0 * (yz - wx), 1.0 - 2.0 * (xx + yy));
+        1.0 - 2.0 * (yy + zz), 2.0 * (xy - wz), 2.0 * (xz + wy),
+        2.0 * (xy + wz), 1.0 - 2.0 * (xx + zz), 2.0 * (yz - wx),
+        2.0 * (xz - wy), 2.0 * (yz + wx), 1.0 - 2.0 * (xx + yy));
 }
 
 // ------------------------------------------------------------------------------------------------ matrices

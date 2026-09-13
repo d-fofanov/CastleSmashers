@@ -29,9 +29,12 @@ namespace Phys.Demo
         readonly FrameTiming[] m_Timings = new FrameTiming[1];
         float m_GpuMs;
 
-        // Player-build verification: -avbd-scene <n> -avbd-screenshot <file> [-avbd-frames <n>] captures a screenshot after n frames and quits.
+        // Player-build verification: -avbd-scene <n> -avbd-screenshot <file> [-avbd-frames <n>] captures a screenshot after n frames and quits;
+        // -avbd-bench [-avbd-frames <n>] logs the average frame time of the second half of the run and quits.
         string m_ScreenshotPath;
         int m_ScreenshotFrame = 150;
+        bool m_Bench;
+        double m_BenchMs; int m_BenchFrames;
 
         public AvbdGpuWorld World => m_World;
         public int Scene => m_Scene;
@@ -48,6 +51,7 @@ namespace Phys.Demo
                 if (args[i] == "-avbd-screenshot") m_ScreenshotPath = args[i + 1];
                 if (args[i] == "-avbd-frames" && int.TryParse(args[i + 1], out int fr)) m_ScreenshotFrame = fr;
             }
+            for (int i = 0; i < args.Length; i++) if (args[i] == "-avbd-bench") m_Bench = true;
             if (!AvbdGpuKernels.Supported) { Debug.LogError("Compute shaders are not supported on this device"); enabled = false; return; }
             m_World = new AvbdGpuWorld(AvbdGpuConfig.ForBodies(MaxBodies)) { ReadbackPoses = true };
             m_Renderer = new AvbdGpuRenderer(m_World);
@@ -92,10 +96,21 @@ namespace Phys.Demo
         {
             if (m_World == null) return;
             m_Renderer.Render();
-            if (m_ScreenshotPath == null) return;
+            if (m_ScreenshotPath == null && !m_Bench) return;
             m_Frames++;
-            if (m_Frames == m_ScreenshotFrame) ScreenCapture.CaptureScreenshot(m_ScreenshotPath);
-            if (m_Frames == m_ScreenshotFrame + 20) Application.Quit();
+            if (m_Bench && m_Frames > m_ScreenshotFrame / 2) { m_BenchMs += Time.unscaledDeltaTime * 1000.0; m_BenchFrames++; }
+            if (m_ScreenshotPath != null && m_Frames == m_ScreenshotFrame) ScreenCapture.CaptureScreenshot(m_ScreenshotPath);
+            if (m_Frames == m_ScreenshotFrame + 20)
+            {
+                if (m_Bench)
+                {
+                    var st = m_World.Stats;
+                    Debug.Log($"AVBD bench: scene {m_Scene} '{AvbdScenes.All[m_Scene].Name}' bodies {m_World.BodyCount} iterations {m_World.Params.Iterations}: " +
+                        $"frame {m_BenchMs / math.max(m_BenchFrames, 1):F2} ms ({m_BenchFrames / (m_BenchMs / 1000.0):F0} fps), submit {st.AvgStepMs:F2} ms, " +
+                        $"pairs {st.Pairs} manifolds {st.Manifolds} contacts {st.Contacts} colours {st.ColorsUsed}/{st.ActiveColors} overflow bodies {st.OverflowBodies} flags {st.OverflowFlags}");
+                }
+                Application.Quit();
+            }
         }
 
         void HandleKeys()
@@ -179,7 +194,7 @@ namespace Phys.Demo
             string text =
                 $"<b>[{m_Scene + 1}] {info.Name}</b>{(m_Paused ? "  <color=#ffcc55>PAUSED</color>" : "")}\n" +
                 $"{info.Description}\n\n" +
-                $"step submit {stats.LastStepMs:F2} ms (avg {stats.AvgStepMs:F2})  gpu frame {(FrameTimingManager.IsFeatureEnabled() ? $"{m_GpuMs:F2} ms" : "n/a")}  {1f / math.max(Time.smoothDeltaTime, 1e-4f):F0} fps\n" +
+                $"frame {Time.smoothDeltaTime * 1000f:F1} ms ({1f / math.max(Time.smoothDeltaTime, 1e-4f):F0} fps)  step submit {stats.LastStepMs:F2} ms (avg {stats.AvgStepMs:F2})  gpu render {(FrameTimingManager.IsFeatureEnabled() ? $"{m_GpuMs:F2} ms" : "n/a")}\n" +
                 $"bodies {m_World.BodyCount}  joints {m_World.JointCount}  springs {m_World.SpringCount}  pairs {stats.Pairs}  manifolds {stats.Manifolds}  contacts {stats.Contacts}\n" +
                 $"colours {stats.ColorsUsed} / active {stats.ActiveColors}  overflow bodies {stats.OverflowBodies}  large bodies {stats.LargeBodies}{overflow}\n" +
                 $"dt 1/{math.round(1f / p.Dt)}  substeps {p.Substeps}  iterations {p.Iterations}  alpha {p.Alpha}  beta {p.BetaLin}/{p.BetaAng}  gamma {p.Gamma}  " +
