@@ -1,0 +1,93 @@
+// Debug geometry written on the GPU: contact crosses (per manifold, from the previous step's manifold list), joint and
+// spring lines. Drawn by AvbdGpuRenderer with Phys/AvbdLines; nothing is read back.
+#pragma kernel DebugArgs
+#pragma kernel DebugContacts
+#pragma kernel DebugJoints
+
+#include "AvbdCommon.hlsl"
+
+struct DebugVertex { float4 position; float4 color; };
+
+StructuredBuffer<float4> _BodyPos;
+StructuredBuffer<float4> _BodyRot;
+StructuredBuffer<uint> _Stats;
+StructuredBuffer<Manifold> _ManifoldPrev;
+StructuredBuffer<Contact> _ContactsPrev;
+StructuredBuffer<JointDef> _JointDef;
+StructuredBuffer<JointState> _JointState;
+StructuredBuffer<SpringDef> _SpringDef;
+RWStructuredBuffer<DebugVertex> _DebugVerts;
+RWStructuredBuffer<DebugVertex> _DebugJointVerts;
+RWByteAddressBuffer _DrawArgs;
+uint _DebugContactCap;
+float _CrossSize;
+
+[numthreads(1, 1, 1)]
+void DebugArgs(uint3 id : SV_DispatchThreadID)
+{
+    uint contacts = min(_Stats[CNT_CONTACTS], _DebugContactCap);
+    _DrawArgs.Store4(0, uint4(contacts * 6, 1, 0, 0));
+}
+
+void writeCross(RWStructuredBuffer<DebugVertex> verts, uint baseIndex, float3 p, float4 color, float s)
+{
+    DebugVertex v; v.color = color;
+    v.position = float4(p - float3(s, 0, 0), 1); verts[baseIndex + 0] = v;
+    v.position = float4(p + float3(s, 0, 0), 1); verts[baseIndex + 1] = v;
+    v.position = float4(p - float3(0, s, 0), 1); verts[baseIndex + 2] = v;
+    v.position = float4(p + float3(0, s, 0), 1); verts[baseIndex + 3] = v;
+    v.position = float4(p - float3(0, 0, s), 1); verts[baseIndex + 4] = v;
+    v.position = float4(p + float3(0, 0, s), 1); verts[baseIndex + 5] = v;
+}
+
+[numthreads(AVBD_THREADS, 1, 1)]
+void DebugContacts(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Stats[CNT_MANIFOLDS]) return;
+    Manifold m = _ManifoldPrev[id.x];
+    float3 posA = _BodyPos[m.bodyA].xyz;
+    float4 rotA = _BodyRot[m.bodyA];
+    for (uint i = 0; i < m.numContacts; i++)
+    {
+        uint ci = m.contactStart + i;
+        if (ci >= _DebugContactCap) continue;
+        Contact c = _ContactsPrev[ci];
+        float3 p = qtransform(posA, rotA, c.rA);
+        bool stick = (c.feature & 0x80000000u) != 0;
+        float4 color = stick ? float4(0.2, 0.9, 0.2, 1) : float4(0.9, 0.15, 0.15, 1);
+        writeCross(_DebugVerts, ci * 6, p, color, _CrossSize);
+    }
+}
+
+// Joints then springs: 2 vertices each
+[numthreads(AVBD_THREADS, 1, 1)]
+void DebugJoints(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+    DebugVertex v;
+    if (i < _JointCount)
+    {
+        JointDef d = _JointDef[i];
+        JointState s = _JointState[i];
+        float3 pA = d.rA;
+        if (d.bodyA >= 0) pA = qtransform(_BodyPos[d.bodyA].xyz, _BodyRot[d.bodyA], d.rA);
+        float3 pB = qtransform(_BodyPos[d.bodyB].xyz, _BodyRot[d.bodyB], d.rB);
+        bool active = s.broken == 0 && (d.stiffnessLin > 0 || d.stiffnessAng > 0);
+        v.color = !active ? float4(0.3, 0.3, 0.3, 1) : d.stiffnessLin >= HARD_STIFFNESS ? float4(0.9, 0.1, 0.1, 1) : float4(1.0, 0.6, 0.1, 1);
+        if (!active) { pA = 0; pB = 0; }
+        v.position = float4(pA, 1); _DebugJointVerts[i * 2] = v;
+        v.position = float4(pB, 1); _DebugJointVerts[i * 2 + 1] = v;
+        return;
+    }
+    i -= _JointCount;
+    if (i < _SpringCount)
+    {
+        SpringDef d = _SpringDef[i];
+        float3 pA = qtransform(_BodyPos[d.bodyA].xyz, _BodyRot[d.bodyA], d.rA);
+        float3 pB = qtransform(_BodyPos[d.bodyB].xyz, _BodyRot[d.bodyB], d.rB);
+        v.color = float4(0.95, 0.85, 0.2, 1);
+        uint o = (_JointCount + i) * 2;
+        v.position = float4(pA, 1); _DebugJointVerts[o] = v;
+        v.position = float4(pB, 1); _DebugJointVerts[o + 1] = v;
+    }
+}

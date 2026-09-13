@@ -1,0 +1,20 @@
+{
+    "name": "Phys.Demo",
+    "rootNamespace": "Phys.Demo",
+    "references": [
+        "Phys.AvbdGpu",
+        "Phys.AvbdGpu.Presentation",
+        "Phys.AvbdGpu.Scenes",
+        "Unity.Mathematics",
+        "Unity.InputSystem"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

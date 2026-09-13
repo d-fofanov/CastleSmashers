@@ -1,0 +1,18 @@
+{
+    "name": "Phys.Demo.Editor",
+    "rootNamespace": "Phys.Demo.Editor",
+    "references": [
+        "Phys.Demo"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

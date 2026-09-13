@@ -34,7 +34,7 @@ namespace Phys.AvbdGpu
                 MaxLinks = math.max(bodies * 4, 16384),
                 MaxManifolds = manifolds,
                 MaxContacts = manifolds * 4,
-                MaxPairs = manifolds,
+                MaxPairs = bodies * 10,      // tightly packed piles pair every box with ~6-8 AABB neighbours
                 MaxCellEntries = bodies * 8,
                 MaxLargeBodies = 256,
                 LargeBodyCells = 64,

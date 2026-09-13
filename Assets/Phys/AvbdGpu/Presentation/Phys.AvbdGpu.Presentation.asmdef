@@ -1,0 +1,17 @@
+{
+    "name": "Phys.AvbdGpu.Presentation",
+    "rootNamespace": "Phys.AvbdGpu.Presentation",
+    "references": [
+        "Unity.Mathematics",
+        "Phys.AvbdGpu"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

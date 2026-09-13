@@ -472,6 +472,7 @@ namespace Phys.AvbdGpu
             s.Constraints = (int)data[(int)StatSlot.Constraints];
             s.ActiveColors = m_ActiveColors;
             m_Stats = s;
+            AdaptColors();
             return s;
         }
 

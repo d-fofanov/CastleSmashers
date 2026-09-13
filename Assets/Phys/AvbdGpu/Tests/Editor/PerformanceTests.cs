@@ -1,0 +1,36 @@
+using System.Diagnostics;
+using NUnit.Framework;
+using Phys.AvbdGpu.Scenes;
+using UnityEngine;
+
+namespace Phys.AvbdGpu.Tests
+{
+    /// <summary>Step times of the GPU solver (excluded from the default runs; `RunTests.ps1 -Filter Phys.AvbdGpu.Tests.PerformanceTests`).
+    /// The GPU is synchronised once after the timed steps, so the numbers are amortised GPU step times.</summary>
+    public class PerformanceTests
+    {
+        static void Measure(string label, int scene, int bodies, int iterations, int warmup, int steps)
+        {
+            using var world = GpuTestUtil.NewWorld(bodies);
+            world.Params.Iterations = iterations;
+            world.BuildScene(scene);
+            for (int i = 0; i < warmup; i++) world.Step();
+            world.GetStatsSync();
+            var sw = Stopwatch.StartNew();
+            for (int i = 0; i < steps; i++) world.Step();
+            var stats = world.GetStatsSync();   // sync
+            sw.Stop();
+            GpuTestUtil.AssertFinite(world);
+            UnityEngine.Debug.Log($"PERF {label}: {world.BodyCount} bodies, {iterations} iterations: {sw.Elapsed.TotalMilliseconds / steps:F2} ms/step, cpu submit {world.Stats.AvgStepMs:F2} ms " +
+                $"(pairs {stats.Pairs}, manifolds {stats.Manifolds}, contacts {stats.Contacts}, colours {stats.ColorsUsed}, overflow bodies {stats.OverflowBodies}, flags {stats.OverflowFlags})");
+            Assert.AreEqual(0, stats.OverflowFlags, "capacity overflow");
+        }
+
+        [Test] public void Pyramid137() => Measure("pyramid 16", AvbdScenes.Pyramid, 4096, 10, 30, 120);
+        [Test] public void Pyramid22k() => Measure("pyramid 40", AvbdScenes.PyramidLarge, 32768, 10, 60, 60);
+        [Test] public void Pyramid22kFourIterations() => Measure("pyramid 40", AvbdScenes.PyramidLarge, 32768, 4, 60, 60);
+        [Test] public void Pile50k() => Measure("pile 50 x 20 x 50", AvbdScenes.Pile, 65536, 10, 120, 60);
+        [Test] public void Pile50kFourIterations() => Measure("pile 50 x 20 x 50", AvbdScenes.Pile, 65536, 4, 120, 60);
+        [Test] public void Pyramid74k() => Measure("pyramid 60", AvbdScenes.PyramidHuge, 81920, 4, 60, 60);
+    }
+}
