@@ -1,0 +1,34 @@
+* text=auto
+*.cs text diff=csharp
+*.shader text
+*.cginc text
+*.hlsl text
+*.asmdef text
+*.json text
+
+# Unity YAML: keep as text, use UnityYAMLMerge for merges
+*.unity text merge=unityyamlmerge eol=lf
+*.prefab text merge=unityyamlmerge eol=lf
+*.asset text merge=unityyamlmerge eol=lf
+*.meta text merge=unityyamlmerge eol=lf
+*.mat text merge=unityyamlmerge eol=lf
+*.anim text merge=unityyamlmerge eol=lf
+*.controller text merge=unityyamlmerge eol=lf
+*.physicMaterial text merge=unityyamlmerge eol=lf
+*.inputactions text eol=lf
+
+# Binary assets
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.tga binary
+*.psd binary
+*.fbx binary
+*.wav binary
+*.mp3 binary
+*.ogg binary
+*.ttf binary
+*.otf binary
+*.dll binary
+*.so binary
+*.dylib binary
