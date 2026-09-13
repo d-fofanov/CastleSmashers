@@ -1,0 +1,87 @@
+// Exclusive prefix sum of _ScanIn[0..N) into _ScanOut[0..N], with _ScanOut[N] = total. Three dispatches:
+// ScanBlock (1024 elements per group), ScanTop (one group over the block sums, N <= 1024 * 1024), ScanAdd.
+#pragma kernel ScanBlock
+#pragma kernel ScanTop
+#pragma kernel ScanAdd
+
+#define SCAN_THREADS 256
+#define SCAN_PER_THREAD 4
+#define SCAN_BLOCK (SCAN_THREADS * SCAN_PER_THREAD)
+#define SCAN_TOP_THREADS 1024
+
+StructuredBuffer<uint> _ScanIn;
+RWStructuredBuffer<uint> _ScanOut;
+RWStructuredBuffer<uint> _BlockSums;
+int _ScanN;
+
+groupshared uint gs_sums[SCAN_THREADS];
+groupshared uint gs_top[SCAN_TOP_THREADS];
+
+[numthreads(SCAN_THREADS, 1, 1)]
+void ScanBlock(uint3 gid : SV_GroupID, uint3 tid : SV_GroupThreadID)
+{
+    uint n = (uint)_ScanN;
+    uint base = gid.x * SCAN_BLOCK + tid.x * SCAN_PER_THREAD;
+    uint v[SCAN_PER_THREAD];
+    uint local = 0;
+    [unroll]
+    for (int k = 0; k < SCAN_PER_THREAD; k++)
+    {
+        uint i = base + k;
+        v[k] = i < n ? _ScanIn[i] : 0;
+        local += v[k];
+    }
+    gs_sums[tid.x] = local;
+    GroupMemoryBarrierWithGroupSync();
+
+    // Hillis-Steele inclusive scan over the thread sums
+    for (uint offset = 1; offset < SCAN_THREADS; offset <<= 1)
+    {
+        uint t = tid.x >= offset ? gs_sums[tid.x - offset] : 0;
+        GroupMemoryBarrierWithGroupSync();
+        gs_sums[tid.x] += t;
+        GroupMemoryBarrierWithGroupSync();
+    }
+
+    uint exclusive = gs_sums[tid.x] - local;
+    [unroll]
+    for (int k2 = 0; k2 < SCAN_PER_THREAD; k2++)
+    {
+        uint i = base + k2;
+        if (i < n) _ScanOut[i] = exclusive;
+        exclusive += v[k2];
+    }
+    if (tid.x == SCAN_THREADS - 1) _BlockSums[gid.x] = gs_sums[tid.x];
+}
+
+[numthreads(SCAN_TOP_THREADS, 1, 1)]
+void ScanTop(uint3 tid : SV_GroupThreadID)
+{
+    uint numBlocks = ((uint)_ScanN + SCAN_BLOCK - 1) / SCAN_BLOCK;
+    uint local = tid.x < numBlocks ? _BlockSums[tid.x] : 0;
+    gs_top[tid.x] = local;
+    GroupMemoryBarrierWithGroupSync();
+    for (uint offset = 1; offset < SCAN_TOP_THREADS; offset <<= 1)
+    {
+        uint t = tid.x >= offset ? gs_top[tid.x - offset] : 0;
+        GroupMemoryBarrierWithGroupSync();
+        gs_top[tid.x] += t;
+        GroupMemoryBarrierWithGroupSync();
+    }
+    if (tid.x < numBlocks) _BlockSums[tid.x] = gs_top[tid.x] - local;
+    if (tid.x == SCAN_TOP_THREADS - 1) _ScanOut[(uint)_ScanN] = gs_top[tid.x];
+}
+
+[numthreads(SCAN_THREADS, 1, 1)]
+void ScanAdd(uint3 gid : SV_GroupID, uint3 tid : SV_GroupThreadID)
+{
+    uint n = (uint)_ScanN;
+    uint add = _BlockSums[gid.x];
+    uint base = gid.x * SCAN_BLOCK + tid.x * SCAN_PER_THREAD;
+    [unroll]
+    for (int k = 0; k < SCAN_PER_THREAD; k++)
+    {
+        uint i = base + k;
+        if (i < n) _ScanOut[i] += add;
+    }
+}

@@ -1,0 +1,474 @@
+// AVBD step kernels: body warm start (Predict), colour-batched primal update (Primal / CommitOverflow), dual update
+// of contacts and joints (Dual), velocity reconstruction (Velocity). Ports of solver.cpp / manifold.cpp / joint.cpp /
+// spring.cpp of avbd-demo3d.
+#pragma kernel Predict
+#pragma kernel Primal
+#pragma kernel CommitOverflow
+#pragma kernel Dual
+#pragma kernel Velocity
+
+#include "AvbdCommon.hlsl"
+
+// D3D11 allows 8 UAVs per kernel: buffers that a kernel only reads are bound through read-only names
+// (the C# side binds the same GraphicsBuffer under both names).
+StructuredBuffer<BodyDef> _BodyDef;
+RWStructuredBuffer<float4> _BodyPos;            // Predict, Primal (in place), Commit, Velocity
+RWStructuredBuffer<float4> _BodyRot;
+RWStructuredBuffer<float4> _BodyPosNew;         // Primal overflow, Commit
+RWStructuredBuffer<float4> _BodyRotNew;
+StructuredBuffer<float4> _BodyInitialLin;       // read by Primal, Dual, Velocity
+StructuredBuffer<float4> _BodyInitialAng;
+StructuredBuffer<float4> _BodyInertialLin;      // read by Primal
+StructuredBuffer<float4> _BodyInertialAng;
+RWStructuredBuffer<float4> _BodyInitialLinW;    // written by Predict
+RWStructuredBuffer<float4> _BodyInitialAngW;
+RWStructuredBuffer<float4> _BodyInertialLinW;
+RWStructuredBuffer<float4> _BodyInertialAngW;
+StructuredBuffer<float4> _BodyVelLinIn;         // read by Predict
+StructuredBuffer<float4> _BodyVelAngIn;
+StructuredBuffer<float4> _BodyPrevVelLinIn;
+RWStructuredBuffer<float4> _BodyVelLin;         // written by Velocity
+RWStructuredBuffer<float4> _BodyVelAng;
+RWStructuredBuffer<float4> _BodyPrevVelLin;
+StructuredBuffer<uint> _BodyConsStart;
+StructuredBuffer<uint> _BodyConsList;
+StructuredBuffer<uint> _ColorStart;
+StructuredBuffer<uint> _ColorList;
+StructuredBuffer<Manifold> _ManifoldCur;
+StructuredBuffer<Contact> _ContactsCur;         // read by Primal
+RWStructuredBuffer<Contact> _ContactsCurRW;     // written by Dual
+StructuredBuffer<JointDef> _JointDef;
+StructuredBuffer<JointState> _JointState;       // read by Primal
+RWStructuredBuffer<JointState> _JointStateRW;   // written by Dual
+StructuredBuffer<SpringDef> _SpringDef;
+StructuredBuffer<uint> _Counters;
+
+int _ColorSlot;       // colour group of this primal dispatch
+int _WriteToNew;      // 1: write positions to the double buffer (overflow group)
+float _AlphaIt;       // stabilisation parameter of this iteration (post-stabilisation varies it)
+
+// ------------------------------------------------------------------------------------------------ Predict
+
+[numthreads(AVBD_THREADS, 1, 1)]
+void Predict(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+    if (i >= _BodyCount) return;
+    BodyDef d = _BodyDef[i];
+    float3 pos = _BodyPos[i].xyz;
+    float4 rot = _BodyRot[i];
+    float3 vel = _BodyVelLinIn[i].xyz;
+    float3 ang = _BodyVelAngIn[i].xyz;
+    float3 prev = _BodyPrevVelLinIn[i].xyz;
+    bool dynamic = !isStatic(d);
+
+    // Compute inertial position (Eq 2)
+    float3 inertialLin = pos + vel * _Dt;
+    if (dynamic) inertialLin += _Gravity * (_Dt * _Dt);
+    float4 inertialAng = qadd(rot, ang * _Dt);
+
+    // Adaptive warmstart (See original VBD paper)
+    float3 accel = (vel - prev) / _Dt;
+    float accelExt = dot(accel, _GravityDir);
+    float accelWeight = clamp(accelExt / _GravityMag, 0.0, 1.0);
+    if (!isfinite(accelWeight)) accelWeight = 0.0;
+
+    // Save initial position (x-) and compute warmstarted position (See original VBD paper)
+    _BodyInitialLinW[i] = float4(pos, 0);
+    _BodyInitialAngW[i] = rot;
+    if (dynamic)
+    {
+        pos = pos + vel * _Dt + _Gravity * (accelWeight * _Dt * _Dt);
+        rot = qadd(rot, ang * _Dt);
+    }
+    _BodyInertialLinW[i] = float4(inertialLin, 0);
+    _BodyInertialAngW[i] = inertialAng;
+    _BodyPos[i] = float4(pos, 0);
+    _BodyRot[i] = rot;
+}
+
+// ------------------------------------------------------------------------------------------------ forces
+
+struct System6
+{
+    float3x3 lhsLin, lhsAng, lhsCross;
+    float3 rhsLin, rhsAng;
+};
+
+// Contact force of one contact at the current positions (Taylor series about x-); F.x is the normal component.
+float3 contactForce(Manifold m, Contact c, float3 dqALin, float3 dqAAng, float3 dqBLin, float3 dqBAng,
+    float3 rAWorld, float3 rBWorld, float3x3 jALin, float3x3 jBLin, out float3x3 jAAng, out float3x3 jBAng, out float3 C, out float frictionScale, out float bounds)
+{
+    jAAng = float3x3(cross(rAWorld, jALin[0]), cross(rAWorld, jALin[1]), cross(rAWorld, jALin[2]));
+    jBAng = float3x3(cross(rBWorld, jBLin[0]), cross(rBWorld, jBLin[1]), cross(rBWorld, jBLin[2]));
+
+    C = c.C0 * (1 - _AlphaIt) + mul(jALin, dqALin) + mul(jBLin, dqBLin) + mul(jAAng, dqAAng) + mul(jBAng, dqBAng);
+
+    // Compute force
+    float3 F = c.penalty * C + c.lambda;
+
+    // Clamp normal force
+    F.x = min(F.x, 0.0);
+
+    // Clamp norm of friction forces to achieve a friction cone
+    bounds = abs(F.x) * m.friction;
+    frictionScale = length(F.yz);
+    if (frictionScale > bounds && frictionScale > 0)
+        F.yz *= bounds / frictionScale;
+    return F;
+}
+
+void stampManifold(uint mi, uint body, inout System6 sys)
+{
+    Manifold m = _ManifoldCur[mi];
+    uint a = m.bodyA, b = m.bodyB;
+    float3 posA = _BodyPos[a].xyz, posB = _BodyPos[b].xyz;
+    float4 rotA = _BodyRot[a], rotB = _BodyRot[b];
+    float3 dqALin = posA - _BodyInitialLin[a].xyz;
+    float3 dqAAng = qsub(rotA, _BodyInitialAng[a]);
+    float3 dqBLin = posB - _BodyInitialLin[b].xyz;
+    float3 dqBAng = qsub(rotB, _BodyInitialAng[b]);
+    float3x3 basis = float3x3(m.normal, m.tangent1, m.tangent2);
+    float3x3 jALin = basis;
+    float3x3 jBLin = -basis;
+    bool isA = body == a;
+
+    for (uint i = 0; i < m.numContacts; i++)
+    {
+        Contact c = _ContactsCur[m.contactStart + i];
+        float3 rAWorld = qrotate(rotA, c.rA);
+        float3 rBWorld = qrotate(rotB, c.rB);
+        float3x3 jAAng, jBAng; float3 C; float fs, bounds;
+        float3 F = contactForce(m, c, dqALin, dqAAng, dqBLin, dqBAng, rAWorld, rBWorld, jALin, jBLin, jAAng, jBAng, C, fs, bounds);
+
+        // Choose jacobian depending on input body
+        float3x3 jLin = isA ? jALin : jBLin;
+        float3x3 jAng = isA ? jAAng : jBAng;
+
+        // Stamp into LHS
+        float3x3 K = diag3(c.penalty);
+        float3x3 jLinT = transpose(jLin);
+        float3x3 jAngT = transpose(jAng);
+        float3x3 jAngTk = mul(jAngT, K);
+
+        sys.lhsLin += mul(mul(jLinT, K), jLin);
+        sys.lhsAng += mul(jAngTk, jAng);
+        sys.lhsCross += mul(jAngTk, jLin);
+
+        // Stamp into RHS
+        sys.rhsLin += mul(jLinT, F);
+        sys.rhsAng += mul(jAngT, F);
+    }
+}
+
+float3x3 geometricStiffnessBallSocket(int k, float3 v)
+{
+    float3x3 m = diag3(float3(-v[k], -v[k], -v[k]));
+    float3 e = float3(k == 0, k == 1, k == 2);   // column k
+    m[0] += e * v[0];
+    m[1] += e * v[1];
+    m[2] += e * v[2];
+    return m;
+}
+
+void stampJoint(uint ji, uint body, inout System6 sys)
+{
+    JointDef d = _JointDef[ji];
+    JointState s = _JointState[ji];
+    bool isA = (int)body == d.bodyA;
+
+    float3 pA = d.rA;
+    float4 qA = float4(0, 0, 0, 1);
+    if (d.bodyA >= 0)
+    {
+        qA = _BodyRot[d.bodyA];
+        pA = qtransform(_BodyPos[d.bodyA].xyz, qA, d.rA);
+    }
+    float4 qB = _BodyRot[d.bodyB];
+    float3 pB = qtransform(_BodyPos[d.bodyB].xyz, qB, d.rB);
+
+    // Linear constraint
+    if (dot(s.penaltyLin, s.penaltyLin) > 0)
+    {
+        float3x3 K = diag3(s.penaltyLin);
+        float3 C = pA - pB;
+
+        // Stabilization
+        if (d.stiffnessLin >= HARD_STIFFNESS)
+            C -= s.C0Lin * _AlphaIt;
+
+        // Compute force
+        float3 F = mul(K, C) + s.lambdaLin;
+
+        // Choose jacobian depending on input body
+        float3x3 I3 = float3x3(1, 0, 0, 0, 1, 0, 0, 0, 1);
+        float3x3 jLin = isA ? I3 : -I3;
+        float3x3 jAng = isA ? skew3(-qrotate(qA, d.rA)) : skew3(qrotate(qB, d.rB));
+
+        // Stamp into LHS
+        float3x3 jLinT = transpose(jLin);
+        float3x3 jAngT = transpose(jAng);
+        float3x3 jAngTk = mul(jAngT, K);
+
+        sys.lhsLin += mul(mul(jLinT, K), jLin);
+        sys.lhsAng += mul(jAngTk, jAng);
+        sys.lhsCross += mul(jAngTk, jLin);
+
+        // Diagonal approximation for higher order terms
+        float3 r = isA ? qrotate(qA, d.rA) : -qrotate(qB, d.rB);
+        float3x3 H =
+            geometricStiffnessBallSocket(0, r) * F[0] +
+            geometricStiffnessBallSocket(1, r) * F[1] +
+            geometricStiffnessBallSocket(2, r) * F[2];
+        sys.lhsAng += diagonalize3(H);
+
+        // Stamp into RHS
+        sys.rhsLin += mul(jLinT, F);
+        sys.rhsAng += mul(jAngT, F);
+    }
+
+    // Angular constraint
+    if (dot(s.penaltyAng, s.penaltyAng) > 0)
+    {
+        float3x3 K = diag3(s.penaltyAng);
+        float3 C = qsub(qA, qB) * d.torqueArm;
+
+        // Stabilization
+        if (d.stiffnessAng >= HARD_STIFFNESS)
+            C -= s.C0Ang * _AlphaIt;
+
+        // Compute force
+        float3 F = mul(K, C) + s.lambdaAng;
+
+        // Choose jacobian depending on input body
+        float3x3 I3 = float3x3(1, 0, 0, 0, 1, 0, 0, 0, 1);
+        float3x3 jAng = (isA ? I3 : -I3) * d.torqueArm;
+
+        // Stamp into LHS
+        sys.lhsAng += mul(mul(transpose(jAng), K), jAng);
+
+        // Stamp into RHS
+        sys.rhsAng += mul(transpose(jAng), F);
+    }
+}
+
+void stampSpring(uint si, uint body, inout System6 sys)
+{
+    SpringDef d = _SpringDef[si];
+    float4 qA = _BodyRot[d.bodyA], qB = _BodyRot[d.bodyB];
+    float3 pA = qtransform(_BodyPos[d.bodyA].xyz, qA, d.rA);
+    float3 pB = qtransform(_BodyPos[d.bodyB].xyz, qB, d.rB);
+    float3 dd = pA - pB;
+    float dLen = length(dd);
+    if (dLen <= 1.0e-6) return;
+
+    float3 n = dd / dLen;
+    float C = dLen - d.rest;
+    float f = d.stiffness * C;
+
+    float3 rWorld, jLin, jAng;
+    if ((int)body == d.bodyA)
+    {
+        rWorld = qrotate(qA, d.rA);
+        jLin = n;
+        jAng = cross(rWorld, n);
+    }
+    else
+    {
+        rWorld = qrotate(qB, d.rB);
+        jLin = -n;
+        jAng = -cross(rWorld, n);
+    }
+
+    sys.lhsLin += outer3(jLin, jLin) * d.stiffness;
+    sys.lhsAng += outer3(jAng, jAng) * d.stiffness;
+    sys.lhsCross += outer3(jAng, jLin) * d.stiffness;
+    sys.rhsLin += jLin * f;
+    sys.rhsAng += jAng * f;
+}
+
+// ------------------------------------------------------------------------------------------------ Primal
+
+[numthreads(AVBD_THREADS, 1, 1)]
+void Primal(uint3 id : SV_DispatchThreadID)
+{
+    uint slot = (uint)_ColorSlot;
+    uint start = _ColorStart[slot];
+    if (id.x >= _ColorStart[slot + 1] - start) return;
+    uint body = _ColorList[start + id.x];
+
+    BodyDef d = _BodyDef[body];
+    float3 pos = _BodyPos[body].xyz;
+    float4 rot = _BodyRot[body];
+    float invDt2 = 1.0 / (_Dt * _Dt);
+
+    // Initialize left and right hand sides of the linear system (Eqs. 5, 6)
+    System6 sys;
+    sys.lhsLin = diag3(float3(d.mass, d.mass, d.mass)) * invDt2;
+    float3x3 MAng = diag3(d.moment);
+    if (_RotatedInertia != 0)
+    {
+        float3x3 R = qmatrix(rot);
+        MAng = mul(mul(R, MAng), transpose(R));
+    }
+    sys.lhsAng = MAng * invDt2;
+    sys.lhsCross = (float3x3)0;
+    sys.rhsLin = mul(sys.lhsLin, pos - _BodyInertialLin[body].xyz);
+    sys.rhsAng = mul(sys.lhsAng, qsub(rot, _BodyInertialAng[body]));
+
+    // Iterate over all forces acting on the body
+    uint cs = _BodyConsStart[body], ce = _BodyConsStart[body + 1];
+    for (uint k = cs; k < ce; k++)
+    {
+        uint r = _BodyConsList[k];
+        uint type = CONS_TYPE(r);
+        uint idx = CONS_INDEX(r);
+        if (type == CONS_MANIFOLD) stampManifold(idx, body, sys);
+        else if (type == CONS_JOINT) stampJoint(idx, body, sys);
+        else if (type == CONS_SPRING) stampSpring(idx, body, sys);
+    }
+
+    // Solve the SPD linear system using LDL and apply the update (Eq. 4)
+    float3 dxLin, dxAng;
+    solve6(sys.lhsLin, sys.lhsAng, sys.lhsCross, -sys.rhsLin, -sys.rhsAng, dxLin, dxAng);
+    pos += dxLin;
+    rot = qadd(rot, dxAng);
+
+    if (_WriteToNew != 0)
+    {
+        _BodyPosNew[body] = float4(pos, 0);
+        _BodyRotNew[body] = rot;
+    }
+    else
+    {
+        _BodyPos[body] = float4(pos, 0);
+        _BodyRot[body] = rot;
+    }
+}
+
+[numthreads(AVBD_THREADS, 1, 1)]
+void CommitOverflow(uint3 id : SV_DispatchThreadID)
+{
+    uint slot = _ActiveColors;
+    uint start = _ColorStart[slot];
+    if (id.x >= _ColorStart[slot + 1] - start) return;
+    uint body = _ColorList[start + id.x];
+    _BodyPos[body] = _BodyPosNew[body];
+    _BodyRot[body] = _BodyRotNew[body];
+}
+
+// ------------------------------------------------------------------------------------------------ Dual
+
+void dualManifold(uint mi)
+{
+    Manifold m = _ManifoldCur[mi];
+    uint a = m.bodyA, b = m.bodyB;
+    float3 posA = _BodyPos[a].xyz, posB = _BodyPos[b].xyz;
+    float4 rotA = _BodyRot[a], rotB = _BodyRot[b];
+    float3 dqALin = posA - _BodyInitialLin[a].xyz;
+    float3 dqAAng = qsub(rotA, _BodyInitialAng[a]);
+    float3 dqBLin = posB - _BodyInitialLin[b].xyz;
+    float3 dqBAng = qsub(rotB, _BodyInitialAng[b]);
+    float3x3 basis = float3x3(m.normal, m.tangent1, m.tangent2);
+    float3x3 jALin = basis;
+    float3x3 jBLin = -basis;
+
+    for (uint i = 0; i < m.numContacts; i++)
+    {
+        uint ci = m.contactStart + i;
+        Contact c = _ContactsCurRW[ci];
+        float3 rAWorld = qrotate(rotA, c.rA);
+        float3 rBWorld = qrotate(rotB, c.rB);
+        float3x3 jAAng, jBAng; float3 C; float frictionScale, bounds;
+        float3 F = contactForce(m, c, dqALin, dqAAng, dqBLin, dqBAng, rAWorld, rBWorld, jALin, jBLin, jAAng, jBAng, C, frictionScale, bounds);
+
+        // Store updated force
+        c.lambda = F;
+
+        // Update the penalty parameter and clamp to material stiffness if we are within the force bounds (Eq. 16)
+        if (F.x < 0)
+            c.penalty.x = min(c.penalty.x + _BetaLin * abs(C.x), PENALTY_MAX);
+        if (frictionScale <= bounds)
+        {
+            c.penalty.y = min(c.penalty.y + _BetaLin * abs(C.y), PENALTY_MAX);
+            c.penalty.z = min(c.penalty.z + _BetaLin * abs(C.z), PENALTY_MAX);
+            bool stick = length(C.yz) < STICK_THRESH;
+            c.feature = (c.feature & 0x7FFFFFFFu) | (stick ? 0x80000000u : 0u);
+        }
+        _ContactsCurRW[ci] = c;
+    }
+}
+
+void dualJoint(uint ji)
+{
+    JointDef d = _JointDef[ji];
+    JointState s = _JointStateRW[ji];
+    if (s.broken) return;
+
+    float3 pA = d.rA;
+    float4 qA = float4(0, 0, 0, 1);
+    if (d.bodyA >= 0)
+    {
+        qA = _BodyRot[d.bodyA];
+        pA = qtransform(_BodyPos[d.bodyA].xyz, qA, d.rA);
+    }
+    float4 qB = _BodyRot[d.bodyB];
+    float3 pB = qtransform(_BodyPos[d.bodyB].xyz, qB, d.rB);
+
+    // Linear constraint
+    if (dot(s.penaltyLin, s.penaltyLin) > 0)
+    {
+        float3 C = pA - pB;
+        if (d.stiffnessLin >= HARD_STIFFNESS)
+        {
+            C -= s.C0Lin * _AlphaIt;
+            s.lambdaLin = s.penaltyLin * C + s.lambdaLin;
+        }
+        s.penaltyLin = min(s.penaltyLin + abs(C) * _BetaLin, min(d.stiffnessLin, PENALTY_MAX));
+    }
+
+    // Angular constraint
+    if (dot(s.penaltyAng, s.penaltyAng) > 0)
+    {
+        float3 C = qsub(qA, qB) * d.torqueArm;
+        if (d.stiffnessAng >= HARD_STIFFNESS)
+        {
+            C -= s.C0Ang * _AlphaIt;
+            s.lambdaAng = s.penaltyAng * C + s.lambdaAng;
+        }
+        s.penaltyAng = min(s.penaltyAng + abs(C) * _BetaAng, min(d.stiffnessAng, PENALTY_MAX));
+    }
+
+    // Fracture test
+    if (dot(s.lambdaAng, s.lambdaAng) > d.fracture * d.fracture)
+    {
+        s.penaltyLin = 0; s.penaltyAng = 0;
+        s.lambdaLin = 0; s.lambdaAng = 0;
+        s.broken = 1;
+    }
+    _JointStateRW[ji] = s;
+}
+
+[numthreads(AVBD_THREADS, 1, 1)]
+void Dual(uint3 id : SV_DispatchThreadID)
+{
+    uint t = id.x;
+    uint m = _Counters[CNT_MANIFOLDS];
+    if (t < m) { dualManifold(t); return; }
+    t -= m;
+    if (t < _JointCount) { dualJoint(t); return; }
+    // springs have no dual variables
+}
+
+// ------------------------------------------------------------------------------------------------ Velocity
+
+[numthreads(AVBD_THREADS, 1, 1)]
+void Velocity(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+    if (i >= _BodyCount) return;
+    _BodyPrevVelLin[i] = _BodyVelLin[i];
+    if (isStatic(_BodyDef[i])) return;
+    _BodyVelLin[i] = float4((_BodyPos[i].xyz - _BodyInitialLin[i].xyz) / _Dt, 0);
+    _BodyVelAng[i] = float4(qsub(_BodyRot[i], _BodyInitialAng[i]) / _Dt, 0);
+}

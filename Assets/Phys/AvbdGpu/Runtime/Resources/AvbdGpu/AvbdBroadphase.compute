@@ -1,0 +1,244 @@
+// Broadphase: world AABBs at x-, hashed uniform grid with multi-cell insertion (counting sort), per-cell sort for
+// determinism, large bodies in a separate brute-force list, pair generation with the owner-cell rule and the
+// joint / spring / ignore-collision filter.
+#pragma kernel BodyAabb
+#pragma kernel GridClear
+#pragma kernel GridCount
+#pragma kernel GridScatter
+#pragma kernel GridSortCell
+#pragma kernel LargeSort
+#pragma kernel PairGen
+
+#include "AvbdCommon.hlsl"
+
+#define OVERFLOW_PAIRS 1u
+#define OVERFLOW_MANIFOLDS 2u
+#define OVERFLOW_CONTACTS 4u
+#define OVERFLOW_CELLS 8u
+#define OVERFLOW_LARGE 16u
+#define OVERFLOW_UNSORTED 32u
+#define MAX_SORTED_CELL 256
+
+StructuredBuffer<BodyDef> _BodyDef;
+StructuredBuffer<float4> _BodyPos;
+StructuredBuffer<float4> _BodyRot;
+RWStructuredBuffer<float4> _BodyAabbMin;   // w = 1 for large bodies (not in the grid)
+RWStructuredBuffer<float4> _BodyAabbMax;
+RWStructuredBuffer<uint> _CellCount;
+StructuredBuffer<uint> _CellStart;
+RWStructuredBuffer<uint> _CellCursor;
+RWStructuredBuffer<uint> _CellEntries;
+RWStructuredBuffer<uint> _LargeBodies;
+RWStructuredBuffer<uint> _Counters;
+RWStructuredBuffer<uint2> _Pairs;
+StructuredBuffer<uint> _LinkStart;
+StructuredBuffer<uint2> _LinkList;         // (other body, constraint ref) sorted by other body
+StructuredBuffer<JointState> _JointState;
+
+void setOverflow(uint bit) { uint dummy; InterlockedOr(_Counters[CNT_OVERFLOW], bit, dummy); }
+
+[numthreads(AVBD_THREADS, 1, 1)]
+void BodyAabb(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+    if (i >= _BodyCount) return;
+    BodyDef d = _BodyDef[i];
+    float3 pos = _BodyPos[i].xyz;
+    float3x3 R = qmatrix(_BodyRot[i]);
+    float3 half = d.size * 0.5;
+    float3 extent = float3(dot(abs(R[0]), half), dot(abs(R[1]), half), dot(abs(R[2]), half)) + COLLISION_MARGIN;
+    float3 mn = pos - extent, mx = pos + extent;
+
+    int3 cmin = cellCoord(mn), cmax = cellCoord(mx);
+    int3 span = min(cmax - cmin + 1, 4096);
+    uint cells = (uint)span.x * (uint)span.y * (uint)span.z;
+    float large = 0;
+    if (cells > _LargeBodyCells)
+    {
+        large = 1;
+        uint slot;
+        InterlockedAdd(_Counters[CNT_LARGE], 1, slot);
+        if (slot < _MaxLargeBodies) _LargeBodies[slot] = i;
+        else setOverflow(OVERFLOW_LARGE);
+    }
+    _BodyAabbMin[i] = float4(mn, large);
+    _BodyAabbMax[i] = float4(mx, 0);
+}
+
+[numthreads(AVBD_THREADS, 1, 1)]
+void GridClear(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x > _CellMask) return;
+    _CellCount[id.x] = 0;
+    _CellCursor[id.x] = 0;
+}
+
+[numthreads(AVBD_THREADS, 1, 1)]
+void GridCount(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+    if (i >= _BodyCount) return;
+    float4 mn = _BodyAabbMin[i];
+    if (mn.w != 0) return;
+    int3 cmin = cellCoord(mn.xyz), cmax = cellCoord(_BodyAabbMax[i].xyz);
+    uint dummy;
+    for (int z = cmin.z; z <= cmax.z; z++)
+        for (int y = cmin.y; y <= cmax.y; y++)
+            for (int x = cmin.x; x <= cmax.x; x++)
+                InterlockedAdd(_CellCount[cellHash(int3(x, y, z))], 1, dummy);
+}
+
+[numthreads(AVBD_THREADS, 1, 1)]
+void GridScatter(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+    if (i >= _BodyCount) return;
+    float4 mn = _BodyAabbMin[i];
+    if (mn.w != 0) return;
+    int3 cmin = cellCoord(mn.xyz), cmax = cellCoord(_BodyAabbMax[i].xyz);
+    for (int z = cmin.z; z <= cmax.z; z++)
+        for (int y = cmin.y; y <= cmax.y; y++)
+            for (int x = cmin.x; x <= cmax.x; x++)
+            {
+                uint h = cellHash(int3(x, y, z));
+                uint slot;
+                InterlockedAdd(_CellCursor[h], 1, slot);
+                uint e = _CellStart[h] + slot;
+                if (e < _MaxCellEntries) _CellEntries[e] = i;
+                else setOverflow(OVERFLOW_CELLS);
+            }
+}
+
+[numthreads(AVBD_THREADS, 1, 1)]
+void GridSortCell(uint3 id : SV_DispatchThreadID)
+{
+    uint h = id.x;
+    if (h > _CellMask) return;
+    uint start = _CellStart[h];
+    uint end = min(_CellStart[h + 1], _MaxCellEntries);
+    if (end <= start + 1) return;
+    if (end - start > MAX_SORTED_CELL) { setOverflow(OVERFLOW_UNSORTED); return; }
+    for (uint i = start + 1; i < end; i++)
+    {
+        uint v = _CellEntries[i];
+        uint j = i;
+        while (j > start)
+        {
+            uint prev = _CellEntries[j - 1];
+            if (prev <= v) break;
+            _CellEntries[j] = prev;
+            j--;
+        }
+        _CellEntries[j] = v;
+    }
+}
+
+[numthreads(1, 1, 1)]
+void LargeSort(uint3 id : SV_DispatchThreadID)
+{
+    uint n = min(_Counters[CNT_LARGE], _MaxLargeBodies);
+    _Counters[CNT_LARGE] = n;
+    for (uint i = 1; i < n; i++)
+    {
+        uint v = _LargeBodies[i];
+        uint j = i;
+        while (j > 0)
+        {
+            uint prev = _LargeBodies[j - 1];
+            if (prev <= v) break;
+            _LargeBodies[j] = prev;
+            j--;
+        }
+        _LargeBodies[j] = v;
+    }
+}
+
+// True when a joint (not broken), spring or ignore-collision link exists between a and b.
+bool linked(uint a, uint b)
+{
+    uint lo = _LinkStart[a], hi = _LinkStart[a + 1];
+    // lower bound on the other-body index
+    while (lo < hi)
+    {
+        uint mid = (lo + hi) >> 1;
+        if (_LinkList[mid].x < b) lo = mid + 1; else hi = mid;
+    }
+    uint end = _LinkStart[a + 1];
+    for (uint k = lo; k < end; k++)
+    {
+        uint2 e = _LinkList[k];
+        if (e.x != b) break;
+        uint type = CONS_TYPE(e.y);
+        if (type == CONS_JOINT) { if (_JointState[CONS_INDEX(e.y)].broken == 0) return true; }
+        else return true;
+    }
+    return false;
+}
+
+bool aabbOverlap(uint i, uint j)
+{
+    float3 mnI = _BodyAabbMin[i].xyz, mxI = _BodyAabbMax[i].xyz;
+    float3 mnJ = _BodyAabbMin[j].xyz, mxJ = _BodyAabbMax[j].xyz;
+    return all(mnI <= mxJ) && all(mnJ <= mxI);
+}
+
+void emitPair(uint a, uint b)
+{
+    if (isStatic(_BodyDef[a]) && isStatic(_BodyDef[b])) return;
+    if (linked(a, b)) return;
+    uint idx;
+    InterlockedAdd(_Counters[CNT_PAIRS], 1, idx);
+    if (idx < _MaxPairs) _Pairs[idx] = uint2(a, b);
+    else setOverflow(OVERFLOW_PAIRS);
+}
+
+[numthreads(AVBD_THREADS, 1, 1)]
+void PairGen(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+    if (i >= _BodyCount) return;
+    uint numLarge = _Counters[CNT_LARGE];
+
+    // Large-large pairs, once, by the first thread
+    if (i == 0)
+    {
+        for (uint p = 0; p < numLarge; p++)
+            for (uint q = p + 1; q < numLarge; q++)
+            {
+                uint a = _LargeBodies[p], b = _LargeBodies[q];
+                if (aabbOverlap(a, b)) emitPair(a, b);
+            }
+    }
+
+    float4 mn4 = _BodyAabbMin[i];
+    if (mn4.w != 0) return;   // large bodies are handled from the small bodies' side
+    float3 mnI = mn4.xyz;
+    int3 cmin = cellCoord(mnI), cmax = cellCoord(_BodyAabbMax[i].xyz);
+
+    for (int z = cmin.z; z <= cmax.z; z++)
+        for (int y = cmin.y; y <= cmax.y; y++)
+            for (int x = cmin.x; x <= cmax.x; x++)
+            {
+                int3 c = int3(x, y, z);
+                uint h = cellHash(c);
+                uint start = _CellStart[h];
+                uint end = min(_CellStart[h + 1], _MaxCellEntries);
+                for (uint e = start; e < end; e++)
+                {
+                    uint j = _CellEntries[e];
+                    if (j <= i) continue;
+                    if (!aabbOverlap(i, j)) continue;
+                    // owner cell of the pair: the cell holding the min corner of the AABB intersection
+                    int3 o = cellCoord(max(mnI, _BodyAabbMin[j].xyz));
+                    if (any(o != c)) continue;
+                    emitPair(i, j);
+                }
+            }
+
+    for (uint l = 0; l < numLarge; l++)
+    {
+        uint L = _LargeBodies[l];
+        if (!aabbOverlap(i, L)) continue;
+        emitPair(min(i, L), max(i, L));
+    }
+}

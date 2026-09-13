@@ -1,0 +1,150 @@
+// Per-step incremental graph colouring of the dynamic bodies (edges = shared constraints), Jones-Plassmann greedy with
+// hashed priorities. Bodies that are still uncoloured after the rounds go to the overflow group (slot _ActiveColors),
+// which the solver updates Jacobi-style with double buffering.
+#pragma kernel ColorInvalidate
+#pragma kernel ColorRound
+#pragma kernel ColorFinalize
+#pragma kernel ColorScan
+#pragma kernel ColorScatter
+
+#include "AvbdCommon.hlsl"
+
+StructuredBuffer<BodyDef> _BodyDef;
+StructuredBuffer<uint> _BodyConsStart;
+StructuredBuffer<uint> _BodyConsList;
+StructuredBuffer<Manifold> _ManifoldCur;
+StructuredBuffer<JointDef> _JointDef;
+StructuredBuffer<SpringDef> _SpringDef;
+StructuredBuffer<uint> _ColorIn;
+RWStructuredBuffer<uint> _ColorOut;
+RWStructuredBuffer<uint> _ColorCount;
+RWStructuredBuffer<uint> _ColorStart;
+RWStructuredBuffer<uint> _ColorCursor;
+RWStructuredBuffer<uint> _ColorList;
+RWStructuredBuffer<uint> _Counters;
+RWByteAddressBuffer _DispatchArgs;
+
+// The other body of constraint r as seen from body; -1 for world anchors.
+int neighbour(uint r, uint body)
+{
+    uint type = CONS_TYPE(r);
+    uint idx = CONS_INDEX(r);
+    if (type == CONS_MANIFOLD)
+    {
+        Manifold m = _ManifoldCur[idx];
+        return (int)(m.bodyA == body ? m.bodyB : m.bodyA);
+    }
+    if (type == CONS_JOINT)
+    {
+        JointDef d = _JointDef[idx];
+        return d.bodyA == (int)body ? d.bodyB : d.bodyA;
+    }
+    SpringDef s = _SpringDef[idx];
+    return s.bodyA == (int)body ? s.bodyB : s.bodyA;
+}
+
+bool dynamicNeighbour(int n) { return n >= 0 && !isStatic(_BodyDef[n]); }
+
+// Keeps last step's colour unless a higher-priority dynamic neighbour has the same one (or the colour is out of range).
+[numthreads(AVBD_THREADS, 1, 1)]
+void ColorInvalidate(uint3 id : SV_DispatchThreadID)
+{
+    uint body = id.x;
+    if (body >= _BodyCount) return;
+    if (isStatic(_BodyDef[body])) { _ColorOut[body] = STATIC_COLOR; return; }
+    uint c = _ColorIn[body];
+    if (c >= _ActiveColors) { _ColorOut[body] = UNCOLORED; return; }
+    uint start = _BodyConsStart[body], end = _BodyConsStart[body + 1];
+    for (uint k = start; k < end; k++)
+    {
+        int n = neighbour(_BodyConsList[k], body);
+        if (!dynamicNeighbour(n)) continue;
+        if (_ColorIn[n] == c && higherPriority((uint)n, body)) { c = UNCOLORED; break; }
+    }
+    _ColorOut[body] = c;
+}
+
+// An uncoloured body whose uncoloured neighbours all have lower priority takes the smallest free colour.
+[numthreads(AVBD_THREADS, 1, 1)]
+void ColorRound(uint3 id : SV_DispatchThreadID)
+{
+    uint body = id.x;
+    if (body >= _BodyCount) return;
+    uint c = _ColorIn[body];
+    if (c != UNCOLORED) { _ColorOut[body] = c; return; }
+    uint start = _BodyConsStart[body], end = _BodyConsStart[body + 1];
+    uint used = 0;
+    bool local = true;
+    for (uint k = start; k < end; k++)
+    {
+        int n = neighbour(_BodyConsList[k], body);
+        if (!dynamicNeighbour(n)) continue;
+        uint cn = _ColorIn[n];
+        if (cn == UNCOLORED)
+        {
+            if (higherPriority((uint)n, body)) { local = false; break; }
+        }
+        else if (cn < MAX_COLORS)
+            used |= 1u << cn;
+    }
+    if (local)
+    {
+        for (uint i = 0; i < _ActiveColors; i++)
+            if ((used & (1u << i)) == 0) { c = i; break; }
+    }
+    _ColorOut[body] = c;
+}
+
+// Final colours: uncoloured -> overflow slot; per-colour counts and stats.
+[numthreads(AVBD_THREADS, 1, 1)]
+void ColorFinalize(uint3 id : SV_DispatchThreadID)
+{
+    uint body = id.x;
+    if (body >= _BodyCount) return;
+    uint c = _ColorIn[body];
+    if (c == STATIC_COLOR) { _ColorOut[body] = c; return; }
+    uint dummy;
+    if (c == UNCOLORED)
+    {
+        c = _ActiveColors;
+        InterlockedAdd(_Counters[CNT_OVERFLOW_BODIES], 1, dummy);
+    }
+    else
+        InterlockedMax(_Counters[CNT_COLORS_USED], c + 1);
+    _ColorOut[body] = c;
+    InterlockedAdd(_ColorCount[c], 1, dummy);
+}
+
+// One group: exclusive scan of the colour counts, per-colour dispatch arguments, cursor reset, count reset.
+[numthreads(MAX_COLORS + 1, 1, 1)]
+void ColorScan(uint3 tid : SV_GroupThreadID)
+{
+    uint slot = tid.x;
+    if (slot == 0)
+    {
+        uint sum = 0;
+        for (uint i = 0; i <= MAX_COLORS; i++)
+        {
+            _ColorStart[i] = sum;
+            sum += _ColorCount[i];
+        }
+        _ColorStart[MAX_COLORS + 1] = sum;
+    }
+    GroupMemoryBarrierWithGroupSync();
+    uint n = _ColorCount[slot];
+    _DispatchArgs.Store3((ARG_COLOR0 + slot) * 12, uint3((n + AVBD_THREADS - 1) / AVBD_THREADS, 1, 1));
+    _ColorCursor[slot] = 0;
+    _ColorCount[slot] = 0;
+}
+
+[numthreads(AVBD_THREADS, 1, 1)]
+void ColorScatter(uint3 id : SV_DispatchThreadID)
+{
+    uint body = id.x;
+    if (body >= _BodyCount) return;
+    uint c = _ColorIn[body];
+    if (c > MAX_COLORS) return;   // static
+    uint slot;
+    InterlockedAdd(_ColorCursor[c], 1, slot);
+    _ColorList[_ColorStart[c] + slot] = body;
+}

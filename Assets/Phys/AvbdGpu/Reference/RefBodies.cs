@@ -57,6 +57,7 @@ namespace Phys.AvbdRef
             // Add to linked list
             next = solver.bodies;
             solver.bodies = this;
+            solver.OrderOf(this);
 
             // Compute mass properties and bounding radius
             mass = size.x * size.y * size.z * density;

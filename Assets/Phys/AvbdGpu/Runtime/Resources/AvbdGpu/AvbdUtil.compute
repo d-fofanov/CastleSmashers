@@ -1,0 +1,70 @@
+// Bookkeeping kernels: indirect dispatch arguments from CPU counts / GPU counters, counter reset, hash clear, stats copy.
+#pragma kernel BuildArgs
+#pragma kernel HashClear
+#pragma kernel CopyStats
+#pragma kernel ClearUints
+
+#include "AvbdCommon.hlsl"
+
+RWStructuredBuffer<uint> _Counters;
+RWStructuredBuffer<uint> _Stats;
+RWByteAddressBuffer _DispatchArgs;
+RWStructuredBuffer<uint> _HashCur;
+RWStructuredBuffer<uint> _ClearTarget;
+int _Phase;
+int _ClearCount;
+
+uint groups(uint n) { return (n + AVBD_THREADS - 1) / AVBD_THREADS; }
+
+void writeArgs(uint slot, uint n)
+{
+    _DispatchArgs.Store3(slot * 12, uint3(groups(n), 1, 1));
+}
+
+// Phase 0: start of step (CPU counts); phase 1: after pair generation; phase 2: after the narrowphase.
+[numthreads(1, 1, 1)]
+void BuildArgs(uint3 id : SV_DispatchThreadID)
+{
+    if (_Phase == 0)
+    {
+        for (int i = 0; i < CNT_COUNT; i++) _Counters[i] = 0;
+        writeArgs(ARG_BODIES, _BodyCount);
+        writeArgs(ARG_JOINTS, _JointCount);
+        writeArgs(ARG_PAIRS, 0);
+        writeArgs(ARG_MANIFOLDS, 0);
+        writeArgs(ARG_CONSTRAINTS, 0);
+    }
+    else if (_Phase == 1)
+    {
+        uint pairs = min(_Counters[CNT_PAIRS], _MaxPairs);
+        _Counters[CNT_PAIRS] = pairs;
+        writeArgs(ARG_PAIRS, pairs);
+    }
+    else
+    {
+        uint manifolds = min(_Counters[CNT_MANIFOLDS], _MaxManifolds);
+        _Counters[CNT_MANIFOLDS] = manifolds;
+        uint constraints = manifolds + _JointCount + _SpringCount;
+        _Counters[CNT_CONSTRAINTS] = constraints;
+        writeArgs(ARG_MANIFOLDS, manifolds);
+        writeArgs(ARG_CONSTRAINTS, constraints);
+    }
+}
+
+[numthreads(AVBD_THREADS, 1, 1)]
+void HashClear(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x <= _HashMask) _HashCur[id.x] = 0;
+}
+
+[numthreads(AVBD_THREADS, 1, 1)]
+void ClearUints(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x < (uint)_ClearCount) _ClearTarget[id.x] = 0;
+}
+
+[numthreads(CNT_COUNT, 1, 1)]
+void CopyStats(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x < CNT_COUNT) _Stats[id.x] = _Counters[id.x];
+}

@@ -31,6 +31,18 @@ namespace Phys.AvbdRef
         public Rigid bodies;
         public Force forces;
 
+        /// <summary>Manifold body order. The C++ demo iterates its newest-first body list, so body A is the newer body; the GPU
+        /// solver keys pairs by index and makes the lower index body A. Set for like-for-like comparisons (the contact basis
+        /// and the clipping reference face follow the order).</summary>
+        public bool LowIndexFirst;
+        readonly System.Collections.Generic.Dictionary<Rigid, int> m_Order = new System.Collections.Generic.Dictionary<Rigid, int>();
+
+        internal int OrderOf(Rigid r)
+        {
+            if (!m_Order.TryGetValue(r, out int i)) { i = m_Order.Count; m_Order[r] = i; }
+            return i;
+        }
+
         public Solver()
         {
             DefaultParams();
@@ -138,7 +150,10 @@ namespace Phys.AvbdRef
                     float3 dp = bodyA.positionLin - bodyB.positionLin;
                     float r = bodyA.radius + bodyB.radius;
                     if (math.dot(dp, dp) <= r * r && !bodyA.ConstrainedTo(bodyB))
-                        new Manifold(this, bodyA, bodyB);
+                    {
+                        if (LowIndexFirst && OrderOf(bodyA) > OrderOf(bodyB)) new Manifold(this, bodyB, bodyA);
+                        else new Manifold(this, bodyA, bodyB);
+                    }
                 }
             }
 

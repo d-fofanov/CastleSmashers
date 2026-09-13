@@ -15,7 +15,8 @@ param(
     [string]$Filter = "",
     [string]$ProjectPath = $PSScriptRoot,
     [string]$UnityExe = "C:\Program Files\Unity\Hub\Editor\6000.3.12f1\Editor\Unity.exe",
-    [string]$ResultsDir = (Join-Path $PSScriptRoot "TestResults")
+    [string]$ResultsDir = (Join-Path $PSScriptRoot "TestResults"),
+    [string]$GraphicsApi = "-force-d3d12"   # the player runs D3D12; "" leaves the editor default (D3D11)
 )
 
 New-Item -ItemType Directory -Force $ResultsDir | Out-Null
@@ -25,9 +26,10 @@ foreach ($p in $platforms) {
     $results = Join-Path $ResultsDir "$p.xml"
     $log = Join-Path $ResultsDir "$p.log"
     $args = @("-batchmode", "-projectPath", $ProjectPath, "-runTests", "-testPlatform", $p, "-testResults", $results, "-logFile", $log)
+    if ($GraphicsApi -ne "") { $args += $GraphicsApi }
     # No -nographics: the GPU solver tests dispatch compute shaders and need a graphics device.
     if ($Filter -ne "") { $args += @("-testFilter", $Filter) }
-    elseif ($p -eq "EditMode") { $args += @("-testFilter", "!Phys.AvbdGpu.Tests.PerformanceTests") }
+    elseif ($p -eq "EditMode") { $args += @("-testFilter", "!Phys.AvbdGpu.Tests.PerformanceTests;!Phys.AvbdGpu.Tests.DiagnosticTests") }
     Write-Host "== $p =="
     $proc = Start-Process -FilePath $UnityExe -ArgumentList $args -Wait -PassThru -NoNewWindow
     if (Test-Path $results) {

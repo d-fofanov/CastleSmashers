@@ -1,0 +1,165 @@
+// Joint warm start (Joint::initialize) and the body -> constraint CSR lists used by the primal update and the colouring.
+// Constraint index space (also used by the dual update): [0, manifolds) manifolds, then joints, then springs.
+#pragma kernel PrepareJoints
+#pragma kernel ConsClear
+#pragma kernel ConsCount
+#pragma kernel ConsFill
+#pragma kernel ConsSort
+
+#include "AvbdCommon.hlsl"
+
+StructuredBuffer<BodyDef> _BodyDef;
+StructuredBuffer<float4> _BodyPos;
+StructuredBuffer<float4> _BodyRot;
+StructuredBuffer<JointDef> _JointDef;
+RWStructuredBuffer<JointState> _JointState;
+StructuredBuffer<SpringDef> _SpringDef;
+StructuredBuffer<Manifold> _ManifoldCur;
+StructuredBuffer<uint> _Counters;
+RWStructuredBuffer<uint> _BodyConsCount;
+RWStructuredBuffer<uint> _BodyConsCursor;
+StructuredBuffer<uint> _BodyConsStart;
+RWStructuredBuffer<uint> _BodyConsList;
+
+[numthreads(AVBD_THREADS, 1, 1)]
+void PrepareJoints(uint3 id : SV_DispatchThreadID)
+{
+    uint j = id.x;
+    if (j >= _JointCount) return;
+    JointDef d = _JointDef[j];
+    JointState s = _JointState[j];
+    if (s.broken) return;
+
+    float3 pA = d.rA;
+    float4 qA = float4(0, 0, 0, 1);
+    if (d.bodyA >= 0)
+    {
+        qA = _BodyRot[d.bodyA];
+        pA = qtransform(_BodyPos[d.bodyA].xyz, qA, d.rA);
+    }
+    float4 qB = _BodyRot[d.bodyB];
+    float3 pB = qtransform(_BodyPos[d.bodyB].xyz, qB, d.rB);
+
+    // Store constraint function at beginning of timestep C(x-)
+    s.C0Lin = pA - pB;
+    s.C0Ang = qsub(qA, qB) * d.torqueArm;
+
+    // Warmstart the dual variables and penalty parameters (Eq. 19)
+    s.lambdaLin *= _LambdaDecay;
+    s.lambdaAng *= _LambdaDecay;
+    s.penaltyLin = clamp(s.penaltyLin * _Gamma, PENALTY_MIN, PENALTY_MAX);
+    s.penaltyAng = clamp(s.penaltyAng * _Gamma, PENALTY_MIN, PENALTY_MAX);
+
+    // Clamp penalty to material stiffness
+    s.penaltyLin = min(s.penaltyLin, d.stiffnessLin);
+    s.penaltyAng = min(s.penaltyAng, d.stiffnessAng);
+    _JointState[j] = s;
+}
+
+// Decodes a constraint index into (type, index, bodyA, bodyB); returns false for inactive constraints.
+bool decodeConstraint(uint t, out uint type, out uint idx, out int a, out int b)
+{
+    uint m = _Counters[CNT_MANIFOLDS];
+    type = 0; idx = 0; a = -1; b = -1;
+    if (t < m)
+    {
+        Manifold mf = _ManifoldCur[t];
+        type = CONS_MANIFOLD; idx = t; a = (int)mf.bodyA; b = (int)mf.bodyB;
+        return true;
+    }
+    t -= m;
+    if (t < _JointCount)
+    {
+        if (_JointState[t].broken) return false;
+        JointDef d = _JointDef[t];
+        type = CONS_JOINT; idx = t; a = d.bodyA; b = d.bodyB;
+        return true;
+    }
+    t -= _JointCount;
+    if (t < _SpringCount)
+    {
+        SpringDef d = _SpringDef[t];
+        type = CONS_SPRING; idx = t; a = d.bodyA; b = d.bodyB;
+        return true;
+    }
+    return false;
+}
+
+bool dynamicBody(int i) { return i >= 0 && !isStatic(_BodyDef[i]); }
+
+[numthreads(AVBD_THREADS, 1, 1)]
+void ConsClear(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _BodyCount) return;
+    _BodyConsCount[id.x] = 0;
+    _BodyConsCursor[id.x] = 0;
+}
+
+[numthreads(AVBD_THREADS, 1, 1)]
+void ConsCount(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Counters[CNT_CONSTRAINTS]) return;
+    uint type, idx; int a, b;
+    if (!decodeConstraint(id.x, type, idx, a, b)) return;
+    uint dummy;
+    if (dynamicBody(a)) InterlockedAdd(_BodyConsCount[a], 1, dummy);
+    if (dynamicBody(b)) InterlockedAdd(_BodyConsCount[b], 1, dummy);
+}
+
+[numthreads(AVBD_THREADS, 1, 1)]
+void ConsFill(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Counters[CNT_CONSTRAINTS]) return;
+    uint type, idx; int a, b;
+    if (!decodeConstraint(id.x, type, idx, a, b)) return;
+    uint r = CONS_REF(type, idx);
+    uint slot;
+    if (dynamicBody(a))
+    {
+        InterlockedAdd(_BodyConsCursor[a], 1, slot);
+        _BodyConsList[_BodyConsStart[a] + slot] = r;
+    }
+    if (dynamicBody(b))
+    {
+        InterlockedAdd(_BodyConsCursor[b], 1, slot);
+        _BodyConsList[_BodyConsStart[b] + slot] = r;
+    }
+}
+
+// Sort key: manifolds by the neighbour index (unique per body), joints and springs by their CPU-assigned index.
+uint consKey(uint r, uint body)
+{
+    uint type = CONS_TYPE(r);
+    uint idx = CONS_INDEX(r);
+    if (type == CONS_MANIFOLD)
+    {
+        Manifold m = _ManifoldCur[idx];
+        return m.bodyA == body ? m.bodyB : m.bodyA;
+    }
+    return CONS_REF(type, idx);
+}
+
+// Insertion sort of each dynamic body's list so that the accumulation order in the primal update is deterministic.
+[numthreads(AVBD_THREADS, 1, 1)]
+void ConsSort(uint3 id : SV_DispatchThreadID)
+{
+    uint body = id.x;
+    if (body >= _BodyCount) return;
+    if (isStatic(_BodyDef[body])) return;
+    uint start = _BodyConsStart[body];
+    uint end = _BodyConsStart[body + 1];
+    for (uint i = start + 1; i < end; i++)
+    {
+        uint r = _BodyConsList[i];
+        uint key = consKey(r, body);
+        uint j = i;
+        while (j > start)
+        {
+            uint prev = _BodyConsList[j - 1];
+            if (consKey(prev, body) <= key) break;
+            _BodyConsList[j] = prev;
+            j--;
+        }
+        _BodyConsList[j] = r;
+    }
+}

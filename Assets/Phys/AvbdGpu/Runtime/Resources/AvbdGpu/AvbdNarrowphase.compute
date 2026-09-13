@@ -1,0 +1,498 @@
+// Narrowphase: OBB vs OBB contact generation (port of collide.cpp of avbd-demo3d) and manifold persistence
+// (Manifold::initialize): the previous step's manifold of the same pair is found through a hash table and its
+// per-feature penalty / lambda / stick state is carried over before the warm-start decay.
+#pragma kernel Collide
+
+#include "AvbdCommon.hlsl"
+
+#define MAX_POLY_VERTS 8      // a quad clipped by four planes has at most 8 vertices
+#define SAT_AXIS_EPSILON 1.0e-6
+#define PLANE_EPSILON 1.0e-5
+#define CONTACT_MERGE_DIST_SQ 1.0e-6
+#define AXIS_FACE_A 0
+#define AXIS_FACE_B 1
+#define AXIS_EDGE 2
+#define OVERFLOW_MANIFOLDS 2u
+#define OVERFLOW_CONTACTS 4u
+#define MAX_PROBES 256
+
+StructuredBuffer<BodyDef> _BodyDef;
+StructuredBuffer<float4> _BodyPos;
+StructuredBuffer<float4> _BodyRot;
+StructuredBuffer<uint2> _Pairs;
+RWStructuredBuffer<uint> _Counters;
+StructuredBuffer<Manifold> _ManifoldPrev;
+StructuredBuffer<Contact> _ContactsPrev;
+StructuredBuffer<uint> _HashPrev;
+RWStructuredBuffer<Manifold> _ManifoldCur;
+RWStructuredBuffer<Contact> _ContactsCur;
+RWStructuredBuffer<uint> _HashCur;
+
+// Per-thread scratch in group shared memory: FXC cannot dynamically index register arrays with data-dependent
+// trip counts, group shared memory can be indexed freely. Two clip polygons and the contact set per thread.
+groupshared float3 gs_poly[AVBD_THREADS][2 * MAX_POLY_VERTS];
+groupshared float3 gs_xA[AVBD_THREADS][MAX_CONTACTS];
+groupshared float3 gs_xB[AVBD_THREADS][MAX_CONTACTS];
+groupshared uint gs_feature[AVBD_THREADS][MAX_CONTACTS];
+
+struct OBB
+{
+    float3 center;
+    float3 half;
+    float3 axis0, axis1, axis2;
+};
+
+float3 obbAxis(OBB box, int i) { return i == 0 ? box.axis0 : i == 1 ? box.axis1 : box.axis2; }
+
+struct SatAxis
+{
+    int type;
+    int indexA;
+    int indexB;
+    float separation;
+    float3 normalAB;
+    bool valid;
+};
+
+struct FaceFrame
+{
+    float3 normal;
+    float3 center;
+    float3 u;
+    float3 v;
+    float extentU;
+    float extentV;
+};
+
+OBB makeOBB(float3 pos, float4 rot, float3 size)
+{
+    OBB box;
+    box.center = pos;
+    box.half = size * 0.5;
+    box.axis0 = qrotate(rot, float3(1, 0, 0));
+    box.axis1 = qrotate(rot, float3(0, 1, 0));
+    box.axis2 = qrotate(rot, float3(0, 0, 1));
+    return box;
+}
+
+float absDot(float3 a, float3 b) { return abs(dot(a, b)); }
+
+float3 supportPoint(OBB box, float3 dir)
+{
+    float sx = dot(dir, box.axis0) >= 0.0 ? 1.0 : -1.0;
+    float sy = dot(dir, box.axis1) >= 0.0 ? 1.0 : -1.0;
+    float sz = dot(dir, box.axis2) >= 0.0 ? 1.0 : -1.0;
+    return box.center + box.axis0 * (box.half.x * sx) + box.axis1 * (box.half.y * sy) + box.axis2 * (box.half.z * sz);
+}
+
+void getFaceAxes(OBB box, int axisIndex, out float3 u, out float3 v, out float extentU, out float extentV)
+{
+    if (axisIndex == 0) { u = box.axis1; v = box.axis2; extentU = box.half.y; extentV = box.half.z; }
+    else if (axisIndex == 1) { u = box.axis0; v = box.axis2; extentU = box.half.x; extentV = box.half.z; }
+    else { u = box.axis0; v = box.axis1; extentU = box.half.x; extentV = box.half.y; }
+}
+
+FaceFrame buildFaceFrame(OBB box, int axisIndex, float3 outwardNormal)
+{
+    FaceFrame frame;
+    float3 axis = obbAxis(box, axisIndex);
+    float sign = dot(outwardNormal, axis) >= 0.0 ? 1.0 : -1.0;
+    frame.normal = axis * sign;
+    frame.center = box.center + frame.normal * box.half[axisIndex];
+    getFaceAxes(box, axisIndex, frame.u, frame.v, frame.extentU, frame.extentV);
+    return frame;
+}
+
+int chooseIncidentFaceAxis(OBB box, float3 referenceNormal)
+{
+    int axis = 0;
+    float best = -3.4e38;
+    for (int i = 0; i < 3; ++i)
+    {
+        float d = absDot(obbAxis(box, i), referenceNormal);
+        if (d > best) { best = d; axis = i; }
+    }
+    return axis;
+}
+
+// Writes the incident face into polygon slot `slot` (0 or 1) of thread t
+void buildIncidentFace(uint t, int slot, OBB box, int axisIndex, float3 referenceNormal)
+{
+    float3 axis = obbAxis(box, axisIndex);
+    float sign = dot(axis, referenceNormal) > 0.0 ? -1.0 : 1.0;
+    float3 faceNormal = axis * sign;
+    float3 faceCenter = box.center + faceNormal * box.half[axisIndex];
+    float3 u, v; float extentU, extentV;
+    getFaceAxes(box, axisIndex, u, v, extentU, extentV);
+    int o = slot * MAX_POLY_VERTS;
+    gs_poly[t][o + 0] = faceCenter + u * extentU + v * extentV;
+    gs_poly[t][o + 1] = faceCenter - u * extentU + v * extentV;
+    gs_poly[t][o + 2] = faceCenter - u * extentU - v * extentV;
+    gs_poly[t][o + 3] = faceCenter + u * extentU - v * extentV;
+}
+
+// Clips polygon slot `inSlot` (inCount vertices) against the plane into slot `outSlot`; returns the vertex count
+int clipPolygonAgainstPlane(uint t, int inSlot, int inCount, float3 planeNormal, float planeOffset, int outSlot)
+{
+    if (inCount <= 0) return 0;
+    int io = inSlot * MAX_POLY_VERTS, oo = outSlot * MAX_POLY_VERTS;
+    int outCount = 0;
+    float3 a = gs_poly[t][io + inCount - 1];
+    float da = dot(planeNormal, a) - planeOffset;
+
+    [loop]
+    for (int i = 0; i < inCount; ++i)
+    {
+        float3 b = gs_poly[t][io + i];
+        float db = dot(planeNormal, b) - planeOffset;
+
+        bool aInside = da <= PLANE_EPSILON;
+        bool bInside = db <= PLANE_EPSILON;
+
+        if (aInside != bInside)
+        {
+            float tt = 0.0;
+            float denom = da - db;
+            if (abs(denom) > SAT_AXIS_EPSILON)
+                tt = clamp(da / denom, 0.0, 1.0);
+            if (outCount < MAX_POLY_VERTS)
+                gs_poly[t][oo + outCount++] = a + (b - a) * tt;
+        }
+
+        if (bInside && outCount < MAX_POLY_VERTS)
+            gs_poly[t][oo + outCount++] = b;
+
+        a = b;
+        da = db;
+    }
+    return outCount;
+}
+
+bool addContact(uint t, inout int count, float3 xA, float3 xB, uint featureKey)
+{
+    float3 midpoint = (xA + xB) * 0.5;
+    [loop]
+    for (int i = 0; i < count; ++i)
+    {
+        float3 d = midpoint - (gs_xA[t][i] + gs_xB[t][i]) * 0.5;
+        if (dot(d, d) < CONTACT_MERGE_DIST_SQ) return false;
+    }
+    if (count >= MAX_CONTACTS) return false;
+    gs_xA[t][count] = xA;
+    gs_xB[t][count] = xB;
+    gs_feature[t][count] = featureKey;
+    count++;
+    return true;
+}
+
+bool testAxis(OBB boxA, OBB boxB, float3 delta, float3 axis, int type, int indexA, int indexB, inout SatAxis best)
+{
+    float lenSq = dot(axis, axis);
+    if (lenSq < SAT_AXIS_EPSILON) return true;
+
+    float invLen = 1.0 / sqrt(lenSq);
+    float3 n = axis * invLen;
+    if (dot(n, delta) < 0.0) n = -n;
+
+    float distance = abs(dot(delta, n));
+    float rA = boxA.half.x * absDot(n, boxA.axis0) + boxA.half.y * absDot(n, boxA.axis1) + boxA.half.z * absDot(n, boxA.axis2);
+    float rB = boxB.half.x * absDot(n, boxB.axis0) + boxB.half.y * absDot(n, boxB.axis1) + boxB.half.z * absDot(n, boxB.axis2);
+
+    float separation = distance - (rA + rB);
+    if (separation > 0.0) return false;
+
+    if (!best.valid || separation > best.separation)
+    {
+        best.valid = true;
+        best.type = type;
+        best.indexA = indexA;
+        best.indexB = indexB;
+        best.separation = separation;
+        best.normalAB = n;
+    }
+    return true;
+}
+
+void supportEdge(OBB box, int axisIndex, float3 dir, out float3 edgeA, out float3 edgeB)
+{
+    int axis1 = (axisIndex + 1) % 3;
+    int axis2 = (axisIndex + 2) % 3;
+    float3 a1 = obbAxis(box, axis1), a2 = obbAxis(box, axis2), a0 = obbAxis(box, axisIndex);
+    float sign1 = dot(dir, a1) >= 0.0 ? 1.0 : -1.0;
+    float sign2 = dot(dir, a2) >= 0.0 ? 1.0 : -1.0;
+    float3 edgeCenter = box.center + a1 * (box.half[axis1] * sign1) + a2 * (box.half[axis2] * sign2);
+    edgeA = edgeCenter - a0 * box.half[axisIndex];
+    edgeB = edgeCenter + a0 * box.half[axisIndex];
+}
+
+void closestPointsOnSegments(float3 p0, float3 p1, float3 q0, float3 q1, out float3 c0, out float3 c1)
+{
+    float3 d1 = p1 - p0;
+    float3 d2 = q1 - q0;
+    float3 r = p0 - q0;
+    float a = dot(d1, d1);
+    float e = dot(d2, d2);
+    float f = dot(d2, r);
+    float s = 0.0;
+    float t = 0.0;
+
+    if (a <= SAT_AXIS_EPSILON && e <= SAT_AXIS_EPSILON)
+    {
+        c0 = p0; c1 = q0;
+        return;
+    }
+
+    if (a <= SAT_AXIS_EPSILON)
+    {
+        t = clamp(f / e, 0.0, 1.0);
+    }
+    else
+    {
+        float c = dot(d1, r);
+        if (e <= SAT_AXIS_EPSILON)
+        {
+            s = clamp(-c / a, 0.0, 1.0);
+        }
+        else
+        {
+            float b = dot(d1, d2);
+            float denom = a * e - b * b;
+            if (abs(denom) > SAT_AXIS_EPSILON)
+                s = clamp((b * f - c * e) / denom, 0.0, 1.0);
+            t = (b * s + f) / e;
+            if (t < 0.0)
+            {
+                t = 0.0;
+                s = clamp(-c / a, 0.0, 1.0);
+            }
+            else if (t > 1.0)
+            {
+                t = 1.0;
+                s = clamp((b - c) / a, 0.0, 1.0);
+            }
+        }
+    }
+    c0 = p0 + d1 * s;
+    c1 = q0 + d2 * t;
+}
+
+void buildFaceManifold(uint t, OBB boxA, OBB boxB, bool referenceIsA, int referenceAxis, float3 normalAB, inout int count)
+{
+    OBB referenceBox, incidentBox;
+    if (referenceIsA) { referenceBox = boxA; incidentBox = boxB; }
+    else { referenceBox = boxB; incidentBox = boxA; }
+    float3 referenceOutward = referenceIsA ? normalAB : -normalAB;
+
+    FaceFrame referenceFace = buildFaceFrame(referenceBox, referenceAxis, referenceOutward);
+    int incidentAxis = chooseIncidentFaceAxis(incidentBox, referenceFace.normal);
+
+    buildIncidentFace(t, 0, incidentBox, incidentAxis, referenceFace.normal);
+    int n = 4;
+
+    float3 n0 = referenceFace.u;
+    float o0 = dot(n0, referenceFace.center) + referenceFace.extentU;
+    n = clipPolygonAgainstPlane(t, 0, n, n0, o0, 1);
+    if (n == 0) return;
+
+    float3 n1 = -referenceFace.u;
+    float o1 = dot(n1, referenceFace.center) + referenceFace.extentU;
+    n = clipPolygonAgainstPlane(t, 1, n, n1, o1, 0);
+    if (n == 0) return;
+
+    float3 n2 = referenceFace.v;
+    float o2 = dot(n2, referenceFace.center) + referenceFace.extentV;
+    n = clipPolygonAgainstPlane(t, 0, n, n2, o2, 1);
+    if (n == 0) return;
+
+    float3 n3 = -referenceFace.v;
+    float o3 = dot(n3, referenceFace.center) + referenceFace.extentV;
+    n = clipPolygonAgainstPlane(t, 1, n, n3, o3, 0);
+    if (n == 0) return;
+
+    uint featurePrefix = (uint)(referenceIsA ? AXIS_FACE_A : AXIS_FACE_B) << 24;
+    featurePrefix |= (uint)(referenceAxis & 0xFF) << 16;
+    featurePrefix |= (uint)(incidentAxis & 0xFF) << 8;
+
+    [loop]
+    for (int i = 0; i < n && count < MAX_CONTACTS; ++i)
+    {
+        float3 pIncident = gs_poly[t][i];
+        float distance = dot(pIncident - referenceFace.center, referenceFace.normal);
+        if (distance > PLANE_EPSILON) continue;
+
+        float3 pReference = pIncident - referenceFace.normal * distance;
+        float3 xA = referenceIsA ? pReference : pIncident;
+        float3 xB = referenceIsA ? pIncident : pReference;
+        addContact(t, count, xA, xB, featurePrefix | (uint)(i & 0xFF));
+    }
+
+    if (count == 0)
+    {
+        float3 xA = supportPoint(boxA, normalAB);
+        float3 xB = supportPoint(boxB, -normalAB);
+        addContact(t, count, xA, xB, featurePrefix);
+    }
+}
+
+void buildEdgeContact(uint t, OBB boxA, OBB boxB, int axisA, int axisB, float3 normalAB, inout int count)
+{
+    float3 a0, a1, b0, b1;
+    supportEdge(boxA, axisA, normalAB, a0, a1);
+    supportEdge(boxB, axisB, -normalAB, b0, b1);
+
+    float3 xA, xB;
+    closestPointsOnSegments(a0, a1, b0, b1, xA, xB);
+
+    uint featureKey = ((uint)AXIS_EDGE << 24) | ((uint)(axisA & 0xFF) << 8) | (uint)(axisB & 0xFF);
+    addContact(t, count, xA, xB, featureKey);
+
+    if (count == 0)
+    {
+        xA = supportPoint(boxA, normalAB);
+        xB = supportPoint(boxB, -normalAB);
+        addContact(t, count, xA, xB, featureKey);
+    }
+}
+
+// Returns the number of contacts (world points in the thread's group shared slice); basis has the normal (B -> A) in row 0.
+int collide(uint t, OBB boxA, OBB boxB, out float3x3 basisOut)
+{
+    float3 delta = boxB.center - boxA.center;
+    basisOut = (float3x3)0;
+
+    SatAxis bestFace;
+    bestFace.type = 0; bestFace.indexA = -1; bestFace.indexB = -1; bestFace.separation = -3.4e38; bestFace.normalAB = 0; bestFace.valid = false;
+    SatAxis bestEdge = bestFace;
+
+    for (int i = 0; i < 3; ++i)
+        if (!testAxis(boxA, boxB, delta, obbAxis(boxA, i), AXIS_FACE_A, i, -1, bestFace)) return 0;
+    for (int i2 = 0; i2 < 3; ++i2)
+        if (!testAxis(boxA, boxB, delta, obbAxis(boxB, i2), AXIS_FACE_B, -1, i2, bestFace)) return 0;
+    for (int i3 = 0; i3 < 3; ++i3)
+        for (int j = 0; j < 3; ++j)
+        {
+            float3 axis = cross(obbAxis(boxA, i3), obbAxis(boxB, j));
+            if (!testAxis(boxA, boxB, delta, axis, AXIS_EDGE, i3, j, bestEdge)) return 0;
+        }
+
+    if (!bestFace.valid) return 0;
+
+    SatAxis best = bestFace;
+    if (bestEdge.valid)
+    {
+        const float edgeRelTol = 0.95;
+        const float edgeAbsTol = 0.01;
+        if (edgeRelTol * bestEdge.separation > bestFace.separation + edgeAbsTol)
+            best = bestEdge;
+    }
+
+    basisOut = orthonormal3(-best.normalAB);
+
+    int count = 0;
+    if (best.type == AXIS_EDGE)
+        buildEdgeContact(t, boxA, boxB, best.indexA, best.indexB, best.normalAB, count);
+    else if (best.type == AXIS_FACE_A)
+        buildFaceManifold(t, boxA, boxB, true, best.indexA, best.normalAB, count);
+    else
+        buildFaceManifold(t, boxA, boxB, false, best.indexB, best.normalAB, count);
+    return count;
+}
+
+// Previous step's manifold index for the pair, or -1
+int findPrevManifold(uint a, uint b)
+{
+    uint h = pairHash(a, b);
+    [loop]
+    for (int probe = 0; probe < MAX_PROBES; probe++)
+    {
+        uint v = _HashPrev[h];
+        if (v == 0) return -1;
+        Manifold m = _ManifoldPrev[v - 1];
+        if (m.bodyA == a && m.bodyB == b) return (int)(v - 1);
+        h = (h + 1) & _HashMask;
+    }
+    return -1;
+}
+
+[numthreads(AVBD_THREADS, 1, 1)]
+void Collide(uint3 id : SV_DispatchThreadID, uint3 gtid : SV_GroupThreadID)
+{
+    if (id.x >= _Counters[CNT_PAIRS]) return;
+    uint t = gtid.x;
+    uint2 pair = _Pairs[id.x];
+    uint a = pair.x, b = pair.y;
+    BodyDef dA = _BodyDef[a], dB = _BodyDef[b];
+    float3 posA = _BodyPos[a].xyz, posB = _BodyPos[b].xyz;
+    float4 rotA = _BodyRot[a], rotB = _BodyRot[b];
+
+    float3x3 basis;
+    int n = collide(t, makeOBB(posA, rotA, dA.size), makeOBB(posB, rotB, dB.size), basis);
+    if (n == 0) return;
+
+    uint dummy;
+    uint cstart;
+    InterlockedAdd(_Counters[CNT_CONTACTS], (uint)n, cstart);
+    if (cstart + (uint)n > _MaxContacts) { InterlockedOr(_Counters[CNT_OVERFLOW], OVERFLOW_CONTACTS, dummy); return; }
+    uint midx;
+    InterlockedAdd(_Counters[CNT_MANIFOLDS], 1, midx);
+    if (midx >= _MaxManifolds) { InterlockedOr(_Counters[CNT_OVERFLOW], OVERFLOW_MANIFOLDS, dummy); return; }
+
+    int prev = findPrevManifold(a, b);
+    Manifold pm = (Manifold)0;
+    if (prev >= 0) pm = _ManifoldPrev[prev];
+    float4 invA = qconj(rotA), invB = qconj(rotB);
+
+    [loop]
+    for (int i = 0; i < n; i++)
+    {
+        Contact c = (Contact)0;
+        c.rA = qrotate(invA, gs_xA[t][i] - posA);
+        c.rB = qrotate(invB, gs_xB[t][i] - posB);
+        c.feature = gs_feature[t][i];
+
+        // Merge old contact data by feature; sticking contacts keep their old anchor points
+        if (prev >= 0)
+        {
+            [loop]
+            for (uint j = 0; j < pm.numContacts; j++)
+            {
+                Contact old = _ContactsPrev[pm.contactStart + j];
+                if ((old.feature & 0x7FFFFFFFu) == c.feature)
+                {
+                    float3 newRA = c.rA, newRB = c.rB;
+                    c = old;
+                    if ((old.feature & 0x80000000u) == 0) { c.rA = newRA; c.rB = newRB; }
+                    break;
+                }
+            }
+        }
+
+        // Error at q-
+        float3 xA = qtransform(posA, rotA, c.rA);
+        float3 xB = qtransform(posB, rotB, c.rB);
+        c.C0 = mul(basis, xA - xB) + float3(COLLISION_MARGIN, 0, 0);
+
+        // Warmstart the dual variables and penalty parameters (Eq. 19)
+        c.lambda = c.lambda * _LambdaDecay;
+        c.penalty = clamp(c.penalty * _Gamma, PENALTY_MIN, PENALTY_MAX);
+        _ContactsCur[cstart + i] = c;
+    }
+
+    Manifold m;
+    m.bodyA = a; m.bodyB = b; m.numContacts = (uint)n; m.contactStart = cstart;
+    m.friction = sqrt(dA.friction * dB.friction);
+    m.normal = basis[0]; m.tangent1 = basis[1]; m.tangent2 = basis[2];
+    m.pad = 0;
+    _ManifoldCur[midx] = m;
+
+    // Insert into this step's hash table (open addressing; slot value = index + 1)
+    uint h = pairHash(a, b);
+    [loop]
+    for (int probe = 0; probe < MAX_PROBES; probe++)
+    {
+        uint old;
+        InterlockedCompareExchange(_HashCur[h], 0, midx + 1, old);
+        if (old == 0) break;
+        h = (h + 1) & _HashMask;
+    }
+}
