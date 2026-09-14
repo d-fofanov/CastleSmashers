@@ -8,6 +8,7 @@
         "Unity.PerformanceTesting",
         "Phys.AvbdRef",
         "Phys.AvbdGpu.Scenes",
+        "Phys.AvbdGpu.Siege",
         "Phys.AvbdGpu"
     ],
     "includePlatforms": [
