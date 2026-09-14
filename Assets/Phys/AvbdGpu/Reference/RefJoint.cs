@@ -23,6 +23,10 @@ namespace Phys.AvbdRef
         public float stiffnessLin, stiffnessAng, fracture;
         public float torqueArm;
         public bool broken;
+        // Snap fracture (extension, off at infinity): tension along the snap axis, shear across it and anchor separation limits;
+        // snapAxis is the body-B-local direction in which B separates from A (+-1 x, +-2 y, +-3 z)
+        public float fractureLateral = float.PositiveInfinity, fractureTension = float.PositiveInfinity, breakDistance = float.PositiveInfinity;
+        public int snapAxis = 2;
 
         static Mat3 GeometricStiffnessBallSocket(int k, float3 v)
         {
@@ -184,7 +188,20 @@ namespace Phys.AvbdRef
             }
 
             // Fracture test
-            if (math.lengthsq(lambdaAng) > fracture * fracture)
+            bool fractured = math.lengthsq(lambdaAng) > fracture * fracture;
+
+            // Snap fracture: lambda accumulates C = pA - pB, so a pull of B away from A along the snap axis shows as a negative
+            // multiplier component along it
+            if (!float.IsPositiveInfinity(fractureLateral) || !float.IsPositiveInfinity(fractureTension) || !float.IsPositiveInfinity(breakDistance))
+            {
+                float3 axis = RefMath.Rotate(bodyB.positionAng, SnapAxisLocal(snapAxis));
+                float axial = math.dot(lambdaLin, axis);
+                float3 lateral = lambdaLin - axial * axis;
+                float3 sep = (bodyA != null ? RefMath.Transform(bodyA.positionLin, bodyA.positionAng, rA) : rA) - RefMath.Transform(bodyB.positionLin, bodyB.positionAng, rB);
+                if (-axial > fractureTension || math.length(lateral) > fractureLateral || math.length(sep) >= breakDistance) fractured = true;
+            }
+
+            if (fractured)
             {
                 penaltyLin = float3.zero;
                 penaltyAng = float3.zero;
@@ -192,6 +209,13 @@ namespace Phys.AvbdRef
                 lambdaAng = float3.zero;
                 broken = true;
             }
+        }
+
+        public static float3 SnapAxisLocal(int code)
+        {
+            int a = math.abs(code);
+            float3 local = a == 1 ? new float3(1, 0, 0) : a == 3 ? new float3(0, 0, 1) : new float3(0, 1, 0);
+            return code < 0 ? -local : local;
         }
     }
 

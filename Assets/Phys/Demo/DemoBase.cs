@@ -31,9 +31,10 @@ namespace Phys.Demo
 
         // Player-build verification: -avbd-scene <n> -avbd-screenshot <file> [-avbd-frames <n>] captures a screenshot after n frames and quits;
         // -avbd-bench [-avbd-frames <n>] logs the average frame time of the second half of the run and quits;
-        // -avbd-yaw <deg> -avbd-pitch <deg> -avbd-distance <m> override the camera.
+        // -avbd-yaw <deg> -avbd-pitch <deg> -avbd-distance <m> override the camera; -avbd-shoot <n> fires a box at frame n.
         string m_ScreenshotPath;
         int m_ScreenshotFrame = 150;
+        int m_ShootFrame = -1;
         bool m_Bench;
         double m_BenchMs; int m_BenchFrames;
         float? m_Yaw, m_Pitch, m_Distance;
@@ -76,6 +77,7 @@ namespace Phys.Demo
                 if (args[i] == "-avbd-scene" && int.TryParse(args[i + 1], out int sc)) StartScene = sc;
                 if (args[i] == "-avbd-screenshot") m_ScreenshotPath = args[i + 1];
                 if (args[i] == "-avbd-frames" && int.TryParse(args[i + 1], out int fr)) m_ScreenshotFrame = fr;
+                if (args[i] == "-avbd-shoot" && int.TryParse(args[i + 1], out int sh)) m_ShootFrame = sh;
                 if (args[i] == "-avbd-yaw" && float.TryParse(args[i + 1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float yaw)) m_Yaw = yaw;
                 if (args[i] == "-avbd-pitch" && float.TryParse(args[i + 1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float pitch)) m_Pitch = pitch;
                 if (args[i] == "-avbd-distance" && float.TryParse(args[i + 1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float dist)) m_Distance = dist;
@@ -134,8 +136,9 @@ namespace Phys.Demo
         {
             if (m_World == null) return;
             m_Renderer.Render();
-            if (m_ScreenshotPath == null && !m_Bench) return;
             m_Frames++;
+            if (m_Frames == m_ShootFrame) Shoot();
+            if (m_ScreenshotPath == null && !m_Bench) return;
             if (m_Bench && m_Frames > m_ScreenshotFrame / 2) { m_BenchMs += Time.unscaledDeltaTime * 1000.0; m_BenchFrames++; }
             if (m_ScreenshotPath != null && m_Frames == m_ScreenshotFrame) ScreenCapture.CaptureScreenshot(m_ScreenshotPath);
             if (m_Frames == m_ScreenshotFrame + 20)

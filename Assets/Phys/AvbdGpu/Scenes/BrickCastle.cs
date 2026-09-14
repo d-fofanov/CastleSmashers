@@ -125,6 +125,8 @@ namespace Phys.AvbdGpu.Scenes
         /// <summary>The model pivot (bottom-face centre) relative to the collision box centre.</summary>
         public float3 MeshOffset => new float3(0f, -(Brick.BodyHeight * Scale - Margin) * 0.5f, 0f);
         public float BrickMass => Brick.Width * Brick.BodyHeight * Brick.Length * Scale * Scale * Scale * Density;
+        /// <summary>A snap comes apart once the bricks separate by half the stud height.</summary>
+        public float SnapBreakDistance => 0.5f * Brick.StudHeight * Scale;
 
         public float3 Center(BrickPlacement b) => Origin + new float3(
             (b.X + b.W * 0.5f) * Brick.Pitch * Scale,
@@ -148,6 +150,8 @@ namespace Phys.AvbdGpu.Scenes
         public const int GateWidth = 6;         // closed by corbelling one stud per course from both sides
         public const int GateCourses = 7;
         public const int TurretSize = 5;        // pinwheel of four bricks around a one-stud hole
+        /// <summary>The upper brick separates from the lower one along its own +y (the stud axis): joint snap axis code +2.</summary>
+        public const int SnapAxisUp = 2;
 
         enum Axis { X, Z }
 
@@ -344,12 +348,16 @@ namespace Phys.AvbdGpu.Scenes
             return first;
         }
 
-        /// <summary>Snaps the bricks together: hard ball-socket joints (breaking at <paramref name="fracture"/> newtons each) between
-        /// every brick and the bricks it rests on, and between the ground course and the world. Jointed bodies do not collide, so
-        /// four joints at the inset corners of every overlap hold the pair rigid (the solver's angular lock assumes equal
-        /// orientations, which the two brick orientations do not have).</summary>
-        public static int AddSnapJoints(ISceneBuilder s, BrickLayout layout, int firstBody, BrickSpec spec, float fracture)
+        /// <summary>Snaps the bricks together: hard ball-socket joints between every brick and the bricks it rests on, and between
+        /// the ground course and the world. Jointed bodies do not collide, so four joints at the inset corners of every overlap
+        /// hold the pair rigid (the solver's angular lock assumes equal orientations, which the two brick orientations do not
+        /// have). A snap breaks when the connection is pushed sideways by more than <paramref name="fractureLateral"/> newtons,
+        /// pulled apart along the studs by more than <paramref name="fractureTension"/>, or separated by half the stud height;
+        /// the force limits are split over the four joints of the connection.</summary>
+        public static int AddSnapJoints(ISceneBuilder s, BrickLayout layout, int firstBody, BrickSpec spec, float fractureLateral, float fractureTension)
         {
+            const int Anchors = 4;
+            float lateral = fractureLateral / Anchors, tension = fractureTension / Anchors, distance = spec.SnapBreakDistance;
             int joints = 0;
             for (int i = 0; i < layout.Bricks.Count; i++)
             {
@@ -362,7 +370,7 @@ namespace Phys.AvbdGpu.Scenes
                     foreach (var p in InsetCorners(b.X, b.X + b.W, b.Z, b.Z + b.D))
                     {
                         float3 anchor = spec.GridPoint(p.x, p.y, 0);
-                        s.AddJoint(-1, bodyB, anchor, math.mul(invB, anchor - posB), float.PositiveInfinity, 0f, fracture);
+                        s.AddJoint(-1, bodyB, anchor, math.mul(invB, anchor - posB), float.PositiveInfinity, 0f, float.PositiveInfinity, lateral, tension, distance, SnapAxisUp);
                         joints++;
                     }
                     continue;
@@ -378,7 +386,7 @@ namespace Phys.AvbdGpu.Scenes
                     foreach (var p in InsetCorners(xMin, xMax, zMin, zMax))
                     {
                         float3 anchor = spec.GridPoint(p.x, p.y, b.Layer);
-                        s.AddJoint(bodyA, bodyB, math.mul(invA, anchor - posA), math.mul(invB, anchor - posB), float.PositiveInfinity, 0f, fracture);
+                        s.AddJoint(bodyA, bodyB, math.mul(invA, anchor - posA), math.mul(invB, anchor - posB), float.PositiveInfinity, 0f, float.PositiveInfinity, lateral, tension, distance, SnapAxisUp);
                         joints++;
                     }
                 }

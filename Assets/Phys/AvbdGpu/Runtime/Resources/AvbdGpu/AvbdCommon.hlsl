@@ -84,7 +84,10 @@ struct JointDef
     float3 rA;
     float3 rB;
     float stiffnessLin, stiffnessAng, fracture, torqueArm;
-    float4 pad;
+    // Snap fracture (each HARD_STIFFNESS = off): the linear multiplier's pull along the snap axis (tension), its part across
+    // the axis (shear) and the anchor separation each break the joint past their limit. snapAxis: +-1 x, +-2 y, +-3 z of
+    // body B's frame, the direction in which B separates from A (0 = +y).
+    float fractureLateral, fractureTension, breakDistance, snapAxis;
 };
 
 struct JointState

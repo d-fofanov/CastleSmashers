@@ -18,18 +18,20 @@ namespace Phys.Demo
         [Tooltip("Solver metres per model metre. 1 simulates the true 0.2 x 0.12 x 0.3 m brick; the default 5 puts the bricks in the " +
                  "metre / kilogram regime the solver's penalty ramp is tuned for (and slows the motion accordingly).")]
         public float BrickScale = 5f;
-        [Tooltip("Mass of one brick (kg).")]
-        public float BrickMass = 1f;
+        [Tooltip("Mass of one brick (kg). Light enough that the snapped gatehouse, bending over its passage, stays below the snap limits.")]
+        public float BrickMass = 0.25f;
         public float BrickFriction = 0.6f;
         [Tooltip("Snap the bricks together with hard ball-socket joints that break under load.")]
         public bool Snap;
-        [Tooltip("Force (N) that breaks a snap joint (the bricks weigh BrickMass x 10 N).")]
-        public float SnapFracture = 300f;
+        [Tooltip("Sideways force (N) that breaks a snap connection (a brick weighs BrickMass x 10 N).")]
+        public float SnapFractureLateral = 300f;
+        [Tooltip("Upward pull (N) that breaks a snap connection; a snap also comes apart once the bricks separate by half the stud height.")]
+        public float SnapFractureTension = 50f;
         public bool Shadows = true;
         [Tooltip("Cannonball: cube size (model metres), mass (kg) and speed (model metres per second).")]
         public float ShotCube = 0.12f;
-        public float ShotMass = 10f;
-        public float ShotVelocity = 12f;
+        public float ShotMass = 30f;
+        public float ShotVelocity = 24f;
 
         BrickLayout m_Layout;
         BrickSpec m_Spec;
@@ -50,7 +52,7 @@ namespace Phys.Demo
 
         protected override int SceneCount => CastlePlan.Presets.Length;
         protected override string SceneName(int index) => CastlePlan.Presets[index].Name;
-        protected override float HudHeight => 205f;
+        protected override float HudHeight => 220f;
         protected override float3 ShotSize => ShotCube * BrickScale;
         protected override float ShotDensity => ShotMass / math.pow(ShotCube * BrickScale, 3f);
         /// <summary>Speeds scale with the square root of lengths under the same gravity (dynamic similarity).</summary>
@@ -73,7 +75,7 @@ namespace Phys.Demo
         protected override void Configure()
         {
             foreach (var arg in System.Environment.GetCommandLineArgs()) if (arg == "-avbd-snap") Snap = true;
-            m_World.Params.Substeps = 2;                      // cannonballs travel a fraction of a brick per substep
+            m_World.Params.Substeps = 3;                      // the cannonball and its debris travel a fraction of a brick per substep
             m_Renderer.Shadows = Shadows;
             m_Renderer.DrawJoints = false;
 #if UNITY_EDITOR
@@ -96,7 +98,7 @@ namespace Phys.Demo
             float ground = 2000f;                             // out to the horizon
             int groundBody = m_World.AddBody(new float3(ground, 1f, ground), 0f, BrickFriction, new float3(0f, -0.5f, 0f), quaternion.identity, float3.zero);
             m_FirstBrick = BrickCastle.Build(m_World, m_Layout, m_Spec);
-            m_SnapJoints = Snap ? BrickCastle.AddSnapJoints(m_World, m_Layout, m_FirstBrick, m_Spec, SnapFracture) : 0;
+            m_SnapJoints = Snap ? BrickCastle.AddSnapJoints(m_World, m_Layout, m_FirstBrick, m_Spec, SnapFractureLateral, SnapFractureTension) : 0;
 
             // colours: the ground, then one tint per brick from its tone with a little per-brick variation
             int n = m_Layout.Bricks.Count;
@@ -151,8 +153,9 @@ namespace Phys.Demo
             return
                 $"<b>[{m_Scene + 1}] {plan.Name}</b>{PausedText}\n" +
                 $"{BrickCount} bricks of {Brick.Width * BrickScale * 100f:F0} x {Brick.BodyHeight * BrickScale * 100f:F0} x {Brick.Length * BrickScale * 100f:F0} cm (model x {BrickScale:G3}), {m_Spec.BrickMass:F2} kg; " +
-                $"{side:F1} m square, walls {plan.WallCourses} courses, towers {plan.TowerCourses}, keep {plan.KeepCourses}  -  " +
-                $"{(Snap ? $"<color=#88ddff>snapped</color>: {m_SnapJoints} joints breaking at {SnapFracture:F0} N" : "dry-stacked (friction only)")}\n\n" +
+                $"{side:F1} m square, walls {plan.WallCourses} courses, towers {plan.TowerCourses}, keep {plan.KeepCourses}\n" +
+                (Snap ? $"<color=#88ddff>snapped</color>: {m_SnapJoints} joints; a snap breaks at {SnapFractureLateral:F0} N sideways, {SnapFractureTension:F0} N upward or {m_Spec.SnapBreakDistance * 100f:F1} cm apart  -  cannonball {ShotMass:F0} kg\n\n"
+                      : $"dry-stacked (friction only)  -  cannonball {ShotMass:F0} kg\n\n") +
                 StatsText() + "\n\n" +
                 "1-3 castle size  , . prev/next  R rebuild  J snap bricks on/off  Space pause  N step  F1 contacts  F2 colour mode  F5 joints  F6 collision boxes  F7 shadows\n" +
                 "+/- iterations  [ ] substeps  B/Enter shoot a cannonball  G gravity  H hide HUD  LMB drag brick  RMB orbit  MMB pan  wheel / Q E zoom  W A S D orbit";

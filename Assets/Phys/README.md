@@ -1,7 +1,7 @@
 # Phys.AvbdGpu — Augmented Vertex Block Descent on the GPU
 
-3D rigid-box physics in compute shaders: frictional contacts, ball-socket joints with angular locks and fracture,
-springs, ignore-collision links. The algorithm is Augmented Vertex Block Descent (Giles, Diaz, Yuksel, SIGGRAPH 2025)
+3D rigid-box physics in compute shaders: frictional contacts, ball-socket joints with angular locks and fracture
+(torque, or directional snap limits), springs, ignore-collision links. The algorithm is Augmented Vertex Block Descent (Giles, Diaz, Yuksel, SIGGRAPH 2025)
 exactly as in the author's reference implementation `avbd-demo3d`; the whole step — broadphase, narrowphase with
 persisted manifolds, graph colouring, colour-batched primal sweeps, dual updates, velocities — runs on the GPU and
 nothing is read back for rendering. See [ALGORITHMS.md](ALGORITHMS.md) for the pipeline.
@@ -40,6 +40,8 @@ var world = new AvbdGpuWorld(AvbdGpuConfig.ForBodies(65536));   // capacities; b
 int ground = world.AddBody(new float3(100, 1, 100), 0f, 0.5f, float3.zero, quaternion.identity, float3.zero); // density 0 = static
 int box = world.AddBody(new float3(1, 1, 1), 1f, 0.5f, new float3(0, 4, 0), quaternion.identity, float3.zero);
 int joint = world.AddJointIndexed(-1, box, new float3(0, 6, 0), float3.zero, 5000f, 0f);   // bodyA -1: world anchor
+// snap joint: hard, breaks at 300 N of shear across body B's +y, 50 N of pull along it, or 1 cm of separation
+world.AddJointIndexed(ground, box, new float3(0, 0.5f, 0), new float3(0, -0.5f, 0), float.PositiveInfinity, 0f, float.PositiveInfinity, 300f, 50f, 0.01f, snapAxis: 2);
 world.Params.Iterations = 10;
 world.Step();                          // uploads new bodies, runs the step on the GPU, no synchronisation
 world.ReadbackPoses = true;            // optional asynchronous pose readback (1-2 frames old) for Pick / gameplay
@@ -68,6 +70,13 @@ box (`Mesh`, `Scale`, `Offset` of the model pivot in body space), `renderer.SetT
 Constants (`AvbdGpuConstants` / `AvbdCommon.hlsl`): penalty bounds 1 .. 1e10, collision margin 0.01, stick
 threshold 1e-5, hard stiffness ≥ 1e30 (`float.PositiveInfinity` accepted), 8 contacts per manifold, 32 colours.
 
+Joint fracture: the reference's `fracture` breaks a joint when its angular multiplier (torque) exceeds it. The snap limits
+(`fractureLateral`, `fractureTension`, `breakDistance`, off at infinity; an extension, mirrored in the reference) act on
+the linear multiplier and the anchors: the joint breaks when the pull of body B away from A along the snap axis (a body-B
+axis, `snapAxis` ±1 x / ±2 y / ±3 z) exceeds `fractureTension`, when the part across the axis exceeds `fractureLateral`,
+or when the anchors are `breakDistance` apart; compression along the axis never breaks it. Jointed bodies do not collide
+until the joint breaks.
+
 Capacities (`AvbdGpuConfig.ForBodies(n)`): bodies n, joints max(n, 4096), springs n/4, manifolds 4n, contacts 16n,
 pairs 10n, grid entries 8n, hash 8n (power of two), cells 2n. Appends beyond a capacity are dropped and flagged in
 `Stats.OverflowFlags` (1 pairs, 2 manifolds, 4 contacts, 8 grid entries, 16 large bodies, 32 unsorted cells); the demo
@@ -86,7 +95,7 @@ joint (5000 N/m), right drag orbits, middle drag pans, wheel / `Q` `E` zoom, `W 
 
 Player flags: `-avbd-scene n`, `-avbd-screenshot file [-avbd-frames n]` (screenshot then quit),
 `-avbd-bench [-avbd-frames n]` (average frame time of the second half of the run logged, then quit),
-`-avbd-yaw deg -avbd-pitch deg -avbd-distance m` (camera).
+`-avbd-yaw deg -avbd-pitch deg -avbd-distance m` (camera), `-avbd-shoot n` (fire a box at frame n).
 
 ## Castle demo
 
@@ -102,17 +111,22 @@ and 5 509 bricks), all planned by `BrickCastle` on the stud grid:
 * The brick's studs nest in the hollow underside of the brick above, so the collision box is the body without the
   studs, made one collision margin (1 cm) taller: resting contacts settle exactly that deep, and the models then stack
   with no gap and no overlap.
-* `BrickScale` (default 5) is solver metres per model metre and `BrickMass` (1 kg) the mass: at 1 x 0.6 x 1.5 m and
-  1 kg a brick is in the regime the reference's penalty ramp is tuned for (`PenaltyMin` 1, `Beta` 1e4); at the model's
-  true 0.2 x 0.12 x 0.3 m the stacks sink visibly before the penalties catch up. Gravity stays 10 m/s², so the toy moves
-  in slow motion; 240 settle steps run before the castle is shown.
+* `BrickScale` (default 5) is solver metres per model metre and `BrickMass` (0.25 kg) the mass: at 1 x 0.6 x 1.5 m and
+  a fraction of a kilogram a brick is in the regime the reference's penalty ramp is tuned for (`PenaltyMin` 1, `Beta`
+  1e4); at the model's true 0.2 x 0.12 x 0.3 m the stacks sink visibly before the penalties catch up. The mass is kept
+  low so that the snapped gatehouse, which bends as a beam over its passage, stays below the snap limits. Gravity stays
+  10 m/s², so the toy moves in slow motion; 240 settle steps run before the castle is shown.
 * `J` snaps the bricks together: four hard ball-socket joints at the inset corners of every brick-on-brick overlap (and
-  of every ground-course footprint, to the world) that break at `SnapFracture` newtons. Jointed bodies do not collide
-  until a joint breaks (the reference's rule), and the angular lock assumes equal orientations, hence four points per
-  overlap rather than one lock.
+  of every ground-course footprint, to the world). A snap connection breaks when it is pushed sideways by more than
+  `SnapFractureLateral` (300 N), pulled apart along the studs by more than `SnapFractureTension` (50 N) — the limits are
+  split over the four joints — or when the bricks separate by half the stud height (5.4 cm at scale 5); the weight of the
+  bricks above (compression) never breaks it. A cannonball into the gatehouse breaks a few thousand of the 23 k joints
+  and blows the hit section out; the rest stays snapped. Jointed bodies do not collide until a joint breaks (the reference's rule),
+  and the angular lock assumes equal orientations, hence four points per overlap rather than one lock.
 
-Keys as the main demo plus `J` snap on/off, `F6` collision boxes, `F7` shadows; `B` / `Enter` fires a 10 kg cannonball.
-Flags: `-avbd-scene 0..2`, `-avbd-snap`, and the screenshot / bench / camera flags above.
+Keys as the main demo plus `J` snap on/off, `F6` collision boxes, `F7` shadows; `B` / `Enter` fires a 30 kg cannonball
+at 24 model m/s (× √5 in the solver). Flags: `-avbd-scene 0..2`, `-avbd-snap`, and the screenshot / bench / camera
+flags above.
 
 ## Measured behaviour
 
@@ -165,7 +179,8 @@ submission).
 .\RunTests.ps1                                  # EditMode + PlayMode (editor must not have the project open)
 .\RunTests.ps1 -Platform EditMode -Filter Phys.AvbdGpu.Tests.GpuVsReferenceTests
 .\RunTests.ps1 -Platform EditMode -Filter Phys.AvbdGpu.Tests.PerformanceTests   # step times (excluded by default)
-.\RunTests.ps1 -Platform PlayMode -Filter Phys.AvbdGpu.Tests.CastleSmokeTests   # the castle stands, cannonball, snap joints
+.\RunTests.ps1 -Platform EditMode -Filter Phys.AvbdGpu.Tests.SnapFractureTests  # snap limits, GPU and reference
+.\RunTests.ps1 -Platform PlayMode -Filter Phys.AvbdGpu.Tests.CastleSmokeTests   # the castle stands, cannonball, snaps break
 ```
 
 The runner forces D3D12 (`-GraphicsApi ""` for the editor default). `DiagnosticTests` only log traces and are

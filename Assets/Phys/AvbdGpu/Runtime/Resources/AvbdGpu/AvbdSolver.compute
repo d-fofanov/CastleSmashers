@@ -399,6 +399,16 @@ void dualManifold(uint mi)
     }
 }
 
+// Body-B-local snap axis of a joint: +-1 x, +-2 y, +-3 z (0 = +y).
+float3 snapAxisLocal(float code)
+{
+    int a = (int)code;
+    float sgn = a < 0 ? -1.0 : 1.0;
+    a = abs(a);
+    float3 local = a == 1 ? float3(1, 0, 0) : a == 3 ? float3(0, 0, 1) : float3(0, 1, 0);
+    return local * sgn;
+}
+
 void dualJoint(uint ji)
 {
     JointDef d = _JointDef[ji];
@@ -440,7 +450,19 @@ void dualJoint(uint ji)
     }
 
     // Fracture test
-    if (dot(s.lambdaAng, s.lambdaAng) > d.fracture * d.fracture)
+    bool fractured = dot(s.lambdaAng, s.lambdaAng) > d.fracture * d.fracture;
+
+    // Snap fracture: lambda accumulates C = pA - pB, so a pull of B away from A along the snap axis shows as a negative
+    // multiplier component along it
+    if (d.fractureLateral < HARD_STIFFNESS || d.fractureTension < HARD_STIFFNESS || d.breakDistance < HARD_STIFFNESS)
+    {
+        float3 axis = qrotate(qB, snapAxisLocal(d.snapAxis));
+        float axial = dot(s.lambdaLin, axis);
+        float3 lateral = s.lambdaLin - axial * axis;
+        if (-axial > d.fractureTension || length(lateral) > d.fractureLateral || length(pA - pB) >= d.breakDistance) fractured = true;
+    }
+
+    if (fractured)
     {
         s.penaltyLin = 0; s.penaltyAng = 0;
         s.lambdaLin = 0; s.lambdaAng = 0;

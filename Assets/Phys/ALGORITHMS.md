@@ -14,7 +14,9 @@ body's inertia and from every constraint that touches it, and solved with an LDL
 Hard constraints (contacts, hard joints) are augmented Lagrangian terms `½ k C² + λ C`: a penalty `k` that ramps
 up with the residual (Eq. 16, `k += β|C|`) and a multiplier `λ` that is updated after every sweep (Eq. 11,
 `λ = clamp(k C + λ, bounds)`). Contacts bound `λ_n ≤ 0` and keep the tangential force inside the friction cone
-`|λ_t| ≤ μ|λ_n|`; joints fracture when `|λ_ang|` exceeds the threshold. Both variables are warm started from the
+`|λ_t| ≤ μ|λ_n|`; joints fracture when `|λ_ang|` exceeds the threshold (and, an extension for snapped bricks, when
+the linear multiplier pulls body B away from A along a body-B axis, shears across it, or the anchors separate past
+per-joint limits). Both variables are warm started from the
 previous step with a decay `γ` (Eq. 19). A stabilisation parameter `α` removes only a fraction of the constraint
 error that existed at the start of the step (Eq. 18), which keeps error correction from injecting momentum.
 

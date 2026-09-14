@@ -102,7 +102,7 @@ namespace Phys.AvbdGpu.Tests
             var spec = BrickSpec.Default;
             var builder = new RecordingBuilder();
             int first = BrickCastle.Build(builder, layout, spec);
-            int joints = BrickCastle.AddSnapJoints(builder, layout, first, spec, 20f);
+            int joints = BrickCastle.AddSnapJoints(builder, layout, first, spec, 300f, 50f);
             Assert.AreEqual(joints, builder.Joints.Count);
             var joined = new HashSet<int>();
             foreach (var (a, b, rA, rB) in builder.Joints)
@@ -127,6 +127,8 @@ namespace Phys.AvbdGpu.Tests
             public readonly List<(int a, int b, float3 rA, float3 rB)> Joints = new List<(int, int, float3, float3)>();
             public int AddBody(float3 size, float density, float friction, float3 position, quaternion rotation, float3 velocity) { Bodies.Add((position, rotation)); return Bodies.Count - 1; }
             public void AddJoint(int bodyA, int bodyB, float3 rA, float3 rB, float stiffnessLin, float stiffnessAng, float fracture) => Joints.Add((bodyA, bodyB, rA, rB));
+            public void AddJoint(int bodyA, int bodyB, float3 rA, float3 rB, float stiffnessLin, float stiffnessAng, float fracture, float fractureLateral, float fractureTension, float breakDistance, int snapAxis)
+                => Joints.Add((bodyA, bodyB, rA, rB));
             public void AddSpring(int bodyA, int bodyB, float3 rA, float3 rB, float stiffness, float rest) { }
             public void AddIgnoreCollision(int bodyA, int bodyB) { }
         }

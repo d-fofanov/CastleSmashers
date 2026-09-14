@@ -32,6 +32,13 @@ namespace Phys.AvbdRef
             Joints.Add(new Joint(Solver, bodyA < 0 ? null : Bodies[bodyA], Bodies[bodyB], rA, rB, stiffnessLin, stiffnessAng, fracture));
         }
 
+        public void AddJoint(int bodyA, int bodyB, float3 rA, float3 rB, float stiffnessLin, float stiffnessAng, float fracture,
+            float fractureLateral, float fractureTension, float breakDistance, int snapAxis)
+        {
+            Joints.Add(new Joint(Solver, bodyA < 0 ? null : Bodies[bodyA], Bodies[bodyB], rA, rB, stiffnessLin, stiffnessAng, fracture)
+                { fractureLateral = fractureLateral, fractureTension = fractureTension, breakDistance = breakDistance, snapAxis = snapAxis });
+        }
+
         public void AddSpring(int bodyA, int bodyB, float3 rA, float3 rB, float stiffness, float rest)
         {
             new Spring(Solver, Bodies[bodyA], Bodies[bodyB], rA, rB, stiffness, rest);

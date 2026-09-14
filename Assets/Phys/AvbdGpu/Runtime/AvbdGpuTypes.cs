@@ -48,7 +48,11 @@ namespace Phys.AvbdGpu
         public int BodyA, BodyB;  // BodyA = -1: RA is a world anchor
         public float3 RA, RB;
         public float StiffnessLin, StiffnessAng, Fracture, TorqueArm;
-        public float4 Pad;
+        /// <summary>Snap fracture (each <see cref="AvbdGpuConstants.HardStiffness"/> = off): the linear multiplier's pull along the snap axis
+        /// (tension), its part across the axis (shear) and the anchor separation each break the joint past their limit.</summary>
+        public float FractureLateral, FractureTension, BreakDistance;
+        /// <summary>The snap axis in body B's frame: +-1 x, +-2 y, +-3 z, the direction in which B separates from A (0 = +y).</summary>
+        public float SnapAxis;
         public const int Stride = 64;
     }
 

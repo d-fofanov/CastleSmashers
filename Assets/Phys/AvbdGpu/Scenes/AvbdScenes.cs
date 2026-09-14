@@ -14,6 +14,12 @@ namespace Phys.AvbdGpu.Scenes
         /// <summary>Ball-socket joint (+ angular lock when stiffnessAng > 0); bodyA = -1 anchors rA in world space.</summary>
         void AddJoint(int bodyA, int bodyB, float3 rA, float3 rB, float stiffnessLin, float stiffnessAng, float fracture);
 
+        /// <summary>Joint with snap fracture: it also breaks when the linear multiplier pulls B away from A along the snap axis by
+        /// more than <paramref name="fractureTension"/>, when its part across the axis exceeds <paramref name="fractureLateral"/>, or
+        /// when the anchors are <paramref name="breakDistance"/> apart. The axis is +-1 x, +-2 y, +-3 z of body B's frame.</summary>
+        void AddJoint(int bodyA, int bodyB, float3 rA, float3 rB, float stiffnessLin, float stiffnessAng, float fracture,
+            float fractureLateral, float fractureTension, float breakDistance, int snapAxis);
+
         /// <summary>Distance spring; rest &lt; 0 measures the rest length from the initial pose.</summary>
         void AddSpring(int bodyA, int bodyB, float3 rA, float3 rB, float stiffness, float rest);
 

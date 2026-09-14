@@ -152,8 +152,16 @@ namespace Phys.AvbdGpu
             AddJointIndexed(bodyA, bodyB, rA, rB, stiffnessLin, stiffnessAng, fracture);
         }
 
-        /// <summary>Adds a joint and returns its index (needed to move or remove it later).</summary>
-        public int AddJointIndexed(int bodyA, int bodyB, float3 rA, float3 rB, float stiffnessLin = float.PositiveInfinity, float stiffnessAng = 0f, float fracture = float.PositiveInfinity)
+        public void AddJoint(int bodyA, int bodyB, float3 rA, float3 rB, float stiffnessLin, float stiffnessAng, float fracture,
+            float fractureLateral, float fractureTension, float breakDistance, int snapAxis)
+        {
+            AddJointIndexed(bodyA, bodyB, rA, rB, stiffnessLin, stiffnessAng, fracture, fractureLateral, fractureTension, breakDistance, snapAxis);
+        }
+
+        /// <summary>Adds a joint and returns its index (needed to move or remove it later). <paramref name="fracture"/> is the
+        /// reference's limit on the angular multiplier; the snap limits (see <see cref="GpuJointDef"/>) act on the linear one.</summary>
+        public int AddJointIndexed(int bodyA, int bodyB, float3 rA, float3 rB, float stiffnessLin = float.PositiveInfinity, float stiffnessAng = 0f, float fracture = float.PositiveInfinity,
+            float fractureLateral = float.PositiveInfinity, float fractureTension = float.PositiveInfinity, float breakDistance = float.PositiveInfinity, int snapAxis = 2)
         {
             float3 sizeA = bodyA >= 0 ? m_BodyDefs[bodyA].Size : float3.zero;
             var def = new GpuJointDef
@@ -163,6 +171,10 @@ namespace Phys.AvbdGpu
                 StiffnessAng = AvbdGpuConstants.ToGpuStiffness(stiffnessAng),
                 Fracture = AvbdGpuConstants.ToGpuStiffness(fracture),
                 TorqueArm = math.lengthsq(sizeA + m_BodyDefs[bodyB].Size),
+                FractureLateral = AvbdGpuConstants.ToGpuStiffness(fractureLateral),
+                FractureTension = AvbdGpuConstants.ToGpuStiffness(fractureTension),
+                BreakDistance = AvbdGpuConstants.ToGpuStiffness(breakDistance),
+                SnapAxis = snapAxis,
             };
             int j;
             if (m_FreeJoints.Count > 0)
@@ -192,7 +204,11 @@ namespace Phys.AvbdGpu
         public void RemoveJoint(int joint)
         {
             var def = m_JointDefs[joint];
-            m_JointDefs[joint] = new GpuJointDef { BodyA = -1, BodyB = 0, StiffnessLin = 0, StiffnessAng = 0, Fracture = AvbdGpuConstants.HardStiffness };
+            m_JointDefs[joint] = new GpuJointDef
+            {
+                BodyA = -1, BodyB = 0, StiffnessLin = 0, StiffnessAng = 0, Fracture = AvbdGpuConstants.HardStiffness,
+                FractureLateral = AvbdGpuConstants.HardStiffness, FractureTension = AvbdGpuConstants.HardStiffness, BreakDistance = AvbdGpuConstants.HardStiffness,
+            };
             if (def.BodyA >= 0) RemoveLink(def.BodyA, def.BodyB, ConsRef.Make(ConsRef.Joint, (uint)joint));
             if (joint < m_UploadedJoints) m_DirtyJoints.Add(joint);
             m_FreeJoints.Add(joint);
