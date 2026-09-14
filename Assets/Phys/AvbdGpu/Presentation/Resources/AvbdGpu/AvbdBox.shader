@@ -1,5 +1,6 @@
-// Instanced box rendering straight from the solver buffers (Graphics.RenderMeshPrimitives, one draw for every body).
-// Simple lit shading (main light + ambient); colour modes: 0 palette by body, 1 graph colour group, 2 uniform.
+// Instanced body rendering straight from the solver buffers (Graphics.RenderMeshPrimitives, one instance per body).
+// Draws either the scaled unit cube (the collision box) or an arbitrary mesh per body (AvbdBodyInstancing.hlsl).
+// Simple lit shading (main light with shadows + ambient); colour modes: 0 tint / palette by body, 1 graph colour group, 2 uniform.
 Shader "Phys/AvbdBox"
 {
     Properties
@@ -22,30 +23,11 @@ Shader "Phys/AvbdBox"
             #pragma vertex vert
             #pragma fragment frag
             #pragma target 4.5
+            #pragma multi_compile _ _MAIN_LIGHT_SHADOWS _MAIN_LIGHT_SHADOWS_CASCADE _MAIN_LIGHT_SHADOWS_SCREEN
+            #pragma multi_compile_fragment _ _SHADOWS_SOFT _SHADOWS_SOFT_LOW _SHADOWS_SOFT_MEDIUM _SHADOWS_SOFT_HIGH
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Lighting.hlsl"
-
-            struct BodyDef
-            {
-                float3 size;
-                float mass;
-                float3 moment;
-                float friction;
-                float radius;
-                uint flags;
-                float pad0, pad1;
-            };
-
-            StructuredBuffer<float4> _BodyPos;
-            StructuredBuffer<float4> _BodyRot;
-            StructuredBuffer<BodyDef> _BodyDef;
-            StructuredBuffer<uint> _BodyColor;
-
-            CBUFFER_START(UnityPerMaterial)
-            float4 _BaseColor;
-            float4 _StaticColor;
-            float _ColorMode;
-            CBUFFER_END
+            #include "AvbdBodyInstancing.hlsl"
 
             struct Attributes
             {
@@ -60,70 +42,82 @@ Shader "Phys/AvbdBox"
                 float3 normalWS : TEXCOORD0;
                 float3 positionWS : TEXCOORD1;
                 float3 color : TEXCOORD2;
+#if defined(REQUIRES_VERTEX_SHADOW_COORD_INTERPOLATOR)
+                float4 shadowCoord : TEXCOORD3;
+#endif
             };
-
-            float3 qrotate(float4 q, float3 v)
-            {
-                float3 t = cross(q.xyz, v) * 2.0;
-                return v + t * q.w + cross(q.xyz, t);
-            }
-
-            uint wangHash(uint s)
-            {
-                s = (s ^ 61u) ^ (s >> 16);
-                s *= 9u;
-                s = s ^ (s >> 4);
-                s *= 0x27d4eb2du;
-                s = s ^ (s >> 15);
-                return s;
-            }
-
-            float3 hsv(float h, float s, float v)
-            {
-                float3 k = float3(1.0, 2.0 / 3.0, 1.0 / 3.0);
-                float3 p = abs(frac(h + k) * 6.0 - 3.0);
-                return v * lerp(1.0, saturate(p - 1.0), s);
-            }
-
-            float3 bodyColor(uint id, BodyDef d)
-            {
-                if (d.mass <= 0.0) return _StaticColor.rgb;
-                int mode = (int)_ColorMode;
-                if (mode == 1)
-                {
-                    uint c = _BodyColor[id];
-                    if (c > 32u) return _StaticColor.rgb;
-                    if (c == 32u) return float3(1, 0, 1);              // overflow (Jacobi) group
-                    return hsv(frac(c * 0.618034), 0.65, 0.95);
-                }
-                if (mode == 2) return _BaseColor.rgb;
-                uint h = wangHash(id);
-                return hsv((h & 1023u) / 1024.0, 0.35 + ((h >> 10) & 255u) / 255.0 * 0.25, 0.8 + ((h >> 18) & 255u) / 255.0 * 0.2);
-            }
 
             Varyings vert(Attributes v)
             {
                 Varyings o;
-                uint id = v.instanceID;
-                BodyDef d = _BodyDef[id];
-                float4 q = _BodyRot[id];
-                float3 p = qrotate(q, v.positionOS * d.size) + _BodyPos[id].xyz;
-                o.positionWS = p;
-                o.positionCS = TransformWorldToHClip(p);
-                o.normalWS = qrotate(q, v.normalOS);
-                o.color = bodyColor(id, d);
+                uint id;
+                bodyVertex(v.instanceID, v.positionOS, v.normalOS, o.positionWS, o.normalWS, id);
+                o.positionCS = TransformWorldToHClip(o.positionWS);
+                o.color = bodyColor(id, _BodyDef[id]);
+#if defined(REQUIRES_VERTEX_SHADOW_COORD_INTERPOLATOR)
+                o.shadowCoord = ComputeScreenPos(o.positionCS);
+#endif
                 return o;
             }
 
             half4 frag(Varyings i) : SV_Target
             {
                 float3 n = normalize(i.normalWS);
-                Light light = GetMainLight();
-                float ndl = saturate(dot(n, light.direction));
+#if defined(REQUIRES_VERTEX_SHADOW_COORD_INTERPOLATOR)
+                float4 shadowCoord = i.shadowCoord;
+#elif defined(MAIN_LIGHT_CALCULATE_SHADOWS)
+                float4 shadowCoord = TransformWorldToShadowCoord(i.positionWS);
+#else
+                float4 shadowCoord = float4(0, 0, 0, 0);
+#endif
+                Light light = GetMainLight(shadowCoord);
+                float ndl = saturate(dot(n, light.direction)) * light.shadowAttenuation;
                 float3 ambient = SampleSH(n);
                 float3 lit = i.color * (light.color * ndl + ambient + 0.12);
                 return half4(lit, 1);
             }
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "ShadowCaster"
+            Tags { "LightMode" = "ShadowCaster" }
+            ZWrite On
+            ZTest LEqual
+            ColorMask 0
+            Cull Back
+
+            HLSLPROGRAM
+            #pragma vertex vert
+            #pragma fragment frag
+            #pragma target 4.5
+            #pragma multi_compile_vertex _ _CASTING_PUNCTUAL_LIGHT_SHADOW
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Shadows.hlsl"
+            #include "AvbdBodyInstancing.hlsl"
+
+            float3 _LightDirection;
+            float3 _LightPosition;
+
+            struct Attributes { float3 positionOS : POSITION; float3 normalOS : NORMAL; uint instanceID : SV_InstanceID; };
+            struct Varyings { float4 positionCS : SV_POSITION; };
+
+            Varyings vert(Attributes v)
+            {
+                Varyings o;
+                float3 positionWS, normalWS; uint id;
+                bodyVertex(v.instanceID, v.positionOS, v.normalOS, positionWS, normalWS, id);
+#if _CASTING_PUNCTUAL_LIGHT_SHADOW
+                float3 lightDirectionWS = normalize(_LightPosition - positionWS);
+#else
+                float3 lightDirectionWS = _LightDirection;
+#endif
+                o.positionCS = ApplyShadowClamping(TransformWorldToHClip(ApplyShadowBias(positionWS, normalize(normalWS), lightDirectionWS)));
+                return o;
+            }
+
+            half4 frag(Varyings i) : SV_Target { return 0; }
             ENDHLSL
         }
 
@@ -139,27 +133,17 @@ Shader "Phys/AvbdBox"
             #pragma fragment frag
             #pragma target 4.5
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "AvbdBodyInstancing.hlsl"
 
-            struct BodyDef { float3 size; float mass; float3 moment; float friction; float radius; uint flags; float pad0, pad1; };
-            StructuredBuffer<float4> _BodyPos;
-            StructuredBuffer<float4> _BodyRot;
-            StructuredBuffer<BodyDef> _BodyDef;
-
-            float3 qrotate(float4 q, float3 v)
-            {
-                float3 t = cross(q.xyz, v) * 2.0;
-                return v + t * q.w + cross(q.xyz, t);
-            }
-
-            struct Attributes { float3 positionOS : POSITION; uint instanceID : SV_InstanceID; };
+            struct Attributes { float3 positionOS : POSITION; float3 normalOS : NORMAL; uint instanceID : SV_InstanceID; };
             struct Varyings { float4 positionCS : SV_POSITION; };
 
             Varyings vert(Attributes v)
             {
                 Varyings o;
-                BodyDef d = _BodyDef[v.instanceID];
-                float3 p = qrotate(_BodyRot[v.instanceID], v.positionOS * d.size) + _BodyPos[v.instanceID].xyz;
-                o.positionCS = TransformWorldToHClip(p);
+                float3 positionWS, normalWS; uint id;
+                bodyVertex(v.instanceID, v.positionOS, v.normalOS, positionWS, normalWS, id);
+                o.positionCS = TransformWorldToHClip(positionWS);
                 return o;
             }
 

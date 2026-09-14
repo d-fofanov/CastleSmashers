@@ -8,6 +8,9 @@ EditorBuildSettings:
   - enabled: 1
     path: Assets/Phys/Demo/Demo.unity
     guid: 3d5c7e9a1b2f4d6e8a0c2b4d6f8e0a13
+  - enabled: 1
+    path: Assets/Phys/Demo/Castle.unity
+    guid: 4a7c9e1b3d5f4a8c9e2b6d0f8a3c5e79
   m_configObjects:
     com.unity.input.settings.actions: {fileID: -944628639613478452, guid: 052faaac586de48259a63d0c4782560b, type: 3}
   m_UseUCBPForAssetBundles: 0

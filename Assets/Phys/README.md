@@ -10,12 +10,13 @@ nothing is read back for rendering. See [ALGORITHMS.md](ALGORITHMS.md) for the p
   recording, seven `.compute` files (`Resources/AvbdGpu`).
 * **Reference** (`Phys.AvbdRef`) — line-for-line C# port of `avbd-demo3d` (the test oracle).
 * **Scenes** (`Phys.AvbdGpu.Scenes`) — the 14 reference scenes and 3 GPU benchmark scenes behind an `ISceneBuilder`
-  interface that both solvers implement.
-* **Presentation** (`Phys.AvbdGpu.Presentation`) — `AvbdGpuRenderer`: one instanced draw straight from the solver
-  buffers, GPU-written contact / joint debug lines.
-* **Demo** (`Phys.Demo`) — `Demo.unity`, `DemoBootstrap` (scene keys, HUD, drag, shooting), `DemoCamera`.
-* **Tests** — EditMode: reference behaviour, kernel checks, GPU vs reference comparisons, invariants, performance;
-  PlayMode: demo smoke test.
+  interface that both solvers implement; `BrickCastle`, a castle planned on the stud grid of the construction brick.
+* **Presentation** (`Phys.AvbdGpu.Presentation`) — `AvbdGpuRenderer`: instanced draws straight from the solver buffers
+  (the collision boxes, or any mesh for a range of bodies), per-body tints, shadows, GPU-written contact / joint debug lines.
+* **Demo** (`Phys.Demo`) — `Demo.unity` / `DemoBootstrap` (the catalog scenes) and `Castle.unity` / `CastleDemo` (the brick
+  castle) on the shared `DemoBase` (scene keys, HUD, drag, shooting, player flags), `DemoCamera`.
+* **Tests** — EditMode: reference behaviour, kernel checks, GPU vs reference comparisons, invariants, castle layout,
+  performance; PlayMode: demo and castle smoke tests.
 
 ## Layout
 
@@ -24,11 +25,12 @@ Assets/Phys/AvbdGpu/Runtime            AvbdGpuWorld, AvbdGpuPipeline, AvbdGpuBuf
 Assets/Phys/AvbdGpu/Runtime/Resources  AvbdCommon.hlsl, AvbdUtil, AvbdScan, AvbdBroadphase, AvbdNarrowphase, AvbdConstraints,
                                        AvbdColoring, AvbdSolver, AvbdDebug (.compute)
 Assets/Phys/AvbdGpu/Reference          RefMath, RefBodies, RefJoint (+Spring), RefManifold, RefCollide, RefSolver, RefSceneBuilder
-Assets/Phys/AvbdGpu/Scenes             AvbdScenes (catalog + ISceneBuilder)
-Assets/Phys/AvbdGpu/Presentation       AvbdGpuRenderer, Resources/AvbdGpu/AvbdBox.shader, AvbdLines.shader
-Assets/Phys/AvbdGpu/Tests/Editor       ReferenceTests, GpuKernelTests, GpuVsReferenceTests, InvariantTests, PerformanceTests, DiagnosticTests
-Assets/Phys/AvbdGpu/Tests/Runtime      DemoSmokeTests
-Assets/Phys/Demo                       Demo.unity, DemoBootstrap, DemoCamera, Editor/BuildDemo
+Assets/Phys/AvbdGpu/Scenes             AvbdScenes (catalog + ISceneBuilder), BrickCastle (brick, layout, castle plans, snap joints)
+Assets/Phys/AvbdGpu/Presentation       AvbdGpuRenderer, Resources/AvbdGpu/AvbdBox.shader (+ AvbdBodyInstancing.hlsl), AvbdLines.shader
+Assets/Phys/AvbdGpu/Tests/Editor       ReferenceTests, GpuKernelTests, GpuVsReferenceTests, InvariantTests, BrickCastleTests, PerformanceTests, DiagnosticTests
+Assets/Phys/AvbdGpu/Tests/Runtime      DemoSmokeTests, CastleSmokeTests
+Assets/Phys/Demo                       Demo.unity, Castle.unity, DemoBase, DemoBootstrap, CastleDemo, DemoCamera, Editor/BuildDemo
+Assets/Models/ConstructorBlock2x3      the 2 x 3 construction brick (FBX, Tools/generate_constructor_block.py)
 ```
 
 ## Using the solver
@@ -45,7 +47,9 @@ world.GetPosesSync(out var pos, out var rot);   // synchronous readback (tests, 
 ```
 
 `AvbdScenes.Build(world, AvbdScenes.Pyramid)` builds a catalog scene into any `ISceneBuilder`. Draw with
-`new AvbdGpuRenderer(world).Render()` once per frame.
+`new AvbdGpuRenderer(world).Render()` once per frame; `renderer.MeshRanges` draws a body range with a mesh instead of its
+box (`Mesh`, `Scale`, `Offset` of the model pivot in body space), `renderer.SetTints(rgba, start, count)` colours bodies
+(RGBA8, alpha 0 = hash palette), `renderer.Shadows` casts and receives the main light's shadows.
 
 ## Parameters (`AvbdGpuParams`, defaults = reference)
 
@@ -81,7 +85,34 @@ pyramid 74k), `R` reset, `Space` pause, `N` step, `F1` contact crosses (red slid
 joint (5000 N/m), right drag orbits, middle drag pans, wheel / `Q` `E` zoom, `W A S D` orbit.
 
 Player flags: `-avbd-scene n`, `-avbd-screenshot file [-avbd-frames n]` (screenshot then quit),
-`-avbd-bench [-avbd-frames n]` (average frame time of the second half of the run logged, then quit).
+`-avbd-bench [-avbd-frames n]` (average frame time of the second half of the run logged, then quit),
+`-avbd-yaw deg -avbd-pitch deg -avbd-distance m` (camera).
+
+## Castle demo
+
+`Assets/Phys/Demo/Castle.unity` (`Phys / Build Castle Player`, or `-executeMethod Phys.Demo.Editor.BuildDemo.Build
+-buildScene Castle`) builds a castle out of the construction brick `Assets/Models/ConstructorBlock2x3`: every brick is a box
+body of the solver, drawn with the brick model through `AvbdGpuRenderer.MeshRanges`. Three sizes (`1` `2` `3`: 1 849, 2 771
+and 5 509 bricks), all planned by `BrickCastle` on the stud grid:
+
+* curtain walls five studs thick in English bond (a stretcher row and a header row per course, swapped every course);
+  10 x 10 hollow corner towers and a 14 x 14 (20 x 20) keep whose two course patterns are rotated copies of each other;
+  a six-deep gatehouse whose passage is closed by three corbel courses (every overhanging stretcher keeps two of its
+  three studs supported), with a turret at each end; header merlons on every top; a staircase up the west wall.
+* The brick's studs nest in the hollow underside of the brick above, so the collision box is the body without the
+  studs, made one collision margin (1 cm) taller: resting contacts settle exactly that deep, and the models then stack
+  with no gap and no overlap.
+* `BrickScale` (default 5) is solver metres per model metre and `BrickMass` (1 kg) the mass: at 1 x 0.6 x 1.5 m and
+  1 kg a brick is in the regime the reference's penalty ramp is tuned for (`PenaltyMin` 1, `Beta` 1e4); at the model's
+  true 0.2 x 0.12 x 0.3 m the stacks sink visibly before the penalties catch up. Gravity stays 10 m/s², so the toy moves
+  in slow motion; 240 settle steps run before the castle is shown.
+* `J` snaps the bricks together: four hard ball-socket joints at the inset corners of every brick-on-brick overlap (and
+  of every ground-course footprint, to the world) that break at `SnapFracture` newtons. Jointed bodies do not collide
+  until a joint breaks (the reference's rule), and the angular lock assumes equal orientations, hence four points per
+  overlap rather than one lock.
+
+Keys as the main demo plus `J` snap on/off, `F6` collision boxes, `F7` shadows; `B` / `Enter` fires a 10 kg cannonball.
+Flags: `-avbd-scene 0..2`, `-avbd-snap`, and the screenshot / bench / camera flags above.
 
 ## Measured behaviour
 
@@ -134,6 +165,7 @@ submission).
 .\RunTests.ps1                                  # EditMode + PlayMode (editor must not have the project open)
 .\RunTests.ps1 -Platform EditMode -Filter Phys.AvbdGpu.Tests.GpuVsReferenceTests
 .\RunTests.ps1 -Platform EditMode -Filter Phys.AvbdGpu.Tests.PerformanceTests   # step times (excluded by default)
+.\RunTests.ps1 -Platform PlayMode -Filter Phys.AvbdGpu.Tests.CastleSmokeTests   # the castle stands, cannonball, snap joints
 ```
 
 The runner forces D3D12 (`-GraphicsApi ""` for the editor default). `DiagnosticTests` only log traces and are
