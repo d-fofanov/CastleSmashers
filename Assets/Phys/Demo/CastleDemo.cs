@@ -41,8 +41,8 @@ namespace Phys.Demo
 
         void Reset()
         {
-            StartScene = 1;
-            MaxBodies = 16384;
+            StartScene = 3;
+            MaxBodies = 40960;   // the largest preset has 34 925 bricks
         }
 
         public BrickLayout Layout => m_Layout;
@@ -61,8 +61,9 @@ namespace Phys.Demo
         /// <summary>Same frequency as the reference's 5000 N/m on a 1 kg box.</summary>
         protected override float DragStiffness => 5000f * m_Spec.BrickMass;
         /// <summary>The contact penalties ramp up from their minimum over the first steps and the stacks sink a few centimetres
-        /// meanwhile; settle that before showing the castle.</summary>
-        protected override int SettleSteps => 240;
+        /// meanwhile; settle that before showing the castle (single substeps: nothing moves fast yet).</summary>
+        protected override int SettleSteps => 180;
+        protected override int SettleSubsteps => 1;
 
         protected override AvbdGpuConfig CreateConfig()
         {
@@ -75,7 +76,6 @@ namespace Phys.Demo
         protected override void Configure()
         {
             foreach (var arg in System.Environment.GetCommandLineArgs()) if (arg == "-avbd-snap") Snap = true;
-            m_World.Params.Substeps = 3;                      // the cannonball and its debris travel a fraction of a brick per substep
             m_Renderer.Shadows = Shadows;
             m_Renderer.DrawJoints = false;
 #if UNITY_EDITOR
@@ -110,8 +110,10 @@ namespace Phys.Demo
             if (BrickMesh != null)
                 m_Renderer.MeshRanges.Add(new AvbdGpuRenderer.MeshRange { Mesh = BrickMesh, Scale = BrickScale, Offset = m_Spec.MeshOffset, Start = m_FirstBrick, Count = n });
 
-            cameraTarget = new float3(0f, 1.3f * plan.WallCourses * Brick.BodyHeight * BrickScale, 0f);
-            cameraDistance = 1.7f * plan.Side * Brick.Pitch * BrickScale;
+            // fewer substeps for the big castles: their cannonball crosses a fraction of the wall thickness per step even at one
+            m_World.Params.Substeps = n > 20000 ? 1 : n > 8000 ? 2 : 3;
+            cameraTarget = new float3(0f, 1.2f * plan.WallCourses * Brick.BodyHeight * BrickScale, 0f);
+            cameraDistance = 1.4f * plan.Side * Brick.Pitch * BrickScale;
         }
 
         /// <summary>Stone in three shades, dark slate battlements, sandstone gatehouse, red keep top, wooden stairs.</summary>
@@ -157,7 +159,7 @@ namespace Phys.Demo
                 (Snap ? $"<color=#88ddff>snapped</color>: {m_SnapJoints} joints; a snap breaks at {SnapFractureLateral:F0} N sideways, {SnapFractureTension:F0} N upward or {m_Spec.SnapBreakDistance * 100f:F1} cm apart  -  cannonball {ShotMass:F0} kg\n\n"
                       : $"dry-stacked (friction only)  -  cannonball {ShotMass:F0} kg\n\n") +
                 StatsText() + "\n\n" +
-                "1-3 castle size  , . prev/next  R rebuild  J snap bricks on/off  Space pause  N step  F1 contacts  F2 colour mode  F5 joints  F6 collision boxes  F7 shadows\n" +
+                "1-0 castle size  , . prev/next  R rebuild  J snap bricks on/off  Space pause  N step  F1 contacts  F2 colour mode  F5 joints  F6 collision boxes  F7 shadows\n" +
                 "+/- iterations  [ ] substeps  B/Enter shoot a cannonball  G gravity  H hide HUD  LMB drag brick  RMB orbit  MMB pan  wheel / Q E zoom  W A S D orbit";
         }
     }

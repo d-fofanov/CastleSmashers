@@ -10,11 +10,13 @@ namespace Phys.AvbdGpu.Tests
     public class BrickCastleTests
     {
         [Test]
-        public void EveryPresetGeneratesAndIsSupported([Range(0, 2)] int preset)
+        public void EveryPresetGeneratesAndIsSupported([Range(0, 9)] int preset)
         {
             var plan = CastlePlan.Presets[preset];
             var layout = BrickCastle.Generate(plan);
-            Assert.Greater(layout.Bricks.Count, 500, "brick count");
+            Assert.Greater(layout.Bricks.Count, 900, "brick count");
+            if (preset > 0) Assert.Greater(layout.Bricks.Count, BrickCastle.Generate(CastlePlan.Presets[preset - 1]).Bricks.Count * 1.25f, "each preset is clearly larger than the previous");
+            if (preset == 9) Assert.LessOrEqual(layout.Bricks.Count, 35000, "the largest stays within 35 000 bricks");
             int minX = int.MaxValue, maxX = int.MinValue, minZ = int.MaxValue, maxZ = int.MinValue;
             for (int i = 0; i < layout.Bricks.Count; i++)
             {
@@ -26,21 +28,25 @@ namespace Phys.AvbdGpu.Tests
             }
             Assert.AreEqual(0, minX); Assert.AreEqual(plan.Side, maxX, "footprint width");
             Assert.AreEqual(0, minZ); Assert.AreEqual(plan.Side, maxZ, "footprint depth");
-            Assert.AreEqual(plan.KeepCourses + 1, layout.Layers, "the keep's merlons are the top course");
+            int tallest = math.max(math.max(plan.KeepCourses, plan.TowerCourses), math.max(plan.GateCourses + plan.TurretCourses, plan.WallCourses + plan.MidTowerCourses));
+            Assert.AreEqual(tallest + 1, layout.Layers, "the merlons of the tallest structure are the top course");
             UnityEngine.Debug.Log($"{plan.Name}: {layout.Bricks.Count} bricks, {layout.Layers} courses");
         }
 
         [Test]
-        public void WallsTowersAndGateAreClosed()
+        public void WallsTowersAndGateAreClosed([Values(1, 5, 8)] int preset)
         {
-            var plan = CastlePlan.Presets[1];
+            var plan = CastlePlan.Presets[preset];
             var layout = BrickCastle.Generate(plan);
-            int S = plan.Side, T = BrickCastle.TowerSize, face = BrickCastle.TowerOut;
-            // every course of the curtain walls is full between the towers (the English bond tiles flush)
+            int S = plan.Side, T = plan.TowerSize, face = BrickCastle.TowerOut;
+            // every course of the curtain walls is full between the towers (the English bond tiles flush); a mid tower (a ring
+            // with its own hollow) takes the place of the wall in the middle
+            int m0 = T + (plan.WallLength - plan.MidTowerSize) / 2, m1 = m0 + plan.MidTowerSize;
             for (int layer = 0; layer < plan.WallCourses; layer++)
                 for (int a = T; a < S - T; a++)
-                    for (int d = 0; d < BrickCastle.WallDepth; d++)
+                    for (int d = 0; d < BrickCastle.WallDepth * plan.WallLayers; d++)
                     {
+                        if (plan.MidTowerSize > 0 && a >= m0 && a < m1) continue;
                         Assert.GreaterOrEqual(layout.BrickAt(face + d, a, layer), 0, $"west wall cell ({face + d}, {a}) course {layer}");
                         Assert.GreaterOrEqual(layout.BrickAt(S - face - 1 - d, a, layer), 0, $"east wall cell course {layer}");
                         Assert.GreaterOrEqual(layout.BrickAt(a, S - face - 1 - d, layer), 0, $"back wall cell course {layer}");
@@ -49,12 +55,12 @@ namespace Phys.AvbdGpu.Tests
             int g0 = S / 2 - BrickCastle.GateWidth / 2;
             for (int layer = 0; layer < BrickCastle.GateCourses; layer++)
                 for (int x = g0; x < g0 + BrickCastle.GateWidth; x++)
-                    for (int z = face; z < face + BrickCastle.GateHouseDepth; z++)
+                    for (int z = face; z < face + BrickCastle.GateHouseDepth * plan.GateLayers; z++)
                         Assert.AreEqual(-1, layout.BrickAt(x, z, layer), $"passage cell ({x}, {z}) course {layer} must be free");
             int closed = BrickCastle.GateCourses + BrickCastle.GateWidth / 2;
             for (int layer = closed; layer < plan.GateCourses; layer++)
                 for (int x = (S - BrickCastle.GateHouseWidth) / 2; x < (S + BrickCastle.GateHouseWidth) / 2; x++)
-                    for (int z = face; z < face + BrickCastle.GateHouseDepth; z++)
+                    for (int z = face; z < face + BrickCastle.GateHouseDepth * plan.GateLayers; z++)
                         Assert.GreaterOrEqual(layout.BrickAt(x, z, layer), 0, $"gatehouse cell ({x}, {z}) course {layer} above the arch");
             // tower rings: the hole stays open and the walls are full on both course patterns
             for (int layer = 0; layer < plan.TowerCourses; layer++)

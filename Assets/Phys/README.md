@@ -101,13 +101,31 @@ Player flags: `-avbd-scene n`, `-avbd-screenshot file [-avbd-frames n]` (screens
 
 `Assets/Phys/Demo/Castle.unity` (`Phys / Build Castle Player`, or `-executeMethod Phys.Demo.Editor.BuildDemo.Build
 -buildScene Castle`) builds a castle out of the construction brick `Assets/Models/ConstructorBlock2x3`: every brick is a box
-body of the solver, drawn with the brick model through `AvbdGpuRenderer.MeshRanges`. Three sizes (`1` `2` `3`: 1 849, 2 771
-and 5 509 bricks), all planned by `BrickCastle` on the stud grid:
+body of the solver, drawn with the brick model through `AvbdGpuRenderer.MeshRanges`. Ten castles on keys `1` .. `0`, all
+planned by `BrickCastle` on the stud grid (`CastlePlan.Presets`):
 
-* curtain walls five studs thick in English bond (a stretcher row and a header row per course, swapped every course);
-  10 x 10 hollow corner towers and a 14 x 14 (20 x 20) keep whose two course patterns are rotated copies of each other;
-  a six-deep gatehouse whose passage is closed by three corbel courses (every overhanging stretcher keeps two of its
-  three studs supported), with a turret at each end; header merlons on every top; a staircase up the west wall.
+| Key | Name | Bricks | Side (studs) | Towers | Walls | Gatehouse |
+|---|---|---|---|---|---|---|
+| 1 | Outpost | 1 001 | 38 | 10 x 10, 8 courses | 5 courses | 10 courses |
+| 2 | Fort | 1 346 | 38 | 10 x 10, 11 | 6 | 11 |
+| 3 | Small castle | 2 282 | 50 | 10 x 10, 15 | 8 | 12 |
+| 4 | Castle | 3 386 | 62 | 10 x 10, 19 | 10 | 14 |
+| 5 | Large castle | 4 699 | 74 | 10 x 10, 24 | 12 | 17 |
+| 6 | Fortress | 7 313 | 94 | 14 x 14, 28 | 14, 6 x 6 mid towers | 17 |
+| 7 | Citadel | 10 643 | 106 | 14 x 14, 30 | 12, double, 6 x 6 mid towers | 18 |
+| 8 | Stronghold | 17 129 | 126 | 18 x 18, 36 | 16, double, 18 x 18 bastions | 22, double depth |
+| 9 | Great fortress | 24 733 | 150 | 18 x 18, 42 | 20, double, 18 x 18 bastions | 26, double depth |
+| 0 | Royal citadel | 34 477 | 170 | 22 x 22, 50 | 24, double, 18 x 18 bastions | 30, double depth |
+
+* curtain walls five studs thick in English bond (a stretcher row and a header row per course, swapped every course),
+  doubled side by side in the big plans; hollow corner towers and a keep (rings whose two course patterns are rotated
+  copies of each other); a six-deep gatehouse whose passage is closed by three corbel courses (every overhanging stretcher
+  keeps two of its three studs supported), with a turret at each end; a mid-wall tower or bastion on the plain walls of
+  the larger plans; header merlons on every top; a staircase up the west wall. Dry-stacked structures lean once they
+  are much taller than they are wide, so the plans grow in footprint and thickness rather than height (every
+  free-standing element stays under about 3.5 times its width tall); the substep count drops from 3 to 2 and 1 for the
+  castles above 8 000 and 20 000 bricks. `Tools/castle_counts.py` reproduces the generator's brick counts and the
+  elements' aspect ratios for tuning new plans without Unity.
 * The brick's studs nest in the hollow underside of the brick above, so the collision box is the body without the
   studs, made one collision margin (1 cm) taller: resting contacts settle exactly that deep, and the models then stack
   with no gap and no overlap.
@@ -180,7 +198,7 @@ submission).
 .\RunTests.ps1 -Platform EditMode -Filter Phys.AvbdGpu.Tests.GpuVsReferenceTests
 .\RunTests.ps1 -Platform EditMode -Filter Phys.AvbdGpu.Tests.PerformanceTests   # step times (excluded by default)
 .\RunTests.ps1 -Platform EditMode -Filter Phys.AvbdGpu.Tests.SnapFractureTests  # snap limits, GPU and reference
-.\RunTests.ps1 -Platform PlayMode -Filter Phys.AvbdGpu.Tests.CastleSmokeTests   # the castle stands, cannonball, snaps break
+.\RunTests.ps1 -Platform PlayMode -Filter Phys.AvbdGpu.Tests.CastleSmokeTests   # the smallest and largest castles stand, cannonball, snaps break
 ```
 
 The runner forces D3D12 (`-GraphicsApi ""` for the editor default). `DiagnosticTests` only log traces and are

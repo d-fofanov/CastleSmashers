@@ -451,9 +451,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 9e4b2c7d1a5f4e8b9c3d6a2f7b1e4d58, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  StartScene: 1
+  StartScene: 3
   ShowHud: 1
-  MaxBodies: 16384
+  MaxBodies: 40960
   BrickMesh: {fileID: -7080205770756681836, guid: 2012e6235bc73a94ba974d678510bb2f, type: 3}
   BrickScale: 5
   BrickMass: 1

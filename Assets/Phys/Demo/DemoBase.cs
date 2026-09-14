@@ -65,6 +65,8 @@ namespace Phys.Demo
         protected virtual void OnShot(int body) { }
         /// <summary>Steps run right after a scene is built, before it is shown (lets stacked scenes settle their penalties).</summary>
         protected virtual int SettleSteps => 0;
+        /// <summary>Substeps used for the settle steps (0 = the current parameter).</summary>
+        protected virtual int SettleSubsteps => 0;
 
         void Start()
         {
@@ -106,7 +108,13 @@ namespace Phys.Demo
             m_Renderer.MeshRanges.Clear();
             BuildScene(index, out float3 target, out float distance);
             m_World.Upload();
-            for (int i = 0; i < SettleSteps; i++) m_World.Step();
+            if (SettleSteps > 0)
+            {
+                int substeps = m_World.Params.Substeps;
+                if (SettleSubsteps > 0) m_World.Params.Substeps = SettleSubsteps;
+                for (int i = 0; i < SettleSteps; i++) m_World.Step();
+                m_World.Params.Substeps = substeps;
+            }
             if (m_Camera != null)
             {
                 if (m_Yaw.HasValue) m_Camera.Yaw = m_Yaw.Value;

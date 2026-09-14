@@ -31,7 +31,7 @@ namespace Phys.AvbdGpu.Tests
             light.transform.rotation = Quaternion.Euler(50f, -30f, 0f);
             m_Demo = m_Root.AddComponent<CastleDemo>();
             m_Demo.StartScene = 0;
-            m_Demo.MaxBodies = 8192;
+            m_Demo.MaxBodies = 40960;
 #if UNITY_EDITOR
             m_Demo.BrickMesh = UnityEditor.AssetDatabase.LoadAssetAtPath<Mesh>("Assets/Models/ConstructorBlock2x3/ConstructorBlock2x3.fbx");
 #endif
@@ -77,6 +77,40 @@ namespace Phys.AvbdGpu.Tests
             Debug.Log($"castle of {m_Demo.BrickCount} bricks ({Brick.BodyHeight * m_Demo.Spec.Scale * 1000f:F0} mm tall), worst brick at ({b.X}, {b.Z}) course {b.Layer}, " +
                 $"contacts {stats.Contacts}, colours {stats.ColorsUsed}, step {stats.AvgStepMs:F2} ms\n{log}");
             Assert.Less(maxMove, 0.25f * Brick.BodyHeight * m_Demo.Spec.Scale, "no brick moved more than a quarter of its height: the castle stands");
+        }
+
+        [UnityTest]
+        public IEnumerator LargestCastleStands()
+        {
+            m_Demo.Load(CastlePlan.Presets.Length - 1);
+            Assert.Greater(m_Demo.BrickCount, 30000, "the largest preset");
+            m_Demo.World.GetPosesSync(out var start, out _);
+            float maxMove = 0f, maxDown = 0f, maxSide = 0f;
+            int worst = -1;
+            var log = new System.Text.StringBuilder();
+            AvbdGpuStats stats = default;
+            for (int f = 1; f <= 240; f++)
+            {
+                yield return null;
+                if (f % 60 != 0) continue;
+                m_Demo.World.GetPosesSync(out var pos, out _);
+                stats = m_Demo.World.GetStatsSync();
+                Assert.AreEqual(0, stats.OverflowFlags, $"capacity overflow {stats.OverflowFlags}");
+                maxMove = maxDown = maxSide = 0f;
+                for (int i = m_Demo.FirstBrick; i < m_Demo.FirstBrick + m_Demo.BrickCount; i++)
+                {
+                    Assert.IsTrue(math.all(math.isfinite(pos[i])), $"brick {i} position");
+                    float3 d = pos[i].xyz - start[i].xyz;
+                    maxDown = math.max(maxDown, -d.y);
+                    maxSide = math.max(maxSide, math.length(d.xz));
+                    if (math.length(d) > maxMove) { maxMove = math.length(d); worst = i; }
+                }
+                log.Append($"  frame {f}: max {maxMove * 1000f:F0} mm (down {maxDown * 1000f:F0}, sideways {maxSide * 1000f:F0})");
+            }
+            var b = m_Demo.Layout.Bricks[worst - m_Demo.FirstBrick];
+            Debug.Log($"largest castle: {m_Demo.BrickCount} bricks, {stats.Contacts} contacts, {stats.ColorsUsed} colours, step {stats.AvgStepMs:F2} ms; " +
+                $"worst brick at ({b.X}, {b.Z}) course {b.Layer}\n{log}");
+            Assert.Less(maxSide, 0.5f * Brick.BodyHeight * m_Demo.Spec.Scale, "nothing slid or toppled: the largest castle stands");
         }
 
         [UnityTest]
