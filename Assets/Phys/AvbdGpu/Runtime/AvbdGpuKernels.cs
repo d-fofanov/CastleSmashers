@@ -8,13 +8,13 @@ namespace Phys.AvbdGpu
     {
         public readonly ComputeShader Util, Scan, Broadphase, Narrowphase, Constraints, Coloring, Solver;
 
-        public readonly int BuildArgs, HashClear, CopyStats, ClearUints;
+        public readonly int BuildArgs, HashClear, CopyStats, ClearUints, SpawnBodies;
         public readonly int ScanBlock, ScanTop, ScanAdd;
         public readonly int BodyAabb, GridClear, GridCount, GridScatter, GridSortCell, LargeSort, PairGen;
         public readonly int Collide;
         public readonly int PrepareJoints, ConsClear, ConsCount, ConsFill, ConsSort;
         public readonly int ColorInvalidate, ColorRound, ColorFinalize, ColorScan, ColorScatter;
-        public readonly int Predict, Primal, CommitOverflow, Dual, Velocity;
+        public readonly int DriveKinematic, Predict, Primal, CommitOverflow, Dual, Velocity;
 
         public static bool Supported => SystemInfo.supportsComputeShaders;
 
@@ -32,6 +32,7 @@ namespace Phys.AvbdGpu
             HashClear = Util.FindKernel("HashClear");
             CopyStats = Util.FindKernel("CopyStats");
             ClearUints = Util.FindKernel("ClearUints");
+            SpawnBodies = Util.FindKernel("SpawnBodies");
             ScanBlock = Scan.FindKernel("ScanBlock");
             ScanTop = Scan.FindKernel("ScanTop");
             ScanAdd = Scan.FindKernel("ScanAdd");
@@ -53,6 +54,7 @@ namespace Phys.AvbdGpu
             ColorFinalize = Coloring.FindKernel("ColorFinalize");
             ColorScan = Coloring.FindKernel("ColorScan");
             ColorScatter = Coloring.FindKernel("ColorScatter");
+            DriveKinematic = Solver.FindKernel("DriveKinematic");
             Predict = Solver.FindKernel("Predict");
             Primal = Solver.FindKernel("Primal");
             CommitOverflow = Solver.FindKernel("CommitOverflow");

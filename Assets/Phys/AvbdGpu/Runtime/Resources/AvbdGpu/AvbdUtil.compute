@@ -1,8 +1,10 @@
-// Bookkeeping kernels: indirect dispatch arguments from CPU counts / GPU counters, counter reset, hash clear, stats copy.
+// Bookkeeping kernels: indirect dispatch arguments from CPU counts / GPU counters, counter reset, hash clear, stats copy,
+// spawning bodies into retired slots.
 #pragma kernel BuildArgs
 #pragma kernel HashClear
 #pragma kernel CopyStats
 #pragma kernel ClearUints
+#pragma kernel SpawnBodies
 
 #include "AvbdCommon.hlsl"
 
@@ -11,8 +13,17 @@ RWStructuredBuffer<uint> _Stats;
 RWByteAddressBuffer _DispatchArgs;
 RWStructuredBuffer<uint> _HashCur;
 RWStructuredBuffer<uint> _ClearTarget;
+StructuredBuffer<SpawnRecord> _SpawnRecords;
+RWStructuredBuffer<float4> _BodyPos;
+RWStructuredBuffer<float4> _BodyRot;
+RWStructuredBuffer<float4> _BodyVelLin;
+RWStructuredBuffer<float4> _BodyVelAng;
+RWStructuredBuffer<float4> _BodyPrevVelLin;
+RWStructuredBuffer<uint> _BodyColor;
+RWStructuredBuffer<uint> _BodyEvents;
 int _Phase;
 int _ClearCount;
+int _SpawnCount;
 
 uint groups(uint n) { return (n + AVBD_THREADS - 1) / AVBD_THREADS; }
 
@@ -67,4 +78,21 @@ void ClearUints(uint3 id : SV_DispatchThreadID)
 void CopyStats(uint3 id : SV_DispatchThreadID)
 {
     if (id.x < CNT_COUNT) _Stats[id.x] = _Counters[id.x];
+}
+
+// Writes the GPU-owned state of spawned bodies (pose, velocities, colour, events); the definition and the drive are
+// uploaded by the CPU. Runs between steps, so a slot retired in an earlier step has no manifold left to warm start from.
+[numthreads(AVBD_THREADS, 1, 1)]
+void SpawnBodies(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= (uint)_SpawnCount) return;
+    SpawnRecord r = _SpawnRecords[id.x];
+    uint i = r.slot;
+    _BodyPos[i] = float4(r.pos.xyz, 0);
+    _BodyRot[i] = r.rot;
+    _BodyVelLin[i] = float4(r.vel.xyz, 0);
+    _BodyPrevVelLin[i] = float4(r.vel.xyz, 0);
+    _BodyVelAng[i] = 0;
+    _BodyColor[i] = UNCOLORED;
+    _BodyEvents[i] = 0;
 }

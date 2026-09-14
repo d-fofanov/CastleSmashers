@@ -104,9 +104,9 @@ namespace Phys.AvbdGpu
 
             // ---------------------------------------------------------------- narrowphase bindings
             BindAll(k.Narrowphase, k.Collide,
-                ("_BodyDef", b.BodyDef), ("_BodyPos", b.BodyPos), ("_BodyRot", b.BodyRot), ("_Pairs", b.Pairs), ("_Counters", b.Counters),
+                ("_BodyDef", b.BodyDef), ("_BodyPos", b.BodyPos), ("_BodyRot", b.BodyRot), ("_BodyVelLin", b.BodyVelLin), ("_Pairs", b.Pairs), ("_Counters", b.Counters),
                 ("_ManifoldPrev", b.ManifoldPrev), ("_ContactsPrev", b.ContactsPrev), ("_HashPrev", b.HashPrev),
-                ("_ManifoldCur", b.ManifoldCur), ("_ContactsCur", b.ContactsCur), ("_HashCur", b.HashCur));
+                ("_ManifoldCur", b.ManifoldCur), ("_ContactsCur", b.ContactsCur), ("_HashCur", b.HashCur), ("_BodyEvents", b.BodyEvents));
 
             // ---------------------------------------------------------------- constraint bindings
             foreach (int kk in new[] { k.PrepareJoints, k.ConsClear, k.ConsCount, k.ConsFill, k.ConsSort })
@@ -125,7 +125,7 @@ namespace Phys.AvbdGpu
                     ("_Counters", b.Counters), ("_DispatchArgs", b.DispatchArgs));
 
             // ---------------------------------------------------------------- solver bindings
-            foreach (int kk in new[] { k.Predict, k.Primal, k.CommitOverflow, k.Dual, k.Velocity })
+            foreach (int kk in new[] { k.DriveKinematic, k.Predict, k.Primal, k.CommitOverflow, k.Dual, k.Velocity })
                 BindAll(k.Solver, kk,
                     ("_BodyDef", b.BodyDef), ("_BodyPos", b.BodyPos), ("_BodyRot", b.BodyRot), ("_BodyPosNew", b.BodyPosNew), ("_BodyRotNew", b.BodyRotNew),
                     ("_BodyInitialLin", b.BodyInitialLin), ("_BodyInitialAng", b.BodyInitialAng),
@@ -137,7 +137,8 @@ namespace Phys.AvbdGpu
                     ("_BodyConsStart", b.BodyConsStart), ("_BodyConsList", b.BodyConsList),
                     ("_ColorStart", b.ColorStart), ("_ColorList", b.ColorList),
                     ("_ManifoldCur", b.ManifoldCur), ("_ContactsCur", b.ContactsCur), ("_ContactsCurRW", b.ContactsCur),
-                    ("_JointDef", b.JointDef), ("_JointState", b.JointState), ("_JointStateRW", b.JointState), ("_SpringDef", b.SpringDef), ("_Counters", b.Counters));
+                    ("_JointDef", b.JointDef), ("_JointState", b.JointState), ("_JointStateRW", b.JointState), ("_SpringDef", b.SpringDef), ("_Counters", b.Counters),
+                    ("_BodyDrive", b.BodyDrive));
 
             // ================================================================ step
             cb.BeginSample("AVBD broadphase");
@@ -145,6 +146,7 @@ namespace Phys.AvbdGpu
             Direct(k.Util, k.BuildArgs, 1);
             Direct(k.Util, k.HashClear, Groups(cfg.HashSize));
 
+            Indirect(k.Solver, k.DriveKinematic, ArgBodies);   // heading / velocity-aligned orientations before the contacts are found
             Indirect(k.Broadphase, k.BodyAabb, ArgBodies);
             Direct(k.Broadphase, k.GridClear, Groups(cfg.CellCount));
             Indirect(k.Broadphase, k.GridCount, ArgBodies);

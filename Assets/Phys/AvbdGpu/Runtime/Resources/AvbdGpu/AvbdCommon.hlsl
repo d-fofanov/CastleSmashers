@@ -16,6 +16,35 @@
 #define MAX_COLORS 32
 #define UNCOLORED 0xFFFFFFFFu
 #define STATIC_COLOR 0xFFFFFFFEu
+#define ALIGN_MIN_SPEED 1.0     // below this speed an align-to-velocity body keeps its orientation (a stuck arrow)
+#define HIT_MIN_SPEED 2.0       // a projectile slower than this does not count as a hit in the event words
+
+// Body flags (BodyDef.flags, mirrored by GpuBodyDef).
+#define FLAG_STATIC 1u
+#define FLAG_LOCK_ROTATION 2u   // the angular degrees of freedom are frozen (3x3 primal solve, no angular velocity)
+#define FLAG_HEADING 4u         // locked rotation set to the drive's yaw about +y at the start of every step
+#define FLAG_ALIGN_VELOCITY 8u  // locked rotation set to point the body's +z along its velocity (arrows)
+#define FLAG_DEAD 16u           // retired slot: no collisions, no update, not drawn; reused by a later spawn
+#define FLAG_REPORT_EVENTS 32u  // the narrowphase records the kinds of bodies this one touches in _BodyEvents
+#define FLAG_DRIVEN 64u         // the body has a BodyDrive record (external force or motor)
+#define KIND_SHIFT 8            // bits 8-9: 0 plain, 1 unit, 2 projectile (event attribution only)
+#define KIND_MASK (3u << KIND_SHIFT)
+#define KIND_UNIT 1u
+#define KIND_PROJECTILE 2u
+#define bodyKind(f) (((f) & KIND_MASK) >> KIND_SHIFT)
+
+// Drive modes (BodyDrive.mode).
+#define DRIVE_NONE 0u
+#define DRIVE_FORCE 1u          // constant world-space force
+#define DRIVE_TO_POINT 2u       // force of constant magnitude towards a fixed point
+#define DRIVE_MOTOR 3u          // force towards a target velocity on the masked axes, capped
+
+// Event bits (_BodyEvents, sticky until the slot is respawned): kinds touched, then the number of new manifolds with projectiles.
+#define EVENT_TOUCH_STATIC 1u
+#define EVENT_TOUCH_BODY 2u
+#define EVENT_TOUCH_UNIT 4u
+#define EVENT_TOUCH_PROJECTILE 8u
+#define EVENT_HITS_SHIFT 8
 
 // Constraint reference packing (per-body CSR lists): type in the top 2 bits, index below.
 #define CONS_MANIFOLD 0u
@@ -54,8 +83,30 @@ struct BodyDef
     float3 moment;      // body-frame diagonal inertia
     float friction;
     float radius;       // bounding sphere
-    uint flags;         // bit 0: static
+    uint flags;         // FLAG_*, KIND_*
     float pad0, pad1;
+};
+
+// External drive of a body (FLAG_DRIVEN), applied as an acceleration of the inertial pose in Predict.
+struct BodyDrive
+{
+    float3 target;      // FORCE: force (N); TO_POINT: the point; MOTOR: target velocity (m/s)
+    uint mode;          // DRIVE_*
+    float3 mask;        // MOTOR: axes the motor acts on (1 / 0)
+    float limit;        // TO_POINT: force magnitude (N); MOTOR: force cap (N)
+    float yaw;          // FLAG_HEADING: heading about +y (rad), applied kinematically at the start of the step
+    float pad0, pad1, pad2;
+};
+
+// A body spawned into a retired slot: the GPU-owned state is written by the SpawnBodies kernel (the definition and the
+// drive are uploaded by the CPU).
+struct SpawnRecord
+{
+    uint slot;
+    uint pad0, pad1, pad2;
+    float4 pos;
+    float4 rot;
+    float4 vel;
 };
 
 struct Manifold
@@ -267,6 +318,68 @@ void solve6(float3x3 aLin, float3x3 aAng, float3x3 aCross, float3 bLin, float3 b
     xLin.x = z1 - L21 * xLin.y - L31 * xLin.z - L41 * xAng.x - L51 * xAng.y - L61 * xAng.z;
 }
 
+// 3x3 LDL^T solve of the SPD system a x = b: the linear block alone, for bodies with locked rotation (the angular inertia is
+// infinite, so the angular update vanishes and the cross terms drop out).
+float3 solve3(float3x3 a, float3 b)
+{
+    float D1 = a[0][0];
+    float L21 = a[1][0] / D1;
+    float L31 = a[2][0] / D1;
+    float D2 = a[1][1] - L21 * L21 * D1;
+    float L32 = (a[2][1] - L21 * L31 * D1) / D2;
+    float D3 = a[2][2] - (L31 * L31 * D1 + L32 * L32 * D2);
+    float y1 = b.x;
+    float y2 = b.y - L21 * y1;
+    float y3 = b.z - L31 * y1 - L32 * y2;
+    float3 x;
+    x.z = y3 / D3;
+    x.y = y2 / D2 - L32 * x.z;
+    x.x = y1 / D1 - L21 * x.y - L31 * x.z;
+    return x;
+}
+
+// Rotation about +y (heading).
+float4 qyaw(float yaw) { return float4(0, sin(yaw * 0.5), 0, cos(yaw * 0.5)); }
+
+// Orientation whose +z is forward and whose +y is as close to up as possible (Unity's LookRotation): the rotation matrix
+// with columns (right, up, forward) converted to a quaternion.
+float4 qlook(float3 forward, float3 up)
+{
+    float3 f = normalize(forward);
+    float3 r = cross(up, f);
+    float rl = length(r);
+    if (rl < 1.0e-4) { up = abs(f.y) < 0.9 ? float3(0, 1, 0) : float3(0, 0, 1); r = cross(up, f); rl = length(r); }
+    r /= rl;
+    float3 u = cross(f, r);
+    // matrix elements m[row][col], columns r, u, f
+    float m00 = r.x, m01 = u.x, m02 = f.x;
+    float m10 = r.y, m11 = u.y, m12 = f.y;
+    float m20 = r.z, m21 = u.z, m22 = f.z;
+    float trace = m00 + m11 + m22;
+    float4 q;
+    if (trace > 0.0)
+    {
+        float s = sqrt(trace + 1.0) * 2.0;
+        q = float4((m21 - m12) / s, (m02 - m20) / s, (m10 - m01) / s, 0.25 * s);
+    }
+    else if (m00 > m11 && m00 > m22)
+    {
+        float s = sqrt(1.0 + m00 - m11 - m22) * 2.0;
+        q = float4(0.25 * s, (m01 + m10) / s, (m02 + m20) / s, (m21 - m12) / s);
+    }
+    else if (m11 > m22)
+    {
+        float s = sqrt(1.0 + m11 - m00 - m22) * 2.0;
+        q = float4((m01 + m10) / s, 0.25 * s, (m12 + m21) / s, (m02 - m20) / s);
+    }
+    else
+    {
+        float s = sqrt(1.0 + m22 - m00 - m11) * 2.0;
+        q = float4((m02 + m20) / s, (m12 + m21) / s, 0.25 * s, (m10 - m01) / s);
+    }
+    return normalize(q);
+}
+
 // ------------------------------------------------------------------------------------------------ hashing
 
 uint wangHash(uint s)
@@ -299,6 +412,9 @@ bool higherPriority(uint i, uint j)
     return hi != hj ? hi > hj : i > j;
 }
 
-bool isStatic(BodyDef d) { return d.mass <= 0.0; }
+// Static bodies and retired (dead) slots take no part in the solve.
+bool isStatic(BodyDef d) { return d.mass <= 0.0 || (d.flags & FLAG_DEAD) != 0; }
+bool isDead(BodyDef d) { return (d.flags & FLAG_DEAD) != 0; }
+bool lockedRotation(BodyDef d) { return (d.flags & (FLAG_LOCK_ROTATION | FLAG_HEADING | FLAG_ALIGN_VELOCITY)) != 0; }
 
 #endif

@@ -19,6 +19,7 @@
 StructuredBuffer<BodyDef> _BodyDef;
 StructuredBuffer<float4> _BodyPos;
 StructuredBuffer<float4> _BodyRot;
+StructuredBuffer<float4> _BodyVelLin;      // hit reporting: a projectile only counts when it is moving
 StructuredBuffer<uint2> _Pairs;
 RWStructuredBuffer<uint> _Counters;
 StructuredBuffer<Manifold> _ManifoldPrev;
@@ -27,6 +28,7 @@ StructuredBuffer<uint> _HashPrev;
 RWStructuredBuffer<Manifold> _ManifoldCur;
 RWStructuredBuffer<Contact> _ContactsCur;
 RWStructuredBuffer<uint> _HashCur;
+RWStructuredBuffer<uint> _BodyEvents;      // FLAG_REPORT_EVENTS bodies: kinds touched, count of new projectile manifolds
 
 // Per-thread scratch in group shared memory: FXC cannot dynamically index register arrays with data-dependent
 // trip counts, group shared memory can be indexed freely. Two clip polygons and the contact set per thread.
@@ -401,6 +403,22 @@ int collide(uint t, OBB boxA, OBB boxB, out float3x3 basisOut)
     return count;
 }
 
+// Records in body's event word which kind of body it touches; a manifold that did not exist last step counts as a hit
+// when the other body is a projectile moving faster than HIT_MIN_SPEED (a spent arrow lying about hurts nobody).
+// Or / Add only, so the result does not depend on the thread order.
+void reportContact(uint body, BodyDef d, uint otherIndex, BodyDef other, bool newManifold)
+{
+    if ((d.flags & FLAG_REPORT_EVENTS) == 0) return;
+    uint dummy;
+    uint bit = isStatic(other) ? EVENT_TOUCH_STATIC : EVENT_TOUCH_BODY << bodyKind(other.flags);
+    InterlockedOr(_BodyEvents[body], bit, dummy);
+    if (newManifold && bodyKind(other.flags) == KIND_PROJECTILE)
+    {
+        float3 v = _BodyVelLin[otherIndex].xyz;
+        if (dot(v, v) >= HIT_MIN_SPEED * HIT_MIN_SPEED) InterlockedAdd(_BodyEvents[body], 1u << EVENT_HITS_SHIFT, dummy);
+    }
+}
+
 // Previous step's manifold index for the pair, or -1
 int findPrevManifold(uint a, uint b)
 {
@@ -444,6 +462,8 @@ void Collide(uint3 id : SV_DispatchThreadID, uint3 gtid : SV_GroupThreadID)
     Manifold pm = (Manifold)0;
     if (prev >= 0) pm = _ManifoldPrev[prev];
     float4 invA = qconj(rotA), invB = qconj(rotB);
+    reportContact(a, dA, b, dB, prev < 0);
+    reportContact(b, dB, a, dA, prev < 0);
 
     [loop]
     for (int i = 0; i < n; i++)

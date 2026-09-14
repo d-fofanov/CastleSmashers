@@ -13,11 +13,72 @@ namespace Phys.AvbdGpu
         public float3 Moment;    // body-frame diagonal inertia
         public float Friction;
         public float Radius;
-        public uint Flags;       // bit 0: static
+        public uint Flags;       // Flag* bits and the Kind field
         public float Pad0, Pad1;
         public const int Stride = 48;
         public const uint FlagStatic = 1;
-        public bool IsStatic => Mass <= 0f;
+        /// <summary>The angular degrees of freedom are frozen: 3x3 primal solve, no angular velocity.</summary>
+        public const uint FlagLockRotation = 2;
+        /// <summary>Locked rotation set to the drive's yaw about +y at the start of every step (units).</summary>
+        public const uint FlagHeading = 4;
+        /// <summary>Locked rotation set to point the body's +z along its velocity while it moves faster than 1 m/s (arrows).</summary>
+        public const uint FlagAlignVelocity = 8;
+        /// <summary>Retired slot: no collisions, no update, not drawn; reused by a later spawn.</summary>
+        public const uint FlagDead = 16;
+        /// <summary>The narrowphase records the kinds of bodies this one touches (see <see cref="GpuBodyEvents"/>).</summary>
+        public const uint FlagReportEvents = 32;
+        /// <summary>The body has a <see cref="GpuBodyDrive"/> record.</summary>
+        public const uint FlagDriven = 64;
+        public const int KindShift = 8;
+        public const uint KindMask = 3u << KindShift;
+        public const uint KindPlain = 0, KindUnit = 1, KindProjectile = 2;
+        public static uint Kind(uint kind) => (kind << KindShift) & KindMask;
+        public bool IsStatic => Mass <= 0f || IsDead;
+        public bool IsDead => (Flags & FlagDead) != 0;
+        public uint KindOf => (Flags & KindMask) >> KindShift;
+    }
+
+    /// <summary>External drive of a body (<see cref="GpuBodyDef.FlagDriven"/>): an acceleration of its inertial pose like gravity.
+    /// The motor is a proportional controller with gain m / dt (capped), so under a steady load F it runs F dt / m below its target.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GpuBodyDrive
+    {
+        /// <summary>Force (N) for <see cref="Force"/>, the point for <see cref="ToPoint"/>, target velocity (m/s) for <see cref="Motor"/>.</summary>
+        public float3 Target;
+        public uint Mode;
+        /// <summary>Motor: the axes it acts on (1 / 0).</summary>
+        public float3 Mask;
+        /// <summary>ToPoint: force magnitude (N); Motor: force cap (N).</summary>
+        public float Limit;
+        /// <summary>Heading about +y (rad) for <see cref="GpuBodyDef.FlagHeading"/> bodies.</summary>
+        public float Yaw;
+        public float Pad0, Pad1, Pad2;
+        public const int Stride = 48;
+        public const uint None = 0, Force = 1, ToPoint = 2, Motor = 3;
+
+        public static GpuBodyDrive ConstantForce(float3 force) => new GpuBodyDrive { Mode = Force, Target = force };
+        public static GpuBodyDrive TowardsPoint(float3 point, float magnitude) => new GpuBodyDrive { Mode = ToPoint, Target = point, Limit = magnitude };
+        public static GpuBodyDrive Velocity(float3 target, float maxForce, float3 mask, float yaw = 0f) =>
+            new GpuBodyDrive { Mode = Motor, Target = target, Limit = maxForce, Mask = mask, Yaw = yaw };
+    }
+
+    /// <summary>Decoding of a body's event word (sticky until the slot is respawned).</summary>
+    public static class GpuBodyEvents
+    {
+        public const uint TouchStatic = 1, TouchBody = 2, TouchUnit = 4, TouchProjectile = 8;
+        public const int HitsShift = 8;
+        public static bool Touched(uint e) => (e & 0xFFu) != 0;
+        /// <summary>Number of manifolds with projectiles moving faster than 2 m/s that appeared (impacts).</summary>
+        public static int Hits(uint e) => (int)(e >> HitsShift);
+    }
+
+    /// <summary>A body spawned into a retired slot (SpawnBodies kernel); the definition and drive are uploaded separately.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GpuSpawnRecord
+    {
+        public uint Slot, Pad0, Pad1, Pad2;
+        public float4 Pos, Rot, Vel;
+        public const int Stride = 64;
     }
 
     [StructLayout(LayoutKind.Sequential)]

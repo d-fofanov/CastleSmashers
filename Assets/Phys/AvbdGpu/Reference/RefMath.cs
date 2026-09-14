@@ -162,6 +162,25 @@ namespace Phys.AvbdRef
 
         public static Mat3 Diagonalize(Mat3 m) => Diagonal(math.length(m.Col(0)), math.length(m.Col(1)), math.length(m.Col(2)));
 
+        /// <summary>3x3 LDL^T solve of the SPD system a x = b (the linear block alone, for bodies with locked rotation).</summary>
+        public static float3 Solve3(Mat3 a, float3 b)
+        {
+            float D1 = a[0][0];
+            float L21 = a[1][0] / D1;
+            float L31 = a[2][0] / D1;
+            float D2 = a[1][1] - L21 * L21 * D1;
+            float L32 = (a[2][1] - L21 * L31 * D1) / D2;
+            float D3 = a[2][2] - (L31 * L31 * D1 + L32 * L32 * D2);
+            float y1 = b.x;
+            float y2 = b.y - L21 * y1;
+            float y3 = b.z - L31 * y1 - L32 * y2;
+            float3 x = default;
+            x.z = y3 / D3;
+            x.y = y2 / D2 - L32 * x.z;
+            x.x = y1 / D1 - L21 * x.y - L31 * x.z;
+            return x;
+        }
+
         /// <summary>6x6 LDL^T solve of the SPD block system [aLin aCross^T; aCross aAng] x = b.</summary>
         public static void Solve(Mat3 aLin, Mat3 aAng, Mat3 aCross, float3 bLin, float3 bAng, out float3 xLin, out float3 xAng)
         {

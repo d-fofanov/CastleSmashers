@@ -51,10 +51,16 @@ namespace Phys.AvbdGpu
 
         // CPU staging (capacity sized)
         readonly GpuBodyDef[] m_BodyDefs;
+        readonly GpuBodyDrive[] m_Drives;
         readonly float4[] m_Pos, m_Rot, m_Vel;
-        readonly uint[] m_Uncolored;
+        readonly uint[] m_Uncolored, m_ZeroUints;
         int m_BodyCount, m_UploadedBodies;
         double m_ExtentSum; int m_ExtentCount;
+        // definitions and drives are CPU-owned: changes to uploaded bodies are re-sent as one range each
+        int m_DirtyDefMin = int.MaxValue, m_DirtyDefMax = -1, m_DirtyDriveMin = int.MaxValue, m_DirtyDriveMax = -1;
+        readonly List<GpuSpawnRecord> m_SpawnQueue = new List<GpuSpawnRecord>();
+        readonly GpuSpawnRecord[] m_SpawnChunk;
+        static readonly int s_SpawnCount = Shader.PropertyToID("_SpawnCount");
 
         readonly GpuJointDef[] m_JointDefs;
         readonly GpuJointState[] m_ZeroJointStates;
@@ -81,8 +87,14 @@ namespace Phys.AvbdGpu
         double m_StepMsSum; int m_StepCount;
         public bool ReadbackPoses;
         float4[] m_PosRead, m_RotRead;
-        int m_PosReadCount;
+        int m_PosReadCount, m_PosReadStep = -1, m_PosRequestStep;
         bool m_PoseRequestPending, m_StatsRequestPending;
+        /// <summary>Body ranges whose event words are read back asynchronously every step (the unit and projectile pools).</summary>
+        public readonly List<(int start, int count)> EventRanges = new List<(int, int)>();
+        uint[] m_EventsRead;
+        int m_EventRequestsPending;
+        /// <summary>Incremented when a full set of event ranges has arrived.</summary>
+        public int EventsFrame { get; private set; }
 
         public int BodyCount => m_BodyCount;
         public int JointCount => m_JointCount;
@@ -100,11 +112,15 @@ namespace Phys.AvbdGpu
             m_Pipeline = new AvbdGpuPipeline(Kernels, Buffers);
 
             m_BodyDefs = new GpuBodyDef[config.MaxBodies];
+            m_Drives = new GpuBodyDrive[config.MaxBodies];
             m_Pos = new float4[config.MaxBodies];
             m_Rot = new float4[config.MaxBodies];
             m_Vel = new float4[config.MaxBodies];
             m_Uncolored = new uint[config.MaxBodies];
+            m_ZeroUints = new uint[config.MaxBodies];
             for (int i = 0; i < m_Uncolored.Length; i++) m_Uncolored[i] = 0xFFFFFFFFu;
+            m_SpawnChunk = new GpuSpawnRecord[math.max(config.MaxSpawns, 1)];
+            m_EventsRead = new uint[config.MaxBodies];
             m_JointDefs = new GpuJointDef[config.MaxJoints];
             m_ZeroJointStates = new GpuJointState[config.MaxJoints];
             m_SpringDefs = new GpuSpringDef[config.MaxSprings];
@@ -124,9 +140,28 @@ namespace Phys.AvbdGpu
 
         public int AddBody(float3 size, float density, float friction, float3 position, quaternion rotation, float3 velocity)
         {
+            return AddBody(size, density, friction, position, rotation, velocity, 0u);
+        }
+
+        /// <summary>Adds a box with the given <see cref="GpuBodyDef"/> flags (rotation lock, heading, events, kind, ...) and drive.</summary>
+        public int AddBody(float3 size, float density, float friction, float3 position, quaternion rotation, float3 velocity, uint flags, GpuBodyDrive drive = default)
+        {
             if (m_BodyCount >= Config.MaxBodies) throw new InvalidOperationException($"AvbdGpuWorld: body capacity {Config.MaxBodies} exceeded");
+            int i = m_BodyCount++;
+            m_BodyDefs[i] = MakeDef(size, density, friction, flags);
+            m_Drives[i] = drive;
+            m_Pos[i] = new float4(position, 0);
+            m_Rot[i] = rotation.value;
+            m_Vel[i] = new float4(velocity, 0);
+            if (m_BodyDefs[i].Mass > 0f) { m_ExtentSum += math.cmax(size); m_ExtentCount++; }
+            return i;
+        }
+
+        static GpuBodyDef MakeDef(float3 size, float density, float friction, uint flags)
+        {
             float mass = size.x * size.y * size.z * density;
-            var def = new GpuBodyDef
+            if (mass <= 0f) flags |= GpuBodyDef.FlagStatic;
+            return new GpuBodyDef
             {
                 Size = size,
                 Mass = mass,
@@ -136,15 +171,93 @@ namespace Phys.AvbdGpu
                     (size.x * size.x + size.y * size.y) / 12.0f * mass),
                 Friction = friction,
                 Radius = math.length(size * 0.5f),
-                Flags = mass <= 0f ? GpuBodyDef.FlagStatic : 0u,
+                Flags = flags,
             };
-            int i = m_BodyCount++;
-            m_BodyDefs[i] = def;
-            m_Pos[i] = new float4(position, 0);
-            m_Rot[i] = rotation.value;
-            m_Vel[i] = new float4(velocity, 0);
-            if (mass > 0f) { m_ExtentSum += math.cmax(size); m_ExtentCount++; }
-            return i;
+        }
+
+        // ------------------------------------------------------------------------------------------------ body pools
+
+        /// <summary>Appends <paramref name="count"/> retired (dead) slots and returns the first index: a contiguous pool that
+        /// <see cref="SpawnBody"/> fills and <see cref="RetireBody"/> empties without changing any other body's index.</summary>
+        public int ReserveBodies(int count)
+        {
+            if (m_BodyCount + count > Config.MaxBodies) throw new InvalidOperationException($"AvbdGpuWorld: body capacity {Config.MaxBodies} exceeded");
+            int first = m_BodyCount;
+            for (int i = 0; i < count; i++)
+            {
+                int slot = m_BodyCount++;
+                m_BodyDefs[slot] = MakeDef(new float3(1, 1, 1), 1f, 0.5f, GpuBodyDef.FlagDead);
+                m_Drives[slot] = default;
+                m_Pos[slot] = float4.zero;
+                m_Rot[slot] = quaternion.identity.value;
+                m_Vel[slot] = float4.zero;
+            }
+            return first;
+        }
+
+        /// <summary>Brings a retired slot back to life as a new box. The GPU-owned state (pose, velocities, colour, events) is
+        /// written by a kernel before the next step; a slot must not be respawned in the step it was retired in (see
+        /// <see cref="BodyPool"/>), so that no manifold of the old body is warm started. Pool bodies do not enter the
+        /// automatic cell size.</summary>
+        public void SpawnBody(int slot, float3 size, float density, float friction, float3 position, quaternion rotation, float3 velocity, uint flags, GpuBodyDrive drive = default)
+        {
+            if (slot < 0 || slot >= m_BodyCount) throw new ArgumentOutOfRangeException(nameof(slot));
+            if (!m_BodyDefs[slot].IsDead) throw new InvalidOperationException($"AvbdGpuWorld: body {slot} is alive");
+            m_BodyDefs[slot] = MakeDef(size, density, friction, flags & ~GpuBodyDef.FlagDead);
+            m_Drives[slot] = drive;
+            m_Pos[slot] = new float4(position, 0);
+            m_Rot[slot] = rotation.value;
+            m_Vel[slot] = new float4(velocity, 0);
+            MarkDef(slot);
+            MarkDrive(slot);
+            if (slot < m_UploadedBodies)
+                m_SpawnQueue.Add(new GpuSpawnRecord { Slot = (uint)slot, Pos = m_Pos[slot], Rot = m_Rot[slot], Vel = m_Vel[slot] });
+        }
+
+        /// <summary>Retires a body: it stops colliding, moving and drawing, and its slot can be spawned into after the next step.
+        /// Joints, springs and links on the body must have been removed.</summary>
+        public void RetireBody(int slot)
+        {
+            if (m_BodyDefs[slot].IsDead) return;
+            for (int i = 0; i < m_Links.Count; i++)
+                if (m_Links[i].a == slot) throw new InvalidOperationException($"AvbdGpuWorld: body {slot} still has a joint, spring or link");
+            m_BodyDefs[slot].Flags |= GpuBodyDef.FlagDead;
+            m_SpawnQueue.RemoveAll(r => r.Slot == (uint)slot);
+            MarkDef(slot);
+        }
+
+        public bool IsAlive(int slot) => !m_BodyDefs[slot].IsDead;
+        public uint GetBodyFlags(int slot) => m_BodyDefs[slot].Flags;
+
+        /// <summary>Replaces the flags of a body (the static and dead bits are kept as they are).</summary>
+        public void SetBodyFlags(int slot, uint flags)
+        {
+            const uint keep = GpuBodyDef.FlagStatic | GpuBodyDef.FlagDead;
+            m_BodyDefs[slot].Flags = (m_BodyDefs[slot].Flags & keep) | (flags & ~keep);
+            MarkDef(slot);
+        }
+
+        public GpuBodyDrive GetBodyDrive(int slot) => m_Drives[slot];
+
+        /// <summary>Sets the drive of a body; the body needs <see cref="GpuBodyDef.FlagDriven"/> for it to act.</summary>
+        public void SetBodyDrive(int slot, in GpuBodyDrive drive)
+        {
+            m_Drives[slot] = drive;
+            MarkDrive(slot);
+        }
+
+        void MarkDef(int slot)
+        {
+            if (slot >= m_UploadedBodies) return;
+            m_DirtyDefMin = math.min(m_DirtyDefMin, slot);
+            m_DirtyDefMax = math.max(m_DirtyDefMax, slot);
+        }
+
+        void MarkDrive(int slot)
+        {
+            if (slot >= m_UploadedBodies) return;
+            m_DirtyDriveMin = math.min(m_DirtyDriveMin, slot);
+            m_DirtyDriveMax = math.max(m_DirtyDriveMax, slot);
         }
 
         public void AddJoint(int bodyA, int bodyB, float3 rA, float3 rB, float stiffnessLin, float stiffnessAng, float fracture)
@@ -260,6 +373,11 @@ namespace Phys.AvbdGpu
             m_StepMsSum = 0; m_StepCount = 0;
             m_Stats = default;
             StepIndex = 0;
+            m_DirtyDefMin = m_DirtyDriveMin = int.MaxValue; m_DirtyDefMax = m_DirtyDriveMax = -1;
+            m_PosReadStep = -1;
+            m_SpawnQueue.Clear();
+            EventRanges.Clear();
+            Array.Clear(m_EventsRead, 0, m_EventsRead.Length);
             AvbdGpuBuffers.Clear(Buffers.HashPrev);
             AvbdGpuBuffers.Clear(Buffers.HashCur);
             AvbdGpuBuffers.Clear(Buffers.BodyConsCount);
@@ -282,14 +400,27 @@ namespace Phys.AvbdGpu
             {
                 int start = m_UploadedBodies, count = m_BodyCount - start;
                 b.BodyDef.SetData(m_BodyDefs, start, start, count);
+                b.BodyDrive.SetData(m_Drives, start, start, count);
                 b.BodyPos.SetData(m_Pos, start, start, count);
                 b.BodyRot.SetData(m_Rot, start, start, count);
                 b.BodyVelLin.SetData(m_Vel, start, start, count);
                 b.BodyPrevVelLin.SetData(m_Vel, start, start, count);
                 b.BodyVelAng.SetData(new float4[count], 0, start, count);
                 b.BodyColor.SetData(m_Uncolored, start, start, count);
+                b.BodyEvents.SetData(m_ZeroUints, start, start, count);
                 m_UploadedBodies = m_BodyCount;
             }
+            if (m_DirtyDefMax >= 0)
+            {
+                b.BodyDef.SetData(m_BodyDefs, m_DirtyDefMin, m_DirtyDefMin, m_DirtyDefMax - m_DirtyDefMin + 1);
+                m_DirtyDefMin = int.MaxValue; m_DirtyDefMax = -1;
+            }
+            if (m_DirtyDriveMax >= 0)
+            {
+                b.BodyDrive.SetData(m_Drives, m_DirtyDriveMin, m_DirtyDriveMin, m_DirtyDriveMax - m_DirtyDriveMin + 1);
+                m_DirtyDriveMin = int.MaxValue; m_DirtyDriveMax = -1;
+            }
+            FlushSpawns();
             if (m_UploadedJoints < m_JointCount)
             {
                 int start = m_UploadedJoints, count = m_JointCount - start;
@@ -318,6 +449,29 @@ namespace Phys.AvbdGpu
                 UploadLinks();
                 m_LinksDirty = false;
             }
+        }
+
+        /// <summary>Writes the queued spawns' GPU state (one upload and one dispatch per chunk of Config.MaxSpawns).</summary>
+        void FlushSpawns()
+        {
+            var cs = Kernels.Util; int k = Kernels.SpawnBodies; var b = Buffers;
+            for (int done = 0; done < m_SpawnQueue.Count; done += m_SpawnChunk.Length)
+            {
+                int n = math.min(m_SpawnChunk.Length, m_SpawnQueue.Count - done);
+                m_SpawnQueue.CopyTo(done, m_SpawnChunk, 0, n);
+                b.SpawnRecords.SetData(m_SpawnChunk, 0, 0, n);
+                cs.SetBuffer(k, "_SpawnRecords", b.SpawnRecords);
+                cs.SetBuffer(k, "_BodyPos", b.BodyPos);
+                cs.SetBuffer(k, "_BodyRot", b.BodyRot);
+                cs.SetBuffer(k, "_BodyVelLin", b.BodyVelLin);
+                cs.SetBuffer(k, "_BodyVelAng", b.BodyVelAng);
+                cs.SetBuffer(k, "_BodyPrevVelLin", b.BodyPrevVelLin);
+                cs.SetBuffer(k, "_BodyColor", b.BodyColor);
+                cs.SetBuffer(k, "_BodyEvents", b.BodyEvents);
+                cs.SetInt(s_SpawnCount, n);
+                cs.Dispatch(k, (n + AvbdGpuConstants.ThreadGroupSize - 1) / AvbdGpuConstants.ThreadGroupSize, 1, 1);
+            }
+            m_SpawnQueue.Clear();
         }
 
         void UploadLinks()
@@ -392,10 +546,49 @@ namespace Phys.AvbdGpu
             if (ReadbackPoses && !m_PoseRequestPending && m_BodyCount > 0)
             {
                 m_PoseRequestPending = true;
+                m_PosRequestStep = StepIndex;
                 int count = m_BodyCount;
                 AsyncGPUReadback.Request(Buffers.BodyPos, count * 16, 0, r => OnPoses(r, count, true));
                 AsyncGPUReadback.Request(Buffers.BodyRot, count * 16, 0, r => OnPoses(r, count, false));
             }
+            if (m_EventRequestsPending == 0 && EventRanges.Count > 0)
+            {
+                foreach (var (start, count) in EventRanges)
+                {
+                    if (count <= 0 || start < 0 || start + count > m_BodyCount) continue;
+                    m_EventRequestsPending++;
+                    int s0 = start, n = count;
+                    AsyncGPUReadback.Request(Buffers.BodyEvents, n * 4, s0 * 4, r => OnEvents(r, s0, n));
+                }
+            }
+        }
+
+        void OnEvents(AsyncGPUReadbackRequest r, int start, int count)
+        {
+            if (!r.hasError) NativeArray<uint>.Copy(r.GetData<uint>(), 0, m_EventsRead, start, count);
+            if (--m_EventRequestsPending == 0) EventsFrame++;
+        }
+
+        /// <summary>Event words from the last asynchronous readback of <see cref="EventRanges"/> (one or two frames old), indexed by body.</summary>
+        public uint[] ReadEvents => m_EventsRead;
+
+        /// <summary>Synchronous readback of the event words of a body range (tests).</summary>
+        public uint[] GetEventsSync(int start, int count)
+        {
+            var data = new uint[math.max(count, 1)];
+            if (count > 0) Buffers.BodyEvents.GetData(data, 0, start, count);
+            return data;
+        }
+
+        /// <summary>Fills <see cref="ReadEvents"/> for every event range synchronously (tests; no frame loop, no async readback).</summary>
+        public void ReadEventsSync()
+        {
+            foreach (var (start, count) in EventRanges)
+            {
+                if (count <= 0 || start < 0 || start + count > m_BodyCount) continue;
+                Buffers.BodyEvents.GetData(m_EventsRead, start, start, count);
+            }
+            EventsFrame++;
         }
 
         void OnStats(AsyncGPUReadbackRequest r)
@@ -445,6 +638,7 @@ namespace Phys.AvbdGpu
                 if (m_RotRead == null || m_RotRead.Length < count) m_RotRead = new float4[math.max(count, 1024)];
                 NativeArray<float4>.Copy(data, m_RotRead, count);
                 m_PosReadCount = count;
+                m_PosReadStep = m_PosRequestStep;
             }
         }
 
@@ -452,6 +646,9 @@ namespace Phys.AvbdGpu
         public float4[] ReadPositions => m_PosRead;
         public float4[] ReadRotations => m_RotRead;
         public int ReadCount => m_PosReadCount;
+        /// <summary>The <see cref="StepIndex"/> after which the read-back poses were taken (-1 before the first readback): bodies
+        /// spawned at or after that step are not in them yet.</summary>
+        public int ReadStep => m_PosReadStep;
 
         /// <summary>Synchronous readback of the body poses (tests, tools).</summary>
         public void GetPosesSync(out float4[] positions, out float4[] rotations)
@@ -529,7 +726,7 @@ namespace Phys.AvbdGpu
             int n = math.min(m_PosReadCount, m_BodyCount);
             for (int i = 0; i < n; i++)
             {
-                if (m_BodyDefs[i].Mass <= 0f) continue;
+                if (m_BodyDefs[i].IsStatic) continue;
                 quaternion invRot = math.conjugate(new quaternion(m_RotRead[i]));
                 float3 o = math.mul(invRot, origin - m_PosRead[i].xyz);
                 float3 d = math.mul(invRot, dir);

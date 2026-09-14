@@ -139,8 +139,57 @@ namespace Phys.AvbdRef
         public int BodyCount { get { int n = 0; for (Rigid b = bodies; b != null; b = b.next) n++; return n; } }
         public int ForceCount { get { int n = 0; for (Force f = forces; f != null; f = f.next) n++; return n; } }
 
+        /// <summary>Orientation whose +z is forward and whose +y is as close to up as possible (Unity's LookRotation).</summary>
+        public static Quat LookRotation(float3 forward, float3 up)
+        {
+            float3 f = math.normalize(forward);
+            float3 r = math.cross(up, f);
+            float rl = math.length(r);
+            if (rl < 1.0e-4f) { up = math.abs(f.y) < 0.9f ? new float3(0, 1, 0) : new float3(0, 0, 1); r = math.cross(up, f); rl = math.length(r); }
+            r /= rl;
+            float3 u = math.cross(f, r);
+            float m00 = r.x, m01 = u.x, m02 = f.x;
+            float m10 = r.y, m11 = u.y, m12 = f.y;
+            float m20 = r.z, m21 = u.z, m22 = f.z;
+            float trace = m00 + m11 + m22;
+            Quat q;
+            if (trace > 0.0f)
+            {
+                float s = math.sqrt(trace + 1.0f) * 2.0f;
+                q = new Quat((m21 - m12) / s, (m02 - m20) / s, (m10 - m01) / s, 0.25f * s);
+            }
+            else if (m00 > m11 && m00 > m22)
+            {
+                float s = math.sqrt(1.0f + m00 - m11 - m22) * 2.0f;
+                q = new Quat(0.25f * s, (m01 + m10) / s, (m02 + m20) / s, (m21 - m12) / s);
+            }
+            else if (m11 > m22)
+            {
+                float s = math.sqrt(1.0f + m11 - m00 - m22) * 2.0f;
+                q = new Quat((m01 + m10) / s, 0.25f * s, (m12 + m21) / s, (m02 - m20) / s);
+            }
+            else
+            {
+                float s = math.sqrt(1.0f + m22 - m00 - m11) * 2.0f;
+                q = new Quat((m02 + m20) / s, (m12 + m21) / s, 0.25f * s, (m10 - m01) / s);
+            }
+            return RefMath.Normalize(q);
+        }
+
         public void Step()
         {
+            // Kinematic orientations of heading / velocity-aligned bodies (GPU DriveKinematic), before the contacts are found
+            for (Rigid body = bodies; body != null; body = body.next)
+            {
+                if (body.mass <= 0) continue;
+                if (body.alignVelocity)
+                {
+                    if (math.lengthsq(body.velocityLin) >= 1.0f) body.positionAng = LookRotation(body.velocityLin, new float3(0, 1, 0));
+                }
+                else if (body.heading)
+                    body.positionAng = new Quat(0, math.sin(body.drive.yaw * 0.5f), 0, math.cos(body.drive.yaw * 0.5f));
+            }
+
             // Perform broadphase collision detection
             // This is a naive O(n^2) approach, but it is sufficient for small numbers of bodies in this sample.
             for (Rigid bodyA = bodies; bodyA != null; bodyA = bodyA.next)
@@ -178,10 +227,11 @@ namespace Phys.AvbdRef
             // Initialize and warmstart bodies (ie primal variables)
             for (Rigid body = bodies; body != null; body = body.next)
             {
-                // Compute inertial position (Eq 2)
+                // Compute inertial position (Eq 2); external drives are accelerations of the inertial pose like gravity
+                float3 accelDrive = body.mass > 0 ? body.drive.Acceleration(body.positionLin, body.velocityLin, body.mass, dt) : float3.zero;
                 body.inertialLin = body.positionLin + body.velocityLin * dt;
                 if (body.mass > 0)
-                    body.inertialLin += gravity * (dt * dt);
+                    body.inertialLin += (gravity + accelDrive) * (dt * dt);
                 body.inertialAng = body.positionAng + body.velocityAng * dt;
 
                 // Adaptive warmstart (See original VBD paper)
@@ -196,7 +246,7 @@ namespace Phys.AvbdRef
                 body.initialAng = body.positionAng;
                 if (body.mass > 0)
                 {
-                    body.positionLin = body.positionLin + body.velocityLin * dt + gravity * (accelWeight * dt * dt);
+                    body.positionLin = body.positionLin + body.velocityLin * dt + gravity * (accelWeight * dt * dt) + accelDrive * (dt * dt);
                     body.positionAng = body.positionAng + body.velocityAng * dt;
                 }
             }
@@ -229,8 +279,10 @@ namespace Phys.AvbdRef
                         force.UpdatePrimal(body, alpha, ref lhsLin, ref lhsAng, ref lhsCross, ref rhsLin, ref rhsAng);
                     }
 
-                    // Solve the SPD linear system using LDL and apply the update (Eq. 4)
-                    RefMath.Solve(lhsLin, lhsAng, lhsCross, -rhsLin, -rhsAng, out float3 dxLin, out float3 dxAng);
+                    // Solve the SPD linear system using LDL and apply the update (Eq. 4); locked rotation: the linear block alone
+                    float3 dxLin, dxAng;
+                    if (body.LockedRotation) { dxLin = RefMath.Solve3(lhsLin, -rhsLin); dxAng = float3.zero; }
+                    else RefMath.Solve(lhsLin, lhsAng, lhsCross, -rhsLin, -rhsAng, out dxLin, out dxAng);
                     body.positionLin = body.positionLin + dxLin;
                     body.positionAng = body.positionAng + dxAng;
                 }
@@ -249,7 +301,7 @@ namespace Phys.AvbdRef
                 if (body.mass > 0)
                 {
                     body.velocityLin = (body.positionLin - body.initialLin) / dt;
-                    body.velocityAng = (body.positionAng - body.initialAng) / dt;
+                    body.velocityAng = body.LockedRotation ? float3.zero : (body.positionAng - body.initialAng) / dt;
                 }
             }
         }

@@ -21,6 +21,7 @@ namespace Phys.AvbdGpu
         public int LargeBodyCells;    // bodies spanning more grid cells than this bypass the grid
         public int HashSize;          // power of two, >= 2 * MaxManifolds
         public int CellCount;         // power of two
+        public int MaxSpawns;         // spawn records uploaded per step (larger batches are flushed in chunks)
 
         public static AvbdGpuConfig ForBodies(int bodies)
         {
@@ -40,6 +41,7 @@ namespace Phys.AvbdGpu
                 LargeBodyCells = 64,
                 HashSize = math.ceilpow2(manifolds * 2),
                 CellCount = math.ceilpow2(bodies * 2),
+                MaxSpawns = 4096,
             };
         }
 
@@ -48,7 +50,7 @@ namespace Phys.AvbdGpu
         public int MaxConstraintRefs => 2 * MaxManifolds + 2 * (MaxJoints + MaxSprings);
 
         public long EstimatedBytes =>
-            (long)MaxBodies * (GpuBodyDef.Stride + 16 * 14 + 8) + (long)MaxLinks * 8 +
+            (long)MaxBodies * (GpuBodyDef.Stride + GpuBodyDrive.Stride + 16 * 14 + 12) + (long)MaxSpawns * GpuSpawnRecord.Stride + (long)MaxLinks * 8 +
             (long)CellCount * 12 + 4 + (long)MaxCellEntries * 4 + (long)MaxPairs * 8 +
             2L * MaxManifolds * GpuManifold.Stride + 2L * MaxContacts * GpuContact.Stride + 2L * HashSize * 4 +
             (long)MaxJoints * (GpuJointDef.Stride + GpuJointState.Stride) + (long)MaxSprings * GpuSpringDef.Stride +
@@ -63,7 +65,7 @@ namespace Phys.AvbdGpu
 
         // bodies
         public GraphicsBuffer BodyDef, BodyPos, BodyRot, BodyPosNew, BodyRotNew, BodyInitialLin, BodyInitialAng, BodyInertialLin, BodyInertialAng,
-            BodyVelLin, BodyVelAng, BodyPrevVelLin, BodyAabbMin, BodyAabbMax, BodyColor, BodyColorTmp;
+            BodyVelLin, BodyVelAng, BodyPrevVelLin, BodyAabbMin, BodyAabbMax, BodyColor, BodyColorTmp, BodyDrive, BodyEvents, SpawnRecords;
         // links
         public GraphicsBuffer LinkStart, LinkList;
         // grid
@@ -93,6 +95,8 @@ namespace Phys.AvbdGpu
             BodyVelLin = Structured(nb, 16); BodyVelAng = Structured(nb, 16); BodyPrevVelLin = Structured(nb, 16);
             BodyAabbMin = Structured(nb, 16); BodyAabbMax = Structured(nb, 16);
             BodyColor = Structured(nb, 4); BodyColorTmp = Structured(nb, 4);
+            BodyDrive = Structured(nb, GpuBodyDrive.Stride); BodyEvents = Structured(nb, 4);
+            SpawnRecords = Structured(math.max(config.MaxSpawns, 1), GpuSpawnRecord.Stride);
             LinkStart = Structured(nb + 1, 4); LinkList = Structured(math.max(config.MaxLinks, 1), 8);
             CellCount = Structured(config.CellCount, 4); CellStart = Structured(config.CellCount + 1, 4); CellCursor = Structured(config.CellCount, 4);
             CellEntries = Structured(config.MaxCellEntries, 4); LargeBodies = Structured(config.MaxLargeBodies, 4);

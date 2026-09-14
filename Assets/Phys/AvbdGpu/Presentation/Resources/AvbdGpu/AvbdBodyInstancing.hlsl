@@ -75,13 +75,15 @@ float3 bodyColor(uint id, BodyDef d)
     return hsv((h & 1023u) / 1024.0, 0.35 + ((h >> 10) & 255u) / 255.0 * 0.25, 0.8 + ((h >> 18) & 255u) / 255.0 * 0.2);
 }
 
-// World position and normal of a mesh vertex of the given instance.
+// World position and normal of a mesh vertex of the given instance. Retired slots (flag bit 4, FLAG_DEAD) collapse to a
+// point so that they rasterise nothing.
 void bodyVertex(uint instanceID, float3 positionOS, float3 normalOS, out float3 positionWS, out float3 normalWS, out uint id)
 {
     id = instanceID + _InstanceOffset;
     BodyDef d = _BodyDef[id];
     float4 q = _BodyRot[id];
     float3 local = _MeshScale > 0.0 ? positionOS * _MeshScale + _MeshOffset : positionOS * d.size;
+    if (d.flags & 16u) local = 0;
     positionWS = qrotate(q, local) + _BodyPos[id].xyz;
     normalWS = qrotate(q, normalOS);
 }

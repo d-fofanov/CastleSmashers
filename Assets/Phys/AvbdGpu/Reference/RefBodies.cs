@@ -21,6 +21,41 @@ namespace Phys.AvbdRef
         public const float StickThresh = 0.00001f;         // Position threshold for sticking contacts (ie static friction)
     }
 
+    /// <summary>External drive of a body (mirror of the GPU solver's BodyDrive): an acceleration of the inertial pose.</summary>
+    public struct Drive
+    {
+        public const int None = 0, Force = 1, ToPoint = 2, Motor = 3;
+        public int mode;
+        /// <summary>Force (N) for Force, the point for ToPoint, target velocity (m/s) for Motor.</summary>
+        public float3 target;
+        /// <summary>Motor: the axes it acts on (1 / 0).</summary>
+        public float3 mask;
+        /// <summary>ToPoint: force magnitude (N); Motor: force cap (N).</summary>
+        public float limit;
+        /// <summary>Heading about +y (rad) of a heading body.</summary>
+        public float yaw;
+
+        public float3 Acceleration(float3 pos, float3 vel, float mass, float dt)
+        {
+            float3 F = float3.zero;
+            if (mode == Force)
+                F = target;
+            else if (mode == ToPoint)
+            {
+                float3 dir = target - pos;
+                float len = math.length(dir);
+                if (len > 1.0e-6f) F = dir * (limit / len);
+            }
+            else if (mode == Motor)
+            {
+                F = (target - vel) * mask * (mass / dt);
+                float f = math.length(F);
+                if (f > limit && f > 0) F *= limit / f;
+            }
+            return F / mass;
+        }
+    }
+
     /// <summary>Holds all the state for a single rigid body that is needed by AVBD.</summary>
     public sealed class Rigid
     {
@@ -41,6 +76,16 @@ namespace Phys.AvbdRef
         public float3 moment;
         public float friction;
         public float radius;
+
+        // Extensions mirrored from the GPU solver (off by default): frozen angular degrees of freedom, a kinematic
+        // orientation source and an external drive.
+        public bool lockRotation;
+        /// <summary>Orientation set to the drive's yaw about +y at the start of every step (implies lockRotation).</summary>
+        public bool heading;
+        /// <summary>Orientation set to point +z along the velocity while faster than 1 m/s (implies lockRotation).</summary>
+        public bool alignVelocity;
+        public Drive drive;
+        public bool LockedRotation => lockRotation || heading || alignVelocity;
 
         public Rigid(Solver solver, float3 size, float density, float friction, float3 position, float3 velocity = default)
         {

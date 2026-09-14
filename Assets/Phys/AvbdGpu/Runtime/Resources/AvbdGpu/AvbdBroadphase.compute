@@ -43,6 +43,13 @@ void BodyAabb(uint3 id : SV_DispatchThreadID)
     uint i = id.x;
     if (i >= _BodyCount) return;
     BodyDef d = _BodyDef[i];
+    if (isDead(d))
+    {
+        // a retired slot: in no cell and not in the large-body list, with an AABB that overlaps nothing
+        _BodyAabbMin[i] = float4(1.0e30, 1.0e30, 1.0e30, 1);
+        _BodyAabbMax[i] = float4(-1.0e30, -1.0e30, -1.0e30, 0);
+        return;
+    }
     float3 pos = _BodyPos[i].xyz;
     float3x3 R = qmatrix(_BodyRot[i]);
     float3 half = d.size * 0.5;

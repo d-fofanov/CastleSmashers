@@ -1,6 +1,8 @@
-// AVBD step kernels: body warm start (Predict), colour-batched primal update (Primal / CommitOverflow), dual update
-// of contacts and joints (Dual), velocity reconstruction (Velocity). Ports of solver.cpp / manifold.cpp / joint.cpp /
-// spring.cpp of avbd-demo3d.
+// AVBD step kernels: kinematic orientation of driven bodies (DriveKinematic), body warm start (Predict), colour-batched
+// primal update (Primal / CommitOverflow), dual update of contacts and joints (Dual), velocity reconstruction (Velocity).
+// Ports of solver.cpp / manifold.cpp / joint.cpp / spring.cpp of avbd-demo3d, plus the extensions for driven bodies:
+// external forces / motors enter the inertial pose in Predict, bodies with locked rotation solve only their linear block.
+#pragma kernel DriveKinematic
 #pragma kernel Predict
 #pragma kernel Primal
 #pragma kernel CommitOverflow
@@ -42,12 +44,56 @@ StructuredBuffer<JointState> _JointState;       // read by Primal
 RWStructuredBuffer<JointState> _JointStateRW;   // written by Dual
 StructuredBuffer<SpringDef> _SpringDef;
 StructuredBuffer<uint> _Counters;
+StructuredBuffer<BodyDrive> _BodyDrive;         // read by DriveKinematic, Predict
 
 int _ColorSlot;       // colour group of this primal dispatch
 int _WriteToNew;      // 1: write positions to the double buffer (overflow group)
 float _AlphaIt;       // stabilisation parameter of this iteration (post-stabilisation varies it)
 
+// ------------------------------------------------------------------------------------------------ DriveKinematic
+
+// Orientation of heading / align-to-velocity bodies, set before collision detection so that the step's contacts see it.
+[numthreads(AVBD_THREADS, 1, 1)]
+void DriveKinematic(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+    if (i >= _BodyCount) return;
+    BodyDef d = _BodyDef[i];
+    if (isStatic(d) || (d.flags & (FLAG_HEADING | FLAG_ALIGN_VELOCITY)) == 0) return;
+    if (d.flags & FLAG_ALIGN_VELOCITY)
+    {
+        float3 v = _BodyVelLinIn[i].xyz;
+        if (dot(v, v) < ALIGN_MIN_SPEED * ALIGN_MIN_SPEED) return;
+        _BodyRot[i] = qlook(v, float3(0, 1, 0));
+    }
+    else if (d.flags & FLAG_DRIVEN)
+        _BodyRot[i] = qyaw(_BodyDrive[i].yaw);
+}
+
 // ------------------------------------------------------------------------------------------------ Predict
+
+// Acceleration of a driven body's inertial pose: external force, force towards a point or a velocity motor.
+float3 driveAcceleration(uint i, BodyDef d, float3 pos, float3 vel)
+{
+    if ((d.flags & FLAG_DRIVEN) == 0) return 0;
+    BodyDrive dr = _BodyDrive[i];
+    float3 F = 0;
+    if (dr.mode == DRIVE_FORCE)
+        F = dr.target;
+    else if (dr.mode == DRIVE_TO_POINT)
+    {
+        float3 dir = dr.target - pos;
+        float len = length(dir);
+        if (len > 1.0e-6) F = dir * (dr.limit / len);
+    }
+    else if (dr.mode == DRIVE_MOTOR)
+    {
+        F = (dr.target - vel) * dr.mask * (d.mass / _Dt);
+        float f = length(F);
+        if (f > dr.limit && f > 0) F *= dr.limit / f;
+    }
+    return F / d.mass;
+}
 
 [numthreads(AVBD_THREADS, 1, 1)]
 void Predict(uint3 id : SV_DispatchThreadID)
@@ -62,9 +108,10 @@ void Predict(uint3 id : SV_DispatchThreadID)
     float3 prev = _BodyPrevVelLinIn[i].xyz;
     bool dynamic = !isStatic(d);
 
-    // Compute inertial position (Eq 2)
+    // Compute inertial position (Eq 2); external drives are accelerations of the inertial pose like gravity
+    float3 accelDrive = dynamic ? driveAcceleration(i, d, pos, vel) : 0;
     float3 inertialLin = pos + vel * _Dt;
-    if (dynamic) inertialLin += _Gravity * (_Dt * _Dt);
+    if (dynamic) inertialLin += (_Gravity + accelDrive) * (_Dt * _Dt);
     float4 inertialAng = qadd(rot, ang * _Dt);
 
     // Adaptive warmstart (See original VBD paper)
@@ -79,7 +126,7 @@ void Predict(uint3 id : SV_DispatchThreadID)
     _BodyInitialAngW[i] = rot;
     if (dynamic)
     {
-        pos = pos + vel * _Dt + _Gravity * (accelWeight * _Dt * _Dt);
+        pos = pos + vel * _Dt + _Gravity * (accelWeight * _Dt * _Dt) + accelDrive * (_Dt * _Dt);
         rot = qadd(rot, ang * _Dt);
     }
     _BodyInertialLinW[i] = float4(inertialLin, 0);
@@ -329,9 +376,16 @@ void Primal(uint3 id : SV_DispatchThreadID)
         else if (type == CONS_SPRING) stampSpring(idx, body, sys);
     }
 
-    // Solve the SPD linear system using LDL and apply the update (Eq. 4)
+    // Solve the SPD linear system using LDL and apply the update (Eq. 4); a body with locked rotation has infinite
+    // angular inertia, so only its linear block is solved
     float3 dxLin, dxAng;
-    solve6(sys.lhsLin, sys.lhsAng, sys.lhsCross, -sys.rhsLin, -sys.rhsAng, dxLin, dxAng);
+    if (lockedRotation(d))
+    {
+        dxLin = solve3(sys.lhsLin, -sys.rhsLin);
+        dxAng = 0;
+    }
+    else
+        solve6(sys.lhsLin, sys.lhsAng, sys.lhsCross, -sys.rhsLin, -sys.rhsAng, dxLin, dxAng);
     pos += dxLin;
     rot = qadd(rot, dxAng);
 
@@ -491,7 +545,8 @@ void Velocity(uint3 id : SV_DispatchThreadID)
     uint i = id.x;
     if (i >= _BodyCount) return;
     _BodyPrevVelLin[i] = _BodyVelLin[i];
-    if (isStatic(_BodyDef[i])) return;
+    BodyDef d = _BodyDef[i];
+    if (isStatic(d)) return;
     _BodyVelLin[i] = float4((_BodyPos[i].xyz - _BodyInitialLin[i].xyz) / _Dt, 0);
-    _BodyVelAng[i] = float4(qsub(_BodyRot[i], _BodyInitialAng[i]) / _Dt, 0);
+    _BodyVelAng[i] = lockedRotation(d) ? 0 : float4(qsub(_BodyRot[i], _BodyInitialAng[i]) / _Dt, 0);
 }
