@@ -68,10 +68,11 @@ void Predict(uint3 id : SV_DispatchThreadID)
     float4 inertialAng = qadd(rot, ang * _Dt);
 
     // Adaptive warmstart (See original VBD paper)
+    // (the reference divides by the gravity magnitude and drops the NaN of 0 / 0 with isfinite; without gravity the
+    // direction is zero too, so the weight is zero either way)
     float3 accel = (vel - prev) / _Dt;
     float accelExt = dot(accel, _GravityDir);
-    float accelWeight = clamp(accelExt / _GravityMag, 0.0, 1.0);
-    if (!isfinite(accelWeight)) accelWeight = 0.0;
+    float accelWeight = _GravityMag > 0.0 ? clamp(accelExt / _GravityMag, 0.0, 1.0) : 0.0;
 
     // Save initial position (x-) and compute warmstarted position (See original VBD paper)
     _BodyInitialLinW[i] = float4(pos, 0);

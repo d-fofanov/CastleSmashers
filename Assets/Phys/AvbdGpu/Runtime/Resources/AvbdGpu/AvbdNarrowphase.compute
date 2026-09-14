@@ -171,13 +171,16 @@ int clipPolygonAgainstPlane(uint t, int inSlot, int inCount, float3 planeNormal,
 bool addContact(uint t, inout int count, float3 xA, float3 xB, uint featureKey)
 {
     float3 midpoint = (xA + xB) * 0.5;
-    [loop]
-    for (int i = 0; i < count; ++i)
+    // fixed trip count over the slots (the compiler sees a constant `count` at some call sites and warns about
+    // zero-iteration loops otherwise); slots beyond `count` hold stale points and are masked out
+    bool merged = false;
+    [unroll]
+    for (int i = 0; i < MAX_CONTACTS; ++i)
     {
         float3 d = midpoint - (gs_xA[t][i] + gs_xB[t][i]) * 0.5;
-        if (dot(d, d) < CONTACT_MERGE_DIST_SQ) return false;
+        merged = merged || (i < count && dot(d, d) < CONTACT_MERGE_DIST_SQ);
     }
-    if (count >= MAX_CONTACTS) return false;
+    if (merged || count >= MAX_CONTACTS) return false;
     gs_xA[t][count] = xA;
     gs_xB[t][count] = xB;
     gs_feature[t][count] = featureKey;
@@ -215,8 +218,8 @@ bool testAxis(OBB boxA, OBB boxB, float3 delta, float3 axis, int type, int index
 
 void supportEdge(OBB box, int axisIndex, float3 dir, out float3 edgeA, out float3 edgeB)
 {
-    int axis1 = (axisIndex + 1) % 3;
-    int axis2 = (axisIndex + 2) % 3;
+    int axis1 = axisIndex == 2 ? 0 : axisIndex + 1;   // the other two axes in cyclic order, without integer modulus
+    int axis2 = axisIndex == 0 ? 2 : axisIndex - 1;
     float3 a1 = obbAxis(box, axis1), a2 = obbAxis(box, axis2), a0 = obbAxis(box, axisIndex);
     float sign1 = dot(dir, a1) >= 0.0 ? 1.0 : -1.0;
     float sign2 = dot(dir, a2) >= 0.0 ? 1.0 : -1.0;
