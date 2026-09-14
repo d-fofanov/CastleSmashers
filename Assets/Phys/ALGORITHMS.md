@@ -30,8 +30,12 @@ Every kernel is recorded once into a `CommandBuffer`; every count-dependent disp
 re-recorded only when the iteration count, the post-stabilisation flag or the active colour count changes. Per-step
 constants (dt, gravity, α, β, γ, counts) live in one constant buffer.
 
+0. **Kinematic orientations** (`DriveKinematic`): bodies with a heading take `RotateY(yaw)` from their drive, bodies that
+   align to their velocity take `LookRotation(v⁻, up)` (the previous step's velocity, while faster than 1 m/s). This runs
+   before collision detection so that the step's contacts see the orientation the body will keep.
 1. **World AABBs** (`BodyAabb`) at `x⁻`, expanded by the collision margin. Bodies spanning more than 64 grid cells
-   (the 100 m grounds) go to a small *large-body list* that every body tests brute force instead of the grid.
+   (the 100 m grounds) go to a small *large-body list* that every body tests brute force instead of the grid. Retired
+   slots get an empty AABB and enter neither the grid nor the list.
 2. **Hashed uniform grid** (`GridCount` → scan → `GridScatter` → `GridSortCell`): every body is inserted into every
    cell its AABB overlaps (counting sort with atomics and an exclusive scan); each bucket is then sorted by body index.
    The cell size defaults to twice the mean extent of the dynamic bodies.
@@ -46,7 +50,8 @@ constants (dt, gravity, α, β, γ, counts) live in one constant buffer.
    the same pair is found in an open-addressing hash table keyed by the pair; per feature key the penalty, multiplier,
    stick flag and, for sticking contacts, the old anchor points are carried over, then the warm-start decay is applied.
    Contacts are appended to a pool (one atomic per manifold), the header to the manifold list, the pair to the new
-   hash table.
+   hash table. Bodies that report events get the kind of the other body or-ed into their event word, and an impact
+   counted when the manifold is new and the other body is a projectile moving faster than 2 m/s.
 5. **Joints** (`PrepareJoints`): `C0` of the ball-socket and the angular lock at `x⁻`, decay, penalty capped at the
    material stiffness.
 6. **Constraint lists** (`ConsCount` → scan → `ConsFill` → `ConsSort`): a CSR list per dynamic body of the manifolds,
@@ -59,17 +64,51 @@ constants (dt, gravity, α, β, γ, counts) live in one constant buffer.
    few rounds). Whatever is still uncoloured joins the *overflow group*, which is updated Jacobi style with double
    buffered positions — always correct, only slower to converge. The colour count in use is read back asynchronously
    and the number of recorded colour passes adapts to it.
-8. **Predict**: inertial pose, VBD adaptive initial guess (gravity weighted by the measured acceleration), `x⁻`.
+8. **Predict**: inertial pose `y = x + h v + h² (g + a)`, where `a` is the body's drive acceleration (below), the VBD
+   adaptive initial guess (gravity weighted by the measured acceleration, the drive added whole), `x⁻`.
 9. **Iterations**: for every colour a `Primal` dispatch updates its bodies in place (they never read each other), the
    overflow group writes to a second buffer and is committed; then `Dual` updates every manifold and joint in
    parallel; the last iteration ends with `Velocity` (`v = (x − x⁻)/h`, `ω = 2 (q q⁻⁻¹)ₓᵧᵤ/h`). With
-   post-stabilisation on, the main iterations use α = 1 and one extra position-only iteration uses α = 0.
+   post-stabilisation on, the main iterations use α = 1 and one extra position-only iteration uses α = 0. A body with
+   locked rotation solves only the 3 × 3 linear block of its system (infinite angular inertia: the angular update and the
+   cross terms vanish) and keeps `ω = 0`.
 10. The manifold, contact and hash buffers are copied to their "previous" twins (`CopyBuffer`) and the counters are
     copied to a stats buffer for the asynchronous readback.
 
 Rendering never touches the CPU: one `RenderMeshPrimitives` cube draw reads the pose and definition buffers by
 instance id; contact crosses and joint lines are written by small kernels into vertex buffers and drawn with
 `RenderPrimitivesIndirect`.
+
+## Driven bodies, pools and events
+
+Three extensions carry units and projectiles on the same solver; none of them touches the numerics of a body that does
+not use them, so the reference comparisons hold as before (the drives and the rotation lock are mirrored in the reference).
+
+* **Drives** are accelerations of the inertial pose, exactly where gravity enters: a constant force, a force of constant
+  magnitude towards a fixed point (evaluated at `x⁻`), or a motor `F = clamp(m (v_target − v⁻) / h, F_max)` on a mask of
+  axes. A free body under a drive therefore follows the implicit Euler trajectory of the total acceleration, and a body
+  in contact feels the drive through its inertia term like any external force. The motor is a proportional controller
+  with the gain `m / h`, so it runs `F h / m` below its target under a steady load `F`. The drive records are CPU-owned
+  and re-uploaded as one range whenever any of them changes (the unit pool every frame, ~30 KB).
+* **Locked rotation** (units, arrows) replaces the 6 × 6 solve by the linear 3 × 3 block; the orientation is then either
+  frozen or set kinematically at the start of the step from the drive's yaw or from the velocity. Setting it before the
+  broadphase keeps the contacts consistent with the orientation used in the solve; the velocity used is the previous
+  step's, which is also what makes the step deterministic.
+* **Retired slots** (`FLAG_DEAD`) count as static everywhere (`isStatic`), get an empty AABB, sit in no cell and no large
+  list, are never coloured, are skipped by `Predict` / `Velocity` and collapse to a point in the vertex shader. Spawning
+  into a slot uploads the definition and the drive from the CPU (their owner) and lets a small kernel write the
+  GPU-owned state (pose, velocities, colour = uncoloured, events = 0) from a record buffer, one dispatch per batch. A
+  slot must not be reused in the step it was retired in: a retired body pairs with nothing, so after one step the
+  previous-manifold buffers hold nothing of it and the newcomer cannot warm start from the old body's contacts;
+  `BodyPool` keeps retired slots back until the world has stepped. Nothing is compacted, so body indices stay stable
+  and pools are contiguous ranges (one mesh range, one event readback each).
+* **Events** are or / add atomics on a per-body word (kinds touched, impacts), which are order-independent, so the
+  step stays bitwise reproducible; the words are sticky until the slot is respawned and are read back asynchronously
+  per pool range. Whether a projectile is spent (touched anything) and whether a unit was hit (an impact by a projectile
+  faster than 2 m/s) both come from them; the CPU never inspects contacts.
+* **Ballistics**: implicit Euler falls `g t h / 2` further than the parabola after a time `t` (`x_n = x_0 + v_0 t + g
+  h² n (n + 1) / 2`), so the launch velocity of a projectile gets `+ g h / 2` upward and the discrete trajectory passes
+  through the aim point exactly (`SiegeTests`: closest approach 2e-3 m).
 
 ## Determinism
 

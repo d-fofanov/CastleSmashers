@@ -1,36 +1,44 @@
 # Phys.AvbdGpu — Augmented Vertex Block Descent on the GPU
 
 3D rigid-box physics in compute shaders: frictional contacts, ball-socket joints with angular locks and fracture
-(torque, or directional snap limits), springs, ignore-collision links. The algorithm is Augmented Vertex Block Descent (Giles, Diaz, Yuksel, SIGGRAPH 2025)
-exactly as in the author's reference implementation `avbd-demo3d`; the whole step — broadphase, narrowphase with
-persisted manifolds, graph colouring, colour-batched primal sweeps, dual updates, velocities — runs on the GPU and
-nothing is read back for rendering. See [ALGORITHMS.md](ALGORITHMS.md) for the pipeline.
+(torque, or directional snap limits), springs, ignore-collision links, driven bodies (external forces, velocity motors,
+locked or kinematic orientation), body pools with contact events for units and projectiles. The algorithm is Augmented
+Vertex Block Descent (Giles, Diaz, Yuksel, SIGGRAPH 2025) exactly as in the author's reference implementation
+`avbd-demo3d`; the whole step — broadphase, narrowphase with persisted manifolds, graph colouring, colour-batched primal
+sweeps, dual updates, velocities — runs on the GPU and nothing is read back for rendering. See
+[ALGORITHMS.md](ALGORITHMS.md) for the pipeline.
 
-* **Runtime** (`Phys.AvbdGpu`) — `AvbdGpuWorld` (bodies, joints, springs, links, `Step()`), buffers, command-buffer
-  recording, seven `.compute` files (`Resources/AvbdGpu`).
+* **Runtime** (`Phys.AvbdGpu`) — `AvbdGpuWorld` (bodies, joints, springs, links, drives, `Step()`), `BodyPool` (retired
+  slots reused by later spawns), buffers, command-buffer recording, seven `.compute` files (`Resources/AvbdGpu`).
 * **Reference** (`Phys.AvbdRef`) — line-for-line C# port of `avbd-demo3d` (the test oracle).
 * **Scenes** (`Phys.AvbdGpu.Scenes`) — the 14 reference scenes and 3 GPU benchmark scenes behind an `ISceneBuilder`
   interface that both solvers implement; `BrickCastle`, a castle planned on the stud grid of the construction brick.
 * **Presentation** (`Phys.AvbdGpu.Presentation`) — `AvbdGpuRenderer`: instanced draws straight from the solver buffers
   (the collision boxes, or any mesh for a range of bodies), per-body tints, shadows, GPU-written contact / joint debug lines.
+* **Siege** (`Phys.AvbdGpu.Siege`) — `SiegeSystem`: armies of toy figures (`Assets/Models/ConstructorFigure`) that march,
+  hold a line and fire volleys of arrows (`Assets/Models/ConstructorArrow`), cannonballs, rockets and homing bolts at each
+  other and at the castle; `Ballistics`, `SiegeSpec` (the models as boxes), `BodyPool`s for units and projectiles.
 * **Demo** (`Phys.Demo`) — `Demo.unity` / `DemoBootstrap` (the catalog scenes) and `Castle.unity` / `CastleDemo` (the brick
-  castle) on the shared `DemoBase` (scene keys, HUD, drag, shooting, player flags), `DemoCamera`.
-* **Tests** — EditMode: reference behaviour, kernel checks, GPU vs reference comparisons, invariants, castle layout,
-  performance; PlayMode: demo and castle smoke tests.
+  castle and its siege) on the shared `DemoBase` (scene keys, HUD, drag, shooting, player flags), `DemoCamera`.
+* **Tests** — EditMode: reference behaviour, kernel checks, GPU vs reference comparisons, invariants, drives, body pools,
+  siege, castle layout, performance; PlayMode: demo, castle and siege smoke tests.
 
 ## Layout
 
 ```
-Assets/Phys/AvbdGpu/Runtime            AvbdGpuWorld, AvbdGpuPipeline, AvbdGpuBuffers, AvbdGpuKernels, AvbdGpuTypes, AvbdGpuConstants
+Assets/Phys/AvbdGpu/Runtime            AvbdGpuWorld, BodyPool, AvbdGpuPipeline, AvbdGpuBuffers, AvbdGpuKernels, AvbdGpuTypes, AvbdGpuConstants
 Assets/Phys/AvbdGpu/Runtime/Resources  AvbdCommon.hlsl, AvbdUtil, AvbdScan, AvbdBroadphase, AvbdNarrowphase, AvbdConstraints,
                                        AvbdColoring, AvbdSolver, AvbdDebug (.compute)
 Assets/Phys/AvbdGpu/Reference          RefMath, RefBodies, RefJoint (+Spring), RefManifold, RefCollide, RefSolver, RefSceneBuilder
 Assets/Phys/AvbdGpu/Scenes             AvbdScenes (catalog + ISceneBuilder), BrickCastle (brick, layout, castle plans, snap joints)
+Assets/Phys/AvbdGpu/Siege              SiegeSpec (figure and arrow models as boxes), Ballistics, SiegeSystem (armies, volleys, purges)
 Assets/Phys/AvbdGpu/Presentation       AvbdGpuRenderer, Resources/AvbdGpu/AvbdBox.shader (+ AvbdBodyInstancing.hlsl), AvbdLines.shader
-Assets/Phys/AvbdGpu/Tests/Editor       ReferenceTests, GpuKernelTests, GpuVsReferenceTests, InvariantTests, BrickCastleTests, PerformanceTests, DiagnosticTests
-Assets/Phys/AvbdGpu/Tests/Runtime      DemoSmokeTests, CastleSmokeTests
+Assets/Phys/AvbdGpu/Tests/Editor       ReferenceTests, GpuKernelTests, GpuVsReferenceTests, InvariantTests, DriveTests, BodyPoolTests, SiegeTests,
+                                       SnapFractureTests, BrickCastleTests, PerformanceTests, DiagnosticTests
+Assets/Phys/AvbdGpu/Tests/Runtime      DemoSmokeTests, CastleSmokeTests, SiegeSmokeTests
 Assets/Phys/Demo                       Demo.unity, Castle.unity, DemoBase, DemoBootstrap, CastleDemo, DemoCamera, Editor/BuildDemo
 Assets/Models/ConstructorBlock2x3      the 2 x 3 construction brick (FBX, Tools/generate_constructor_block.py)
+Assets/Models/ConstructorFigure, ConstructorArrow   the toy figure and the arrow (Tools/generate_constructor_accessories.py)
 ```
 
 ## Using the solver
@@ -53,6 +61,43 @@ world.GetPosesSync(out var pos, out var rot);   // synchronous readback (tests, 
 box (`Mesh`, `Scale`, `Offset` of the model pivot in body space), `renderer.SetTints(rgba, start, count)` colours bodies
 (RGBA8, alpha 0 = hash palette), `renderer.Shadows` casts and receives the main light's shadows.
 
+### Driven bodies, pools and events
+
+```csharp
+// a figure that never tips over, faces its drive's yaw and reports what it touches; walks at 3 m/s with up to 12 N
+uint unit = GpuBodyDef.FlagDriven | GpuBodyDef.FlagHeading | GpuBodyDef.FlagReportEvents | GpuBodyDef.Kind(GpuBodyDef.KindUnit);
+int figure = world.AddBody(new float3(1.8f, 2.4f, 0.6f), 0.4f, 0.6f, new float3(10, 1.2f, 0), quaternion.identity, float3.zero, unit,
+    GpuBodyDrive.Velocity(new float3(-3, 0, 0), maxForce: 12f, mask: new float3(1, 0, 1), yaw: -math.PI / 2));
+world.SetBodyDrive(figure, GpuBodyDrive.ConstantForce(new float3(0, 0, 5)));   // drives are CPU-owned, uploaded as one range per step
+world.SetBodyFlags(figure, GpuBodyDef.FlagReportEvents);                         // unlock the rotation: it can topple now
+// a pool: retired slots reused by later spawns, one contiguous body range (mesh range, event readback)
+var arrows = new BodyPool(world, 2048);
+uint arrowFlags = GpuBodyDef.FlagAlignVelocity | GpuBodyDef.FlagReportEvents | GpuBodyDef.Kind(GpuBodyDef.KindProjectile);
+int arrow = arrows.Spawn(new float3(0.75f, 0.1f, 1.5f), 0.2f, 0.6f, from, quaternion.LookRotation(dir, up), dir * 30f, arrowFlags);
+// ... later, from the asynchronous event readback of the pool's range (or world.GetEventsSync in tests):
+if (GpuBodyEvents.Touched(world.ReadEvents[arrow])) arrows.Retire(arrow);        // free again after the next step
+```
+
+| Body flag | Effect |
+|---|---|
+| `LockRotation` | the angular degrees of freedom are frozen: 3 x 3 primal solve of the linear block, no angular velocity |
+| `Heading` | locked rotation set to `RotateY(drive.Yaw)` at the start of every step (units face where they go) |
+| `AlignVelocity` | locked rotation set to `LookRotation(v, up)` while faster than 1 m/s (arrows fly point first, a stuck one keeps its pose) |
+| `Dead` | retired slot: no collisions, no update, not drawn; `SpawnBody` brings it back |
+| `ReportEvents` | the narrowphase records the kinds of bodies touched and the impacts (see below) |
+| `Driven` | the body reads its `GpuBodyDrive` record |
+| `Kind(...)` | plain / unit / projectile, for the event attribution only |
+
+Drives (`GpuBodyDrive`, an acceleration of the inertial pose like gravity): `ConstantForce(F)`, `TowardsPoint(p, magnitude)`
+(a force of constant magnitude towards a fixed point) and `Velocity(target, maxForce, mask, yaw)` (a motor: `F = m (v_target -
+v) / h` on the masked axes, capped; being a proportional controller it runs `F h / m` below its target under a steady load
+`F`, 0.08 m/s for 5 N of friction at 60 Hz). Events (`world.ReadEvents[body]`, sticky until the slot is respawned; ranges
+in `world.EventRanges` are read back asynchronously every step, `BodyPool` registers its own): bits `TouchStatic`,
+`TouchBody`, `TouchUnit`, `TouchProjectile` and, above them, the number of impacts — new manifolds with a projectile moving
+faster than 2 m/s (a spent arrow lying about hurts nobody). Slot rules: a retired slot is reusable from the step after
+its retirement (`BodyPool` keeps it back until then), and joints, springs and links on a body must be removed before it is
+retired (the world checks the links; a world-anchored joint, like the demo's drag, is the caller's to release).
+
 ## Parameters (`AvbdGpuParams`, defaults = reference)
 
 | Parameter | Default | Meaning |
@@ -68,7 +113,8 @@ box (`Mesh`, `Scale`, `Offset` of the model pivot in body space), `renderer.SetT
 | `ColorRounds` | 8 | Jones–Plassmann rounds per step |
 
 Constants (`AvbdGpuConstants` / `AvbdCommon.hlsl`): penalty bounds 1 .. 1e10, collision margin 0.01, stick
-threshold 1e-5, hard stiffness ≥ 1e30 (`float.PositiveInfinity` accepted), 8 contacts per manifold, 32 colours.
+threshold 1e-5, hard stiffness ≥ 1e30 (`float.PositiveInfinity` accepted), 8 contacts per manifold, 32 colours,
+align-to-velocity above 1 m/s, impacts count above 2 m/s.
 
 Joint fracture: the reference's `fracture` breaks a joint when its angular multiplier (torque) exceeds it. The snap limits
 (`fractureLateral`, `fractureTension`, `breakDistance`, off at infinity; an extension, mirrored in the reference) act on
@@ -78,9 +124,10 @@ or when the anchors are `breakDistance` apart; compression along the axis never 
 until the joint breaks.
 
 Capacities (`AvbdGpuConfig.ForBodies(n)`): bodies n, joints max(n, 4096), springs n/4, manifolds 4n, contacts 16n,
-pairs 10n, grid entries 8n, hash 8n (power of two), cells 2n. Appends beyond a capacity are dropped and flagged in
-`Stats.OverflowFlags` (1 pairs, 2 manifolds, 4 contacts, 8 grid entries, 16 large bodies, 32 unsorted cells); the demo
-HUD shows the flags in red. 65 536 bodies take ~270 MB of GPU memory.
+pairs 10n, grid entries 8n, hash 8n (power of two), cells 2n, spawn records per upload 4096 (larger batches go up in
+chunks). Appends beyond a capacity are dropped and flagged in `Stats.OverflowFlags` (1 pairs, 2 manifolds, 4 contacts, 8
+grid entries, 16 large bodies, 32 unsorted cells); the demo HUD shows the flags in red. 65 536 bodies take ~275 MB of GPU
+memory.
 
 ## Demo
 
@@ -143,8 +190,35 @@ planned by `BrickCastle` on the stud grid (`CastlePlan.Presets`):
   and the angular lock assumes equal orientations, hence four points per overlap rather than one lock.
 
 Keys as the main demo plus `J` snap on/off, `F6` collision boxes, `F7` shadows; `B` / `Enter` fires a 30 kg cannonball
-at 24 model m/s (× √5 in the solver). Flags: `-avbd-scene 0..2`, `-avbd-snap`, and the screenshot / bench / camera
-flags above.
+at 24 model m/s (× √5 in the solver). Flags: `-avbd-scene 0..9`, `-avbd-snap`, `-avbd-siege`, and the screenshot / bench /
+camera flags above.
+
+### Siege
+
+`U` surrounds the castle with two armies (`SiegeSystem`, tunables in `CastleDemo.SiegeParams`): on every side two ranks of
+twelve attackers march in from 30 m to a firing line 14 m outside the wall, and up to 24 defenders stand on free ground
+inside the walls (found through the layout's occupancy map). Every four seconds each holding unit fires once, all the
+shots going up in one batch; every five seconds the spent projectiles and the dead are retired in one batch (`X`
+purges now, `V` fires a volley now, `K` stops the automatic volleys). Attackers aim at the nearest defender in range or,
+failing that, at the nearest wall crest; defenders at the nearest attacker. A unit hit by a moving projectile dies: its
+rotation lock and motor go and it topples where it stands until the purge.
+
+* Units are the figure model (`Assets/Models/ConstructorFigure`, 0.354 x 0.48 x 0.12 m): the collision box is its bounding
+  box scaled like the bricks (1.77 x 2.4 x 0.6 m at scale 5, plus one margin in height so that the feet rest on the ground),
+  1 kg, rotation locked with a heading, a motor of 12 N (six of them go to the ground friction of 0.6) walking at 3 m/s.
+  Attackers are archers (red), on the gate side also gunners (dark red), rocketeers (orange) and mages (purple); defenders
+  are blue archers.
+* Arrows are the arrow model (`Assets/Models/ConstructorArrow`, a 0.15 x 0.018 x 0.3 m plate pointing +z; 0.75 x 0.1 x 1.5 m at
+  scale 5), 0.02 kg, aligned to their velocity, launched at a 55° elevation with the speed solved from the range (40 m/s at
+  most: further targets get the top speed and a short shot). Rockets are arrows under a constant 0.3 N thrust along their
+  launch direction; cannonballs 5 kg cubes at 35 m/s on the flat arc; bolts 0.1 kg cubes pulled towards their aim point with
+  3 N, with no drag, so they overshoot and swing back until they hit something. Launch velocities carry the implicit
+  Euler correction (`Ballistics`, + g h / 2 upward), so an undisturbed projectile passes through its aim point exactly.
+* Projectiles spawn 2.6 m from the shooter's shoulder along their velocity and never inside a castle brick (the shot is
+  skipped instead). Body pools: 512 units, 2 048 arrow-shaped and 512 cube projectiles reserved at load (3 072 retired slots
+  that cost nothing measurable), so the largest castle plus the siege fits in the 40 960 bodies.
+* Cost: the siege of the Outpost (109 units, a few hundred projectiles in flight) adds ~0.5 ms to the 7.6 ms frame; on the
+  Royal citadel it is lost in the noise (38 ms either way).
 
 ## Measured behaviour
 
@@ -182,7 +256,10 @@ submission).
 ## Known limits
 
 * Boxes only (the narrowphase is `collide.cpp`); no sleeping; discrete contacts at `x⁻`, so very fast small bodies
-  can tunnel (the reference behaves the same); no body removal (joints can be removed, their slots are reused).
+  can tunnel (the reference behaves the same); bodies are retired into pools rather than removed (a retired slot keeps
+  its thread in the per-body kernels and its instance in the draw, both idle).
+* Steering and aiming use the asynchronous pose readback (one or two frames old), so a siege is not bitwise reproducible
+  from run to run; the solver itself still is (spawns are ordered on the CPU, events use order-independent atomics).
 * Small scenes cost ~1–2 ms per step regardless of size: every iteration is `colours + 3` dispatches. The active
   colour count adapts to the scene to keep that low.
 * Determinism holds on one GPU/driver; other GPUs round differently.
@@ -198,8 +275,16 @@ submission).
 .\RunTests.ps1 -Platform EditMode -Filter Phys.AvbdGpu.Tests.GpuVsReferenceTests
 .\RunTests.ps1 -Platform EditMode -Filter Phys.AvbdGpu.Tests.PerformanceTests   # step times (excluded by default)
 .\RunTests.ps1 -Platform EditMode -Filter Phys.AvbdGpu.Tests.SnapFractureTests  # snap limits, GPU and reference
+.\RunTests.ps1 -Platform EditMode -Filter "Phys.AvbdGpu.Tests.DriveTests;Phys.AvbdGpu.Tests.BodyPoolTests;Phys.AvbdGpu.Tests.SiegeTests"
 .\RunTests.ps1 -Platform PlayMode -Filter Phys.AvbdGpu.Tests.CastleSmokeTests   # the smallest and largest castles stand, cannonball, snaps break
+.\RunTests.ps1 -Platform PlayMode -Filter Phys.AvbdGpu.Tests.SiegeSmokeTests    # the Outpost under siege: volleys, kills, purges
 ```
+
+`DriveTests` check the drives against the implicit Euler parabola and the reference mirror (constant force 1e-5, motor
+2e-3, a locked tall box that stays upright while a free one tips); `BodyPoolTests` that retired slots neither collide nor
+move, that a respawn starts from a clean state and that the events report what units and projectiles touch;
+`SiegeTests` the ballistics (closest approach 2e-3 m over three arcs), marching, a volley that kills its target and a
+600-step siege of the Outpost with synchronous readbacks.
 
 The runner forces D3D12 (`-GraphicsApi ""` for the editor default). `DiagnosticTests` only log traces and are
 excluded from the default runs, like `PerformanceTests`.
