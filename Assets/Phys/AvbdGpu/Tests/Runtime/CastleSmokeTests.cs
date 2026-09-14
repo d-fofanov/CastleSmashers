@@ -49,7 +49,7 @@ namespace Phys.AvbdGpu.Tests
         public IEnumerator DryStackedCastleStands()
         {
             Assert.IsNotNull(m_Demo.BrickMesh, "brick mesh");
-            Assert.AreEqual(1, m_Demo.Renderer.MeshRanges.Count, "the bricks are drawn with the brick model");
+            Assert.AreEqual(3, m_Demo.Renderer.MeshRanges.Count, "the bricks are drawn with the brick model, the siege pools with the figure and arrow models");
             Assert.AreEqual(m_Demo.BrickCount, m_Demo.Renderer.MeshRanges[0].Count);
             m_Demo.World.GetPosesSync(out var start, out _);
             float maxMove = 0f;

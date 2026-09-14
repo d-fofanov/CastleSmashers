@@ -36,6 +36,24 @@ namespace Phys.Demo.Editor
             if (s.result != BuildResult.Succeeded && Application.isBatchMode) EditorApplication.Exit(1);
         }
 
+        /// <summary>Assigns the brick, figure and arrow meshes to the CastleDemo of Castle.unity and saves the scene (the player
+        /// needs the references serialised; the editor falls back to loading them by path).</summary>
+        [MenuItem("Phys/Assign Castle Meshes")]
+        public static void AssignCastleMeshes()
+        {
+            var scene = UnityEditor.SceneManagement.EditorSceneManager.OpenScene("Assets/Phys/Demo/Castle.unity");
+            var demo = UnityEngine.Object.FindFirstObjectByType<CastleDemo>();
+            if (demo == null) { Debug.LogError("Castle.unity has no CastleDemo"); return; }
+            demo.BrickMesh = AssetDatabase.LoadAssetAtPath<Mesh>("Assets/Models/ConstructorBlock2x3/ConstructorBlock2x3.fbx");
+            demo.FigureMesh = AssetDatabase.LoadAssetAtPath<Mesh>("Assets/Models/ConstructorFigure/ConstructorFigure.fbx");
+            demo.ArrowMesh = AssetDatabase.LoadAssetAtPath<Mesh>("Assets/Models/ConstructorArrow/ConstructorArrow.fbx");
+            if (demo.SiegeParams.VolleyInterval <= 0) demo.SiegeParams = Phys.AvbdGpu.Siege.SiegeSettings.Default;
+            EditorUtility.SetDirty(demo);
+            UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(scene);
+            UnityEditor.SceneManagement.EditorSceneManager.SaveScene(scene);
+            Debug.Log($"AssignCastleMeshes: brick {demo.BrickMesh}, figure {demo.FigureMesh}, arrow {demo.ArrowMesh}");
+        }
+
         /// <summary>Logs the guid / local id of the brick mesh (the reference serialised in Castle.unity).</summary>
         [MenuItem("Phys/Log Brick Mesh Reference")]
         public static void LogBrickMeshReference()

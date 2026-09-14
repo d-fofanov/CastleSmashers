@@ -455,6 +455,8 @@ MonoBehaviour:
   ShowHud: 1
   MaxBodies: 40960
   BrickMesh: {fileID: -7080205770756681836, guid: 2012e6235bc73a94ba974d678510bb2f, type: 3}
+  FigureMesh: {fileID: -3360807449873858051, guid: a7e52bc360a64628831765394423acfe, type: 3}
+  ArrowMesh: {fileID: 5581172060584242650, guid: 557c9b90f02f45bab8a06f79652bfc80, type: 3}
   BrickScale: 5
   BrickMass: 1
   BrickFriction: 0.6
@@ -465,6 +467,37 @@ MonoBehaviour:
   ShotCube: 0.12
   ShotMass: 20
   ShotVelocity: 24
+  SiegeOnLoad: 0
+  UnitCapacity: 512
+  ArrowCapacity: 2048
+  ShotCapacity: 512
+  UnitMass: 1
+  ArrowMass: 0.02
+  SiegeParams:
+    UnitSpeed: 3
+    UnitForce: 12
+    ArriveRadius: 0.5
+    VolleyInterval: 240
+    PurgeInterval: 300
+    ProjectileMaxAge: 1800
+    HitPoints: 1
+    ArrowElevationDeg: 55
+    ArrowMaxSpeed: 40
+    CannonSpeed: 45
+    RocketSpeed: 20
+    RocketThrust: 0.3
+    BoltSpeed: 12
+    BoltForce: 3
+    Range: 60
+    Spread: 0.03
+    LaunchOffset: 2.6
+    AttackDistance: 14
+    MarchDistance: 16
+    RankSpacing: 2.5
+    ColumnSpacing: 2.4
+    ArchersPerRank: 12
+    Ranks: 2
+    Defenders: 24
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

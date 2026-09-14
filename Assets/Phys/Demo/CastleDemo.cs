@@ -1,6 +1,7 @@
 using Phys.AvbdGpu;
 using Phys.AvbdGpu.Presentation;
 using Phys.AvbdGpu.Scenes;
+using Phys.AvbdGpu.Siege;
 using Unity.Mathematics;
 using UnityEngine;
 #if ENABLE_INPUT_SYSTEM
@@ -10,11 +11,16 @@ using UnityEngine.InputSystem;
 namespace Phys.Demo
 {
     /// <summary>A castle of construction bricks (Assets/Models/ConstructorBlock2x3) on the GPU solver (Castle.unity): every brick is a
-    /// box body drawn with the brick model. Bricks are either dry-stacked (friction only) or snapped together with breakable joints.</summary>
+    /// box body drawn with the brick model. Bricks are either dry-stacked (friction only) or snapped together with breakable joints.
+    /// A siege (key U) surrounds it with figures that march in and fire volleys at the garrison and the walls.</summary>
     public class CastleDemo : DemoBase
     {
         [Tooltip("The brick model (Assets/Models/ConstructorBlock2x3/ConstructorBlock2x3.fbx); the collision boxes are drawn when unset.")]
         public Mesh BrickMesh;
+        [Tooltip("The figure model (Assets/Models/ConstructorFigure/ConstructorFigure.fbx) drawn for the units.")]
+        public Mesh FigureMesh;
+        [Tooltip("The arrow model (Assets/Models/ConstructorArrow/ConstructorArrow.fbx) drawn for arrows and rockets.")]
+        public Mesh ArrowMesh;
         [Tooltip("Solver metres per model metre. 1 simulates the true 0.2 x 0.12 x 0.3 m brick; the default 5 puts the bricks in the " +
                  "metre / kilogram regime the solver's penalty ramp is tuned for (and slows the motion accordingly).")]
         public float BrickScale = 5f;
@@ -32,11 +38,22 @@ namespace Phys.Demo
         public float ShotCube = 0.12f;
         public float ShotMass = 30f;
         public float ShotVelocity = 24f;
+        [Tooltip("Spawn the armies when a castle is loaded (also the -avbd-siege flag).")]
+        public bool SiegeOnLoad;
+        [Tooltip("Body pools reserved for the siege: units, arrow-shaped and cube projectiles.")]
+        public int UnitCapacity = 512;
+        public int ArrowCapacity = 2048;
+        public int ShotCapacity = 512;
+        public float UnitMass = 1f;
+        public float ArrowMass = 0.02f;
+        public SiegeSettings SiegeParams = SiegeSettings.Default;
 
         BrickLayout m_Layout;
         BrickSpec m_Spec;
         int m_FirstBrick, m_SnapJoints;
         uint[] m_Tints;
+        SiegeSystem m_Siege;
+        bool m_SiegeActive;
         static readonly Color32 s_Iron = new Color32(70, 72, 78, 255);
 
         void Reset()
@@ -49,10 +66,12 @@ namespace Phys.Demo
         public int FirstBrick => m_FirstBrick;
         public int BrickCount => m_Layout?.Bricks.Count ?? 0;
         public BrickSpec Spec => m_Spec;
+        public SiegeSystem Siege => m_Siege;
+        public bool SiegeActive => m_SiegeActive;
 
         protected override int SceneCount => CastlePlan.Presets.Length;
         protected override string SceneName(int index) => CastlePlan.Presets[index].Name;
-        protected override float HudHeight => 220f;
+        protected override float HudHeight => 250f;
         protected override float3 ShotSize => ShotCube * BrickScale;
         protected override float ShotDensity => ShotMass / math.pow(ShotCube * BrickScale, 3f);
         /// <summary>Speeds scale with the square root of lengths under the same gravity (dynamic similarity).</summary>
@@ -70,18 +89,27 @@ namespace Phys.Demo
             var cfg = AvbdGpuConfig.ForBodies(MaxBodies);
             cfg.MaxJoints = MaxBodies * 12;                   // four snap joints per brick overlap (about ten per brick) plus drag joints
             cfg.MaxLinks = cfg.MaxJoints * 2 + 4096;
+            cfg.MaxSpawns = math.max(cfg.MaxSpawns, UnitCapacity + ArrowCapacity + ShotCapacity);
             return cfg;
         }
 
         protected override void Configure()
         {
-            foreach (var arg in System.Environment.GetCommandLineArgs()) if (arg == "-avbd-snap") Snap = true;
+            foreach (var arg in System.Environment.GetCommandLineArgs())
+            {
+                if (arg == "-avbd-snap") Snap = true;
+                if (arg == "-avbd-siege") SiegeOnLoad = true;
+            }
+            if (SiegeParams.VolleyInterval <= 0) SiegeParams = SiegeSettings.Default;   // a scene serialised before the field existed
             m_Renderer.Shadows = Shadows;
             m_Renderer.DrawJoints = false;
 #if UNITY_EDITOR
             if (BrickMesh == null) BrickMesh = UnityEditor.AssetDatabase.LoadAssetAtPath<Mesh>("Assets/Models/ConstructorBlock2x3/ConstructorBlock2x3.fbx");
+            if (FigureMesh == null) FigureMesh = UnityEditor.AssetDatabase.LoadAssetAtPath<Mesh>("Assets/Models/ConstructorFigure/ConstructorFigure.fbx");
+            if (ArrowMesh == null) ArrowMesh = UnityEditor.AssetDatabase.LoadAssetAtPath<Mesh>("Assets/Models/ConstructorArrow/ConstructorArrow.fbx");
 #endif
             if (BrickMesh == null) Debug.LogWarning("CastleDemo: no brick mesh assigned, drawing the collision boxes");
+            if (FigureMesh == null || ArrowMesh == null) Debug.LogWarning("CastleDemo: figure / arrow mesh not assigned, drawing the collision boxes");
         }
 
         protected override void BuildScene(int index, out float3 cameraTarget, out float cameraDistance)
@@ -110,6 +138,18 @@ namespace Phys.Demo
             if (BrickMesh != null)
                 m_Renderer.MeshRanges.Add(new AvbdGpuRenderer.MeshRange { Mesh = BrickMesh, Scale = BrickScale, Offset = m_Spec.MeshOffset, Start = m_FirstBrick, Count = n });
 
+            // the siege's body pools (retired slots until an army is spawned), drawn with the figure and arrow models
+            var siegeSpec = SiegeSpec.Default;
+            siegeSpec.Scale = BrickScale; siegeSpec.Margin = AvbdGpuConstants.CollisionMargin; siegeSpec.Friction = BrickFriction;
+            siegeSpec.UnitMass = UnitMass; siegeSpec.ArrowMass = ArrowMass; siegeSpec.BallCube = ShotCube;
+            m_Siege = new SiegeSystem(m_World, siegeSpec, UnitCapacity, ArrowCapacity, ShotCapacity, SiegeParams) { OnSpawned = OnSiegeSpawn, OnRetiring = OnSiegeRetire };
+            m_SiegeActive = false;
+            if (FigureMesh != null)
+                m_Renderer.MeshRanges.Add(new AvbdGpuRenderer.MeshRange { Mesh = FigureMesh, Scale = BrickScale, Offset = siegeSpec.UnitMeshOffset, Start = m_Siege.Units.Start, Count = m_Siege.Units.Capacity });
+            if (ArrowMesh != null)
+                m_Renderer.MeshRanges.Add(new AvbdGpuRenderer.MeshRange { Mesh = ArrowMesh, Scale = BrickScale, Offset = siegeSpec.ArrowMeshOffset, Start = m_Siege.Arrows.Start, Count = m_Siege.Arrows.Capacity });
+            if (SiegeOnLoad) ToggleSiege();
+
             // fewer substeps for the big castles: their cannonball crosses a fraction of the wall thickness per step even at one
             m_World.Params.Substeps = n > 20000 ? 1 : n > 8000 ? 2 : 3;
             cameraTarget = new float3(0f, 1.2f * plan.WallCourses * Brick.BodyHeight * BrickScale, 0f);
@@ -133,9 +173,45 @@ namespace Phys.Demo
 
         protected override void OnShot(int body)
         {
+            SetTint(body, s_Iron);
+        }
+
+        void SetTint(int body, Color32 color)
+        {
             if (m_Tints == null || m_Tints.Length <= body) System.Array.Resize(ref m_Tints, math.max(body + 1, 1024));
-            m_Tints[body] = AvbdGpuRenderer.Tint(s_Iron);
+            m_Tints[body] = AvbdGpuRenderer.Tint(color);
             m_Renderer.SetTints(m_Tints, body, 1);
+        }
+
+        void OnSiegeSpawn(int body, Color32 color) => SetTint(body, color);
+
+        void OnSiegeRetire(int body)
+        {
+            if (DragBody == body) ReleaseDrag();
+        }
+
+        /// <summary>The cannonball goes through the siege's shot pool, so it is purged like every other spent projectile.</summary>
+        public override void Shoot()
+        {
+            var cam = Camera.main;
+            if (cam == null || m_Siege == null) { base.Shoot(); return; }
+            float3 forward = cam.transform.forward;
+            m_Siege.Launch(ProjectileKind.Cannonball, SiegeSystem.Attackers, (float3)cam.transform.position + forward * ShotDistance, forward * ShotSpeed, default, ShotMass);
+        }
+
+        /// <summary>Spawns the armies around the castle, or clears them.</summary>
+        public void ToggleSiege()
+        {
+            if (m_Siege == null) return;
+            if (m_SiegeActive) { ReleaseDrag(); m_Siege.ClearArmies(); }
+            else m_Siege.SpawnArmies(m_Layout, CastlePlan.Presets[m_Scene], m_Spec);
+            m_SiegeActive = !m_SiegeActive;
+        }
+
+        protected override void OnStep()
+        {
+            if (m_Siege != null && (m_SiegeActive || m_Siege.ProjectileList.Count > 0))
+                m_Siege.Tick(m_World.ReadPositions, m_World.ReadCount, m_World.ReadStep);
         }
 
         protected override void HandleSceneKeys()
@@ -145,6 +221,10 @@ namespace Phys.Demo
             if (kb.jKey.wasPressedThisFrame) { Snap = !Snap; Load(m_Scene); }
             if (kb.f6Key.wasPressedThisFrame) m_Renderer.DrawCollisionBoxes = !m_Renderer.DrawCollisionBoxes;
             if (kb.f7Key.wasPressedThisFrame) { Shadows = !Shadows; m_Renderer.Shadows = Shadows; }
+            if (kb.uKey.wasPressedThisFrame) ToggleSiege();
+            if (kb.vKey.wasPressedThisFrame && m_Siege != null) m_Siege.Volley(m_World.ReadPositions, m_World.ReadCount, m_World.ReadStep);
+            if (kb.kKey.wasPressedThisFrame && m_Siege != null) m_Siege.AutoVolleys = !m_Siege.AutoVolleys;
+            if (kb.xKey.wasPressedThisFrame && m_Siege != null) { ReleaseDrag(); m_Siege.Purge(); }
 #endif
         }
 
@@ -156,11 +236,13 @@ namespace Phys.Demo
                 $"<b>[{m_Scene + 1}] {plan.Name}</b>{PausedText}\n" +
                 $"{BrickCount} bricks of {Brick.Width * BrickScale * 100f:F0} x {Brick.BodyHeight * BrickScale * 100f:F0} x {Brick.Length * BrickScale * 100f:F0} cm (model x {BrickScale:G3}), {m_Spec.BrickMass:F2} kg; " +
                 $"{side:F1} m square, walls {plan.WallCourses} courses, towers {plan.TowerCourses}, keep {plan.KeepCourses}\n" +
-                (Snap ? $"<color=#88ddff>snapped</color>: {m_SnapJoints} joints; a snap breaks at {SnapFractureLateral:F0} N sideways, {SnapFractureTension:F0} N upward or {m_Spec.SnapBreakDistance * 100f:F1} cm apart  -  cannonball {ShotMass:F0} kg\n\n"
-                      : $"dry-stacked (friction only)  -  cannonball {ShotMass:F0} kg\n\n") +
+                (Snap ? $"<color=#88ddff>snapped</color>: {m_SnapJoints} joints; a snap breaks at {SnapFractureLateral:F0} N sideways, {SnapFractureTension:F0} N upward or {m_Spec.SnapBreakDistance * 100f:F1} cm apart  -  cannonball {ShotMass:F0} kg\n"
+                      : $"dry-stacked (friction only)  -  cannonball {ShotMass:F0} kg\n") +
+                (m_SiegeActive ? $"<color=#ffcc88>siege</color> (volleys {(m_Siege.AutoVolleys ? "auto" : "manual")}): {m_Siege.Summary()}\n\n" : "no siege (U)\n\n") +
                 StatsText() + "\n\n" +
-                "1-0 castle size  , . prev/next  R rebuild  J snap bricks on/off  Space pause  N step  F1 contacts  F2 colour mode  F5 joints  F6 collision boxes  F7 shadows\n" +
-                "+/- iterations  [ ] substeps  B/Enter shoot a cannonball  G gravity  H hide HUD  LMB drag brick  RMB orbit  MMB pan  wheel / Q E zoom  W A S D orbit";
+                "1-0 castle size  , . prev/next  R rebuild  J snap bricks on/off  U siege on/off  V volley  K auto volleys  X purge  Space pause  N step\n" +
+                "F1 contacts  F2 colour mode  F5 joints  F6 collision boxes  F7 shadows  +/- iterations  [ ] substeps  B/Enter cannonball  G gravity  H hide HUD\n" +
+                "LMB drag  RMB orbit  MMB pan  wheel / Q E zoom  W A S D orbit";
         }
     }
 }

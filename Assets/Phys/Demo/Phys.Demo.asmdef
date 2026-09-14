@@ -5,6 +5,7 @@
         "Phys.AvbdGpu",
         "Phys.AvbdGpu.Presentation",
         "Phys.AvbdGpu.Scenes",
+        "Phys.AvbdGpu.Siege",
         "Unity.Mathematics",
         "Unity.InputSystem"
     ],

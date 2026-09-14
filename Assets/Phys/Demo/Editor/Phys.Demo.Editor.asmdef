@@ -2,7 +2,8 @@
     "name": "Phys.Demo.Editor",
     "rootNamespace": "Phys.Demo.Editor",
     "references": [
-        "Phys.Demo"
+        "Phys.Demo",
+        "Phys.AvbdGpu.Siege"
     ],
     "includePlatforms": [
         "Editor"

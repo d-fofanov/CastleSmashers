@@ -8,6 +8,7 @@
         "Phys.AvbdGpu",
         "Phys.AvbdGpu.Presentation",
         "Phys.AvbdGpu.Scenes",
+        "Phys.AvbdGpu.Siege",
         "Phys.Demo"
     ],
     "includePlatforms": [],

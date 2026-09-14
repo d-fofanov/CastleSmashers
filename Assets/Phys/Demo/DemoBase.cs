@@ -23,7 +23,7 @@ namespace Phys.Demo
         protected int m_Scene;
         protected bool m_Paused;
         bool m_StepOnce;
-        int m_DragJoint = -1;
+        int m_DragJoint = -1, m_DragBody = -1;
         float m_DragDistance;
         int m_Frames;
         readonly FrameTiming[] m_Timings = new FrameTiming[1];
@@ -63,6 +63,8 @@ namespace Phys.Demo
         /// <summary>Stiffness of the soft world joint that drags a picked body.</summary>
         protected virtual float DragStiffness => 5000f;
         protected virtual void OnShot(int body) { }
+        /// <summary>Called before every world step that the frame loop runs (not paused, or single-stepping).</summary>
+        protected virtual void OnStep() { }
         /// <summary>Steps run right after a scene is built, before it is shown (lets stacked scenes settle their penalties).</summary>
         protected virtual int SettleSteps => 0;
         /// <summary>Substeps used for the settle steps (0 = the current parameter).</summary>
@@ -102,7 +104,7 @@ namespace Phys.Demo
         {
             index = math.clamp(index, 0, SceneCount - 1);
             m_Scene = index;
-            m_DragJoint = -1;
+            m_DragJoint = m_DragBody = -1;
             m_World.Clear();
             m_Renderer.ClearTints();
             m_Renderer.MeshRanges.Clear();
@@ -130,6 +132,7 @@ namespace Phys.Demo
             HandleMouse();
             if (!m_Paused || m_StepOnce)
             {
+                OnStep();
                 m_World.Step();
                 m_StepOnce = false;
             }
@@ -194,7 +197,7 @@ namespace Phys.Demo
         }
 
         /// <summary>Shoots a box from the camera along its view direction.</summary>
-        public void Shoot()
+        public virtual void Shoot()
         {
             var cam = Camera.main;
             if (cam == null) return;
@@ -220,6 +223,7 @@ namespace Phys.Demo
                     float3 worldHit = (float3)ray.origin + (float3)ray.direction * dist;
                     m_DragDistance = math.max(dist, 0.1f);
                     m_DragJoint = m_World.AddJointIndexed(-1, body, worldHit, local, DragStiffness, 0f);
+                    m_DragBody = body;
                 }
             }
             else if (mouse.leftButton.isPressed && m_DragJoint >= 0)
@@ -228,11 +232,19 @@ namespace Phys.Demo
                 m_World.SetJointAnchor(m_DragJoint, (float3)ray.origin + (float3)ray.direction * m_DragDistance);
             }
             else if (!mouse.leftButton.isPressed && m_DragJoint >= 0)
-            {
-                m_World.RemoveJoint(m_DragJoint);
-                m_DragJoint = -1;
-            }
+                ReleaseDrag();
 #endif
+        }
+
+        /// <summary>The body held by the mouse drag joint, or -1.</summary>
+        protected int DragBody => m_DragJoint >= 0 ? m_DragBody : -1;
+
+        /// <summary>Removes the mouse drag joint (also needed before its body is retired).</summary>
+        protected void ReleaseDrag()
+        {
+            if (m_DragJoint < 0) return;
+            m_World.RemoveJoint(m_DragJoint);
+            m_DragJoint = m_DragBody = -1;
         }
 
         /// <summary>The line of solver statistics and parameters shared by the HUDs.</summary>
