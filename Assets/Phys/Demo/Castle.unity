@@ -478,7 +478,7 @@ MonoBehaviour:
     UnitForce: 12
     ArriveRadius: 0.5
     VolleyInterval: 240
-    PurgeInterval: 300
+    RetireDelay: 120
     ProjectileMaxAge: 1800
     HitPoints: 1
     ArrowElevationDeg: 55

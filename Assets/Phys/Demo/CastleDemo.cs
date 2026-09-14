@@ -100,7 +100,7 @@ namespace Phys.Demo
                 if (arg == "-avbd-snap") Snap = true;
                 if (arg == "-avbd-siege") SiegeOnLoad = true;
             }
-            if (SiegeParams.VolleyInterval <= 0) SiegeParams = SiegeSettings.Default;   // a scene serialised before the field existed
+            SiegeParams = SiegeParams.WithDefaults();   // fields a scene was serialised without come out as zero
             m_Renderer.Shadows = Shadows;
             m_Renderer.DrawJoints = false;
 #if UNITY_EDITOR
@@ -240,7 +240,7 @@ namespace Phys.Demo
                       : $"dry-stacked (friction only)  -  cannonball {ShotMass:F0} kg\n") +
                 (m_SiegeActive ? $"<color=#ffcc88>siege</color> (volleys {(m_Siege.AutoVolleys ? "auto" : "manual")}): {m_Siege.Summary()}\n\n" : "no siege (U)\n\n") +
                 StatsText() + "\n\n" +
-                "1-0 castle size  , . prev/next  R rebuild  J snap bricks on/off  U siege on/off  V volley  K auto volleys  X purge  Space pause  N step\n" +
+                "1-0 castle size  , . prev/next  R rebuild  J snap bricks on/off  U siege on/off  V volley  K auto volleys  X retire the dead and spent now  Space pause  N step\n" +
                 "F1 contacts  F2 colour mode  F5 joints  F6 collision boxes  F7 shadows  +/- iterations  [ ] substeps  B/Enter cannonball  G gravity  H hide HUD\n" +
                 "LMB drag  RMB orbit  MMB pan  wheel / Q E zoom  W A S D orbit";
         }

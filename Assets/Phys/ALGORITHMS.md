@@ -104,8 +104,9 @@ not use them, so the reference comparisons hold as before (the drives and the ro
   and pools are contiguous ranges (one mesh range, one event readback each).
 * **Events** are or / add atomics on a per-body word (kinds touched, impacts), which are order-independent, so the
   step stays bitwise reproducible; the words are sticky until the slot is respawned and are read back asynchronously
-  per pool range. Whether a projectile is spent (touched anything) and whether a unit was hit (an impact by a projectile
-  faster than 2 m/s) both come from them; the CPU never inspects contacts.
+  per pool range. Whether a projectile is spent (touched anything: its drive is switched off, and it is retired after a
+  cooldown) and whether a unit was hit (an impact by a projectile faster than 2 m/s) both come from them; the CPU never
+  inspects contacts.
 * **Ballistics**: implicit Euler falls `g t h / 2` further than the parabola after a time `t` (`x_n = x_0 + v_0 t + g
   h² n (n + 1) / 2`), so the launch velocity of a projectile gets `+ g h / 2` upward and the discrete trajectory passes
   through the aim point exactly (`SiegeTests`: closest approach 2e-3 m).

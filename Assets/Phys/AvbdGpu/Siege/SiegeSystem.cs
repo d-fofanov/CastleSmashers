@@ -1,6 +1,7 @@
 // Units and projectiles on the GPU solver: figures that march, hold a line and fire volleys, arrows / cannonballs / rockets
-// / homing bolts that fly, hit and lie about until the next purge. Everything is an ordinary box body of the solver; the
-// CPU side only steers (drive uploads), fires (batched spawns), reads the contact events back and purges in batches.
+// / homing bolts that fly, hit and lie about for a while. Everything is an ordinary box body of the solver; the CPU side
+// only steers (drive uploads), fires (batched spawns), reads the contact events back and retires the dead and the spent
+// once their cooldown has run out.
 
 using System;
 using System.Collections.Generic;
@@ -35,6 +36,10 @@ namespace Phys.AvbdGpu.Siege
         public ProjectileKind Kind;
         public int Team;
         public int LaunchStep;
+        /// <summary>The step at which the projectile was seen to have touched something (-1 while in flight); its drive is
+        /// switched off then and it is retired <see cref="SiegeSettings.RetireDelay"/> steps later.</summary>
+        public int SpentStep;
+        public bool Spent => SpentStep >= 0;
     }
 
     /// <summary>Tunables of the siege (solver metres, seconds as steps at 60 Hz). Defaults suit the castle at brick scale 5.</summary>
@@ -42,7 +47,9 @@ namespace Phys.AvbdGpu.Siege
     public struct SiegeSettings
     {
         public float UnitSpeed, UnitForce, ArriveRadius;
-        public int VolleyInterval, PurgeInterval, ProjectileMaxAge, HitPoints;
+        /// <summary>Volleys every VolleyInterval steps; a dead unit or a spent projectile is retired RetireDelay steps after its
+        /// death / first contact; a projectile still flying after ProjectileMaxAge steps is retired as well.</summary>
+        public int VolleyInterval, RetireDelay, ProjectileMaxAge, HitPoints;
         public float ArrowElevationDeg, ArrowMaxSpeed, CannonSpeed, RocketSpeed, RocketThrust, BoltSpeed, BoltForce;
         public float Range, Spread, LaunchOffset;
         public float AttackDistance, MarchDistance, RankSpacing, ColumnSpacing;
@@ -51,12 +58,41 @@ namespace Phys.AvbdGpu.Siege
         public static SiegeSettings Default => new SiegeSettings
         {
             UnitSpeed = 3f, UnitForce = 12f, ArriveRadius = 0.5f,
-            VolleyInterval = 240, PurgeInterval = 300, ProjectileMaxAge = 1800, HitPoints = 1,
+            VolleyInterval = 240, RetireDelay = 120, ProjectileMaxAge = 1800, HitPoints = 1,
             ArrowElevationDeg = 55f, ArrowMaxSpeed = 40f, CannonSpeed = 35f, RocketSpeed = 20f, RocketThrust = 0.3f, BoltSpeed = 12f, BoltForce = 3f,
             Range = 60f, Spread = 0.03f, LaunchOffset = 2.6f,
             AttackDistance = 14f, MarchDistance = 16f, RankSpacing = 2.5f, ColumnSpacing = 2.4f,
             ArchersPerRank = 12, Ranks = 2, Defenders = 24,
         };
+
+        /// <summary>These settings with every zero field (a scene serialised before the field existed) taken from the defaults.</summary>
+        public SiegeSettings WithDefaults()
+        {
+            var d = Default;
+            var s = this;
+            if (s.UnitSpeed <= 0f) s.UnitSpeed = d.UnitSpeed;
+            if (s.UnitForce <= 0f) s.UnitForce = d.UnitForce;
+            if (s.ArriveRadius <= 0f) s.ArriveRadius = d.ArriveRadius;
+            if (s.VolleyInterval <= 0) s.VolleyInterval = d.VolleyInterval;
+            if (s.RetireDelay <= 0) s.RetireDelay = d.RetireDelay;
+            if (s.ProjectileMaxAge <= 0) s.ProjectileMaxAge = d.ProjectileMaxAge;
+            if (s.HitPoints <= 0) s.HitPoints = d.HitPoints;
+            if (s.ArrowElevationDeg <= 0f) s.ArrowElevationDeg = d.ArrowElevationDeg;
+            if (s.ArrowMaxSpeed <= 0f) s.ArrowMaxSpeed = d.ArrowMaxSpeed;
+            if (s.CannonSpeed <= 0f) s.CannonSpeed = d.CannonSpeed;
+            if (s.RocketSpeed <= 0f) s.RocketSpeed = d.RocketSpeed;
+            if (s.RocketThrust <= 0f) s.RocketThrust = d.RocketThrust;
+            if (s.BoltSpeed <= 0f) s.BoltSpeed = d.BoltSpeed;
+            if (s.BoltForce <= 0f) s.BoltForce = d.BoltForce;
+            if (s.Range <= 0f) s.Range = d.Range;
+            if (s.LaunchOffset <= 0f) s.LaunchOffset = d.LaunchOffset;
+            if (s.AttackDistance <= 0f) s.AttackDistance = d.AttackDistance;
+            if (s.RankSpacing <= 0f) s.RankSpacing = d.RankSpacing;
+            if (s.ColumnSpacing <= 0f) s.ColumnSpacing = d.ColumnSpacing;
+            if (s.ArchersPerRank <= 0) s.ArchersPerRank = d.ArchersPerRank;
+            if (s.Ranks <= 0) s.Ranks = d.Ranks;
+            return s;
+        }
     }
 
     /// <summary>Two armies around a brick castle: attackers outside its walls, defenders inside. Call <see cref="Tick"/> once
@@ -80,8 +116,10 @@ namespace Phys.AvbdGpu.Siege
         public Action<int, Color32> OnSpawned;
         /// <summary>Called with the body index before a unit or projectile is retired (release joints on it).</summary>
         public Action<int> OnRetiring;
-        public bool AutoVolleys = true, AutoPurges = true;
-        public int Volleys, Purges, ShotsFired;
+        public bool AutoVolleys = true;
+        /// <summary>Retire the dead and the spent on their own once their cooldown has run out (off: only <see cref="Purge"/> does).</summary>
+        public bool AutoRetire = true;
+        public int Volleys, ShotsFired, Retired;
         public readonly int[] Alive = new int[2], Dead = new int[2];
 
         // the castle's outer wall faces (xz) and the crest height, for aiming at the walls, and its layout, so that no
@@ -97,7 +135,7 @@ namespace Phys.AvbdGpu.Siege
         {
             World = world;
             Spec = spec;
-            Settings = settings ?? SiegeSettings.Default;
+            Settings = (settings ?? SiegeSettings.Default).WithDefaults();
             Units = new BodyPool(world, unitCapacity);
             Arrows = new BodyPool(world, arrowCapacity);
             Shots = new BodyPool(world, shotCapacity);
@@ -111,7 +149,6 @@ namespace Phys.AvbdGpu.Siege
 
         public int LiveProjectiles => ProjectileList.Count;
         public int NextVolleyIn => Settings.VolleyInterval - World.StepIndex % Settings.VolleyInterval;
-        public int NextPurgeIn => Settings.PurgeInterval - World.StepIndex % Settings.PurgeInterval;
 
         // ------------------------------------------------------------------------------------------------ armies
 
@@ -271,16 +308,34 @@ namespace Phys.AvbdGpu.Siege
 
         // ------------------------------------------------------------------------------------------------ per step
 
-        /// <summary>Hits, steering, the scheduled volley and purge. <paramref name="positions"/> are the latest read-back body
-        /// positions, taken after step <paramref name="positionsStep"/> (null: units keep their drives); units spawned at or after
-        /// that step are not in them yet and wait.</summary>
+        /// <summary>Hits, contacts of the projectiles, steering, the scheduled volley and the retirements that are due.
+        /// <paramref name="positions"/> are the latest read-back body positions, taken after step <paramref name="positionsStep"/>
+        /// (null: units keep their drives); units spawned at or after that step are not in them yet and wait.</summary>
         public void Tick(float4[] positions, int positionCount, int positionsStep)
         {
             UpdateHits();
+            UpdateSpent();
             Steer(positions, positionCount, positionsStep);
             int step = World.StepIndex;
             if (AutoVolleys && step > 0 && step % Settings.VolleyInterval == 0) Volley(positions, positionCount, positionsStep);
-            if (AutoPurges && step > 0 && step % Settings.PurgeInterval == 0) Purge();
+            if (AutoRetire) RetireDue();
+        }
+
+        /// <summary>A projectile that has touched anything (or flown for too long) is spent: its drive is switched off at once
+        /// (rockets and bolts fly on inertia from their first collision) and its cooldown starts.</summary>
+        void UpdateSpent()
+        {
+            var events = World.ReadEvents;
+            for (int i = 0; i < ProjectileList.Count; i++)
+            {
+                var p = ProjectileList[i];
+                if (p.Spent) continue;
+                bool touched = GpuBodyEvents.Touched(events[p.Body]);
+                if (!touched && World.StepIndex - p.LaunchStep <= Settings.ProjectileMaxAge) continue;
+                p.SpentStep = touched ? World.StepIndex : World.StepIndex - Settings.RetireDelay;   // over age: retired right away
+                ProjectileList[i] = p;
+                if (World.GetBodyDrive(p.Body).Mode != GpuBodyDrive.None) World.SetBodyDrive(p.Body, default);
+            }
         }
 
         static bool Known(in Unit u, int positionCount, int positionsStep) => u.Body < positionCount && u.SpawnStep < positionsStep;
@@ -300,7 +355,7 @@ namespace Phys.AvbdGpu.Siege
             }
         }
 
-        /// <summary>A unit dies: its rotation is unlocked and its motor switched off, so it topples; retired at the next purge.</summary>
+        /// <summary>A unit dies: its rotation is unlocked and its motor switched off, so it topples; retired after its cooldown.</summary>
         public void Kill(int unitIndex)
         {
             var u = UnitList[unitIndex];
@@ -463,23 +518,27 @@ namespace Phys.AvbdGpu.Siege
                     break;
             }
             if (body < 0) return -1;
-            ProjectileList.Add(new Projectile { Body = body, Kind = kind, Team = team, LaunchStep = World.StepIndex });
+            ProjectileList.Add(new Projectile { Body = body, Kind = kind, Team = team, LaunchStep = World.StepIndex, SpentStep = -1 });
             OnSpawned?.Invoke(body, ProjectileColor(kind));
             return body;
         }
 
-        // ------------------------------------------------------------------------------------------------ purge
+        // ------------------------------------------------------------------------------------------------ retirement
 
-        /// <summary>Retires every dead unit and every spent projectile (one that touched anything, or older than
-        /// <see cref="SiegeSettings.ProjectileMaxAge"/>) in one batch.</summary>
-        public int Purge()
+        /// <summary>Retires the dead units and spent projectiles whose cooldown (<see cref="SiegeSettings.RetireDelay"/> steps
+        /// since the death / first contact) has run out; each on its own, no batches.</summary>
+        public int RetireDue() => Retire(Settings.RetireDelay);
+
+        /// <summary>Retires every dead unit and every spent projectile at once, cooldowns ignored (the X key).</summary>
+        public int Purge() => Retire(0);
+
+        int Retire(int delay)
         {
-            int retired = 0;
-            var events = World.ReadEvents;
+            int retired = 0, step = World.StepIndex;
             for (int i = UnitList.Count - 1; i >= 0; i--)
             {
                 var u = UnitList[i];
-                if (u.State != UnitState.Dead) continue;
+                if (u.State != UnitState.Dead || step - u.DeathStep < delay) continue;
                 OnRetiring?.Invoke(u.Body);
                 Units.Retire(u.Body);
                 UnitList.RemoveAt(i);
@@ -488,23 +547,23 @@ namespace Phys.AvbdGpu.Siege
             for (int i = ProjectileList.Count - 1; i >= 0; i--)
             {
                 var p = ProjectileList[i];
-                bool spent = GpuBodyEvents.Touched(events[p.Body]) || World.StepIndex - p.LaunchStep > Settings.ProjectileMaxAge;
-                if (!spent) continue;
+                if (!p.Spent || step - p.SpentStep < delay) continue;
                 OnRetiring?.Invoke(p.Body);
                 PoolOf(p.Kind).Retire(p.Body);
                 ProjectileList.RemoveAt(i);
                 retired++;
             }
-            Purges++;
+            Retired += retired;
             return retired;
         }
 
         public string Summary()
         {
-            int marching = 0;
+            int marching = 0, spent = 0;
             foreach (var u in UnitList) if (u.State == UnitState.Marching) marching++;
+            foreach (var p in ProjectileList) if (p.Spent) spent++;
             return $"attackers {Alive[Attackers]} alive / {Dead[Attackers]} dead ({marching} marching), defenders {Alive[Defenders]} alive / {Dead[Defenders]} dead; " +
-                   $"projectiles {ProjectileList.Count} live, {ShotsFired} fired in {Volleys} volleys; next volley {NextVolleyIn / 60f:F1} s, purge {NextPurgeIn / 60f:F1} s; " +
+                   $"projectiles {ProjectileList.Count - spent} flying, {spent} spent, {ShotsFired} fired in {Volleys} volleys, {Retired} retired after {Settings.RetireDelay / 60f:F1} s; next volley {NextVolleyIn / 60f:F1} s; " +
                    $"pools {Units.Alive}/{Units.Capacity} units, {Arrows.Alive}/{Arrows.Capacity} arrows, {Shots.Alive}/{Shots.Capacity} shots";
         }
     }

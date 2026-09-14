@@ -35,7 +35,7 @@ namespace Phys.AvbdGpu.Tests
             m_Demo.SiegeOnLoad = true;
             var settings = SiegeSettings.Default;
             settings.VolleyInterval = 90;      // 1.5 s
-            settings.PurgeInterval = 180;      // 3 s
+            settings.RetireDelay = 120;        // 2 s
             settings.MarchDistance = 6f;
             m_Demo.SiegeParams = settings;
 #if UNITY_EDITOR
@@ -78,7 +78,7 @@ namespace Phys.AvbdGpu.Tests
             Debug.Log("siege smoke:\n" + log);
             Assert.Greater(siege.Volleys, 3, "volleys were fired");
             Assert.Greater(siege.ShotsFired, 100, "arrows flew");
-            Assert.Greater(siege.Purges, 2, "purges ran");
+            Assert.Greater(siege.Retired, 0, "the dead and the spent were retired after their cooldown");
             Assert.Less(siege.ProjectileList.Count, siege.ShotsFired, "spent projectiles were retired");
             int marching = 0;
             foreach (var u in siege.UnitList) if (u.State == UnitState.Marching) marching++;

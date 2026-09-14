@@ -73,7 +73,7 @@ namespace Phys.AvbdGpu.Tests
         {
             var s = SiegeSettings.Default;
             s.Spread = 0f;
-            s.VolleyInterval = 60; s.PurgeInterval = 120;
+            s.VolleyInterval = 60; s.RetireDelay = 120;
             s.ArchersPerRank = 3; s.Ranks = 1; s.Defenders = 4; s.MarchDistance = 4f; s.AttackDistance = 10f;
             return s;
         }
@@ -132,7 +132,7 @@ namespace Phys.AvbdGpu.Tests
             using var a = new Arena();
             var settings = TestSettings();
             a.MakeSiege(settings);
-            a.Siege.AutoVolleys = false; a.Siege.AutoPurges = false;
+            a.Siege.AutoVolleys = false; a.Siege.AutoRetire = false;
             int archer = a.Siege.SpawnUnit(UnitKind.Archer, SiegeSystem.Attackers, new float3(0, 0, -15), new float3(0, 0, -15), 0f, holding: true);
             // a gunner only aims at walls, so the victim does not shoot back
             int victim = a.Siege.SpawnUnit(UnitKind.Gunner, SiegeSystem.Defenders, new float3(0, 0, 0), new float3(0, 0, 0), math.PI, holding: true);
@@ -156,6 +156,7 @@ namespace Phys.AvbdGpu.Tests
             Assert.AreEqual(0u, a.World.GetBodyFlags(victim) & (GpuBodyDef.FlagLockRotation | GpuBodyDef.FlagHeading), "a dead unit may topple");
             // the arrow is spent, and the purge retires it together with the corpse
             Assert.IsTrue(GpuBodyEvents.Touched(a.World.GetEventsSync(arrowOfArcher, 1)[0]), "the arrow touched something");
+            Assert.IsTrue(a.Siege.ProjectileList[0].Spent, "the siege saw the contact");
             Assert.AreEqual(UnitState.Holding, a.Siege.UnitList[0].State, "the archer is untouched");
             int retired = a.Siege.Purge();
             Assert.AreEqual(2, retired, "one spent arrow and one dead unit");
@@ -169,12 +170,47 @@ namespace Phys.AvbdGpu.Tests
         }
 
         [Test]
+        public void DeadUnitsAndSpentProjectilesRetireAfterTheirCooldown()
+        {
+            using var a = new Arena();
+            var settings = TestSettings();   // RetireDelay 120
+            a.MakeSiege(settings);
+            a.Siege.AutoVolleys = false;
+            a.Siege.SpawnUnit(UnitKind.Archer, SiegeSystem.Attackers, new float3(0, 0, -15), new float3(0, 0, -15), 0f, holding: true);
+            int victim = a.Siege.SpawnUnit(UnitKind.Gunner, SiegeSystem.Defenders, new float3(0, 0, 0), new float3(0, 0, 0), math.PI, holding: true);
+            a.Run(5);
+            a.World.GetPosesSync(out var pos, out _);
+            Assert.AreEqual(1, a.Siege.Volley(pos, pos.Length, a.World.StepIndex));
+            int arrow = a.Siege.ProjectileList[0].Body;
+            int deathStep = -1;
+            for (int i = 0; i < 300 && deathStep < 0; i++)
+            {
+                a.Run(1);
+                if (a.Siege.UnitList[1].State == UnitState.Dead) deathStep = a.Siege.UnitList[1].DeathStep;
+            }
+            Assert.GreaterOrEqual(deathStep, 0, "the arrow killed the defender");
+            Assert.IsTrue(a.Siege.ProjectileList[0].Spent, "the arrow is spent");
+            Assert.AreEqual(deathStep, a.Siege.ProjectileList[0].SpentStep, "same contact, same step");
+            // the tick at deathStep + RetireDelay retires both; until then they stay (the corpse toppling, the arrow stuck)
+            a.Run(deathStep + settings.RetireDelay - a.World.StepIndex);
+            Assert.AreEqual(2, a.Siege.UnitList.Count, "still there one step before the cooldown ends");
+            Assert.AreEqual(1, a.Siege.ProjectileList.Count);
+            Assert.IsTrue(a.World.IsAlive(victim) && a.World.IsAlive(arrow));
+            a.Run(1);
+            Assert.AreEqual(1, a.Siege.UnitList.Count, "retired when the cooldown ended");
+            Assert.AreEqual(0, a.Siege.ProjectileList.Count);
+            Assert.IsFalse(a.World.IsAlive(victim) || a.World.IsAlive(arrow));
+            Assert.AreEqual(2, a.Siege.Retired);
+            GpuTestUtil.AssertFinite(a.World);
+        }
+
+        [Test]
         public void EveryProjectileKindFliesAndIsPurged()
         {
             using var a = new Arena();
             var settings = TestSettings();
             a.MakeSiege(settings);
-            a.Siege.AutoVolleys = false; a.Siege.AutoPurges = false;
+            a.Siege.AutoVolleys = false; a.Siege.AutoRetire = false;
             var target = new float3(0, 0, 20);
             foreach (var kind in new[] { UnitKind.Archer, UnitKind.Gunner, UnitKind.Rocketeer, UnitKind.Mage })
             {
@@ -186,6 +222,7 @@ namespace Phys.AvbdGpu.Tests
             a.World.GetPosesSync(out var pos, out _);
             // no enemies and no castle: only the gunner (aims at walls) has nothing to shoot at... give them all an aim by hand
             int fired = 0;
+            var bodies = new int[4];
             foreach (var kind in new[] { ProjectileKind.Arrow, ProjectileKind.Cannonball, ProjectileKind.Rocket, ProjectileKind.Bolt })
             {
                 float3 from = new float3(((int)kind - 1.5f) * 4f, 3f, 3f);
@@ -193,16 +230,23 @@ namespace Phys.AvbdGpu.Tests
                 var drive = kind == ProjectileKind.Rocket ? GpuBodyDrive.ConstantForce(dir * settings.RocketThrust)
                           : kind == ProjectileKind.Bolt ? GpuBodyDrive.TowardsPoint(target + new float3(0, 3, 0), settings.BoltForce) : default;
                 float speed = kind == ProjectileKind.Cannonball ? settings.CannonSpeed : kind == ProjectileKind.Rocket ? settings.RocketSpeed : kind == ProjectileKind.Bolt ? settings.BoltSpeed : 20f;
-                if (a.Siege.Launch(kind, SiegeSystem.Attackers, from, dir * speed, drive) >= 0) fired++;
+                bodies[(int)kind] = a.Siege.Launch(kind, SiegeSystem.Attackers, from, dir * speed, drive);
+                if (bodies[(int)kind] >= 0) fired++;
             }
             Assert.AreEqual(4, fired);
             Assert.AreEqual(2, a.Siege.Arrows.Alive); Assert.AreEqual(2, a.Siege.Shots.Alive);
+            Assert.AreEqual(GpuBodyDrive.Force, a.World.GetBodyDrive(bodies[(int)ProjectileKind.Rocket]).Mode);
+            Assert.AreEqual(GpuBodyDrive.ToPoint, a.World.GetBodyDrive(bodies[(int)ProjectileKind.Bolt]).Mode);
             a.Run(180);
             foreach (var p in a.Siege.ProjectileList)
             {
                 uint e = a.World.GetEventsSync(p.Body, 1)[0];
                 Assert.IsTrue(GpuBodyEvents.Touched(e), $"{p.Kind} touched something within 3 s (events {e:X})");
+                Assert.IsTrue(p.Spent, $"{p.Kind} is spent");
             }
+            // rockets and bolts lose their drive at the first contact
+            Assert.AreEqual(GpuBodyDrive.None, a.World.GetBodyDrive(bodies[(int)ProjectileKind.Rocket]).Mode, "the rocket flies on inertia after its first contact");
+            Assert.AreEqual(GpuBodyDrive.None, a.World.GetBodyDrive(bodies[(int)ProjectileKind.Bolt]).Mode, "the bolt is no longer pulled");
             Assert.AreEqual(4, a.Siege.Purge());
             Assert.AreEqual(0, a.Siege.Arrows.Alive + a.Siege.Shots.Alive);
             GpuTestUtil.AssertFinite(a.World);
@@ -238,7 +282,7 @@ namespace Phys.AvbdGpu.Tests
             Debug.Log("outpost siege: " + a.Siege.Summary());
             Assert.Greater(a.Siege.Volleys, 5);
             Assert.Greater(a.Siege.ShotsFired, 20);
-            Assert.Greater(a.Siege.Purges, 3);
+            Assert.Greater(a.Siege.Retired, 0, "spent projectiles were retired after their cooldown");
             foreach (var u in a.Siege.UnitList) if (u.Team == SiegeSystem.Attackers && u.State != UnitState.Dead) Assert.AreEqual(UnitState.Holding, u.State, "attackers arrived at their firing line");
             Assert.Less(a.Siege.ProjectileList.Count, a.Siege.ShotsFired, "purges retired spent projectiles");
             Assert.AreEqual(0, a.World.GetStatsSync().OverflowFlags);

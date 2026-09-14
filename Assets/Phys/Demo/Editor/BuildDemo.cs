@@ -47,7 +47,7 @@ namespace Phys.Demo.Editor
             demo.BrickMesh = AssetDatabase.LoadAssetAtPath<Mesh>("Assets/Models/ConstructorBlock2x3/ConstructorBlock2x3.fbx");
             demo.FigureMesh = AssetDatabase.LoadAssetAtPath<Mesh>("Assets/Models/ConstructorFigure/ConstructorFigure.fbx");
             demo.ArrowMesh = AssetDatabase.LoadAssetAtPath<Mesh>("Assets/Models/ConstructorArrow/ConstructorArrow.fbx");
-            if (demo.SiegeParams.VolleyInterval <= 0) demo.SiegeParams = Phys.AvbdGpu.Siege.SiegeSettings.Default;
+            demo.SiegeParams = demo.SiegeParams.WithDefaults();
             EditorUtility.SetDirty(demo);
             UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(scene);
             UnityEditor.SceneManagement.EditorSceneManager.SaveScene(scene);

@@ -31,7 +31,7 @@ Assets/Phys/AvbdGpu/Runtime/Resources  AvbdCommon.hlsl, AvbdUtil, AvbdScan, Avbd
                                        AvbdColoring, AvbdSolver, AvbdDebug (.compute)
 Assets/Phys/AvbdGpu/Reference          RefMath, RefBodies, RefJoint (+Spring), RefManifold, RefCollide, RefSolver, RefSceneBuilder
 Assets/Phys/AvbdGpu/Scenes             AvbdScenes (catalog + ISceneBuilder), BrickCastle (brick, layout, castle plans, snap joints)
-Assets/Phys/AvbdGpu/Siege              SiegeSpec (figure and arrow models as boxes), Ballistics, SiegeSystem (armies, volleys, purges)
+Assets/Phys/AvbdGpu/Siege              SiegeSpec (figure and arrow models as boxes), Ballistics, SiegeSystem (armies, volleys, retirement)
 Assets/Phys/AvbdGpu/Presentation       AvbdGpuRenderer, Resources/AvbdGpu/AvbdBox.shader (+ AvbdBodyInstancing.hlsl), AvbdLines.shader
 Assets/Phys/AvbdGpu/Tests/Editor       ReferenceTests, GpuKernelTests, GpuVsReferenceTests, InvariantTests, DriveTests, BodyPoolTests, SiegeTests,
                                        SnapFractureTests, BrickCastleTests, PerformanceTests, DiagnosticTests
@@ -198,10 +198,12 @@ camera flags above.
 `U` surrounds the castle with two armies (`SiegeSystem`, tunables in `CastleDemo.SiegeParams`): on every side two ranks of
 twelve attackers march in from 30 m to a firing line 14 m outside the wall, and up to 24 defenders stand on free ground
 inside the walls (found through the layout's occupancy map). Every four seconds each holding unit fires once, all the
-shots going up in one batch; every five seconds the spent projectiles and the dead are retired in one batch (`X`
-purges now, `V` fires a volley now, `K` stops the automatic volleys). Attackers aim at the nearest defender in range or,
-failing that, at the nearest wall crest; defenders at the nearest attacker. A unit hit by a moving projectile dies: its
-rotation lock and motor go and it topples where it stands until the purge.
+shots going up in one batch (`V` fires a volley now, `K` stops the automatic volleys). Attackers aim at the nearest
+defender in range or, failing that, at the nearest wall crest; defenders at the nearest attacker. A unit hit by a moving
+projectile dies: its rotation lock and motor go and it topples where it stands. A projectile that touches anything is
+spent: a rocket or bolt loses its drive at that first contact and flies on by inertia. The dead and the spent are
+retired one by one, each two seconds after its death or first contact (`RetireDelay`; `X` retires them all at once);
+a spent slot is free for the next spawn one step later.
 
 * Units are the figure model (`Assets/Models/ConstructorFigure`, 0.354 x 0.48 x 0.12 m): the collision box is its bounding
   box scaled like the bricks (1.77 x 2.4 x 0.6 m at scale 5, plus one margin in height so that the feet rest on the ground),
@@ -277,14 +279,15 @@ submission).
 .\RunTests.ps1 -Platform EditMode -Filter Phys.AvbdGpu.Tests.SnapFractureTests  # snap limits, GPU and reference
 .\RunTests.ps1 -Platform EditMode -Filter "Phys.AvbdGpu.Tests.DriveTests;Phys.AvbdGpu.Tests.BodyPoolTests;Phys.AvbdGpu.Tests.SiegeTests"
 .\RunTests.ps1 -Platform PlayMode -Filter Phys.AvbdGpu.Tests.CastleSmokeTests   # the smallest and largest castles stand, cannonball, snaps break
-.\RunTests.ps1 -Platform PlayMode -Filter Phys.AvbdGpu.Tests.SiegeSmokeTests    # the Outpost under siege: volleys, kills, purges
+.\RunTests.ps1 -Platform PlayMode -Filter Phys.AvbdGpu.Tests.SiegeSmokeTests    # the Outpost under siege: volleys, kills, retirements
 ```
 
 `DriveTests` check the drives against the implicit Euler parabola and the reference mirror (constant force 1e-5, motor
 2e-3, a locked tall box that stays upright while a free one tips); `BodyPoolTests` that retired slots neither collide nor
 move, that a respawn starts from a clean state and that the events report what units and projectiles touch;
-`SiegeTests` the ballistics (closest approach 2e-3 m over three arcs), marching, a volley that kills its target and a
-600-step siege of the Outpost with synchronous readbacks.
+`SiegeTests` the ballistics (closest approach 2e-3 m over three arcs), marching, a volley that kills its target, the
+retirement cooldown, the drives switched off at the first contact and a 600-step siege of the Outpost with synchronous
+readbacks (bitwise reproducible over two runs).
 
 The runner forces D3D12 (`-GraphicsApi ""` for the editor default). `DiagnosticTests` only log traces and are
 excluded from the default runs, like `PerformanceTests`.
