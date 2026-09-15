@@ -51,6 +51,7 @@ namespace Phys.Demo
         BrickLayout m_Layout;
         BrickSpec m_Spec;
         int m_FirstBrick, m_SnapJoints;
+        float m_Plateau;
         uint[] m_Tints;
         SiegeSystem m_Siege;
         bool m_SiegeActive;
@@ -68,10 +69,12 @@ namespace Phys.Demo
         public BrickSpec Spec => m_Spec;
         public SiegeSystem Siege => m_Siege;
         public bool SiegeActive => m_SiegeActive;
+        /// <summary>Ground height under the castle (the plateau levelled into the terrain; 0 on the flat ground).</summary>
+        public float Plateau => m_Plateau;
 
         protected override int SceneCount => CastlePlan.Presets.Length;
         protected override string SceneName(int index) => CastlePlan.Presets[index].Name;
-        protected override float HudHeight => 250f;
+        protected override float HudHeight => 268f;
         protected override float3 ShotSize => ShotCube * BrickScale;
         protected override float ShotDensity => ShotMass / math.pow(ShotCube * BrickScale, 3f);
         /// <summary>Speeds scale with the square root of lengths under the same gravity (dynamic similarity).</summary>
@@ -118,13 +121,14 @@ namespace Phys.Demo
             m_Layout = BrickCastle.Generate(plan);
             float2 c = BrickCastle.Center(plan) * Brick.Pitch * BrickScale;
             float volume = Brick.Width * Brick.BodyHeight * Brick.Length * BrickScale * BrickScale * BrickScale;
+            // the terrain (or the flat ground), with a plateau under the castle's footprint and a few studs around it
+            float2 halfSide = plan.Side * Brick.Pitch * BrickScale * 0.5f;
+            m_Plateau = AddGround(CreateTerrain(), BrickFriction, halfSide, 4f * Brick.Pitch * BrickScale, out int groundBody);
             m_Spec = new BrickSpec
             {
                 Scale = BrickScale, Density = BrickMass / volume, Friction = BrickFriction, Margin = AvbdGpuConstants.CollisionMargin,
-                Origin = new float3(-c.x, 0f, -c.y),
+                Origin = new float3(-c.x, m_Plateau, -c.y),
             };
-            float ground = 2000f;                             // out to the horizon
-            int groundBody = m_World.AddBody(new float3(ground, 1f, ground), 0f, BrickFriction, new float3(0f, -0.5f, 0f), quaternion.identity, float3.zero);
             m_FirstBrick = BrickCastle.Build(m_World, m_Layout, m_Spec);
             m_SnapJoints = Snap ? BrickCastle.AddSnapJoints(m_World, m_Layout, m_FirstBrick, m_Spec, SnapFractureLateral, SnapFractureTension) : 0;
 
@@ -142,7 +146,7 @@ namespace Phys.Demo
             var siegeSpec = SiegeSpec.Default;
             siegeSpec.Scale = BrickScale; siegeSpec.Margin = AvbdGpuConstants.CollisionMargin; siegeSpec.Friction = BrickFriction;
             siegeSpec.UnitMass = UnitMass; siegeSpec.ArrowMass = ArrowMass; siegeSpec.BallCube = ShotCube;
-            m_Siege = new SiegeSystem(m_World, siegeSpec, UnitCapacity, ArrowCapacity, ShotCapacity, SiegeParams) { OnSpawned = OnSiegeSpawn, OnRetiring = OnSiegeRetire };
+            m_Siege = new SiegeSystem(m_World, siegeSpec, UnitCapacity, ArrowCapacity, ShotCapacity, SiegeParams) { OnSpawned = OnSiegeSpawn, OnRetiring = OnSiegeRetire, Terrain = m_World.Terrain };
             m_SiegeActive = false;
             if (FigureMesh != null)
                 m_Renderer.MeshRanges.Add(new AvbdGpuRenderer.MeshRange { Mesh = FigureMesh, Scale = BrickScale, Offset = siegeSpec.UnitMeshOffset, Start = m_Siege.Units.Start, Count = m_Siege.Units.Capacity });
@@ -152,7 +156,7 @@ namespace Phys.Demo
 
             // fewer substeps for the big castles: their cannonball crosses a fraction of the wall thickness per step even at one
             m_World.Params.Substeps = n > 20000 ? 1 : n > 8000 ? 2 : 3;
-            cameraTarget = new float3(0f, 1.2f * plan.WallCourses * Brick.BodyHeight * BrickScale, 0f);
+            cameraTarget = new float3(0f, m_Plateau + 1.2f * plan.WallCourses * Brick.BodyHeight * BrickScale, 0f);
             cameraDistance = 1.4f * plan.Side * Brick.Pitch * BrickScale;
         }
 
@@ -225,6 +229,7 @@ namespace Phys.Demo
             if (kb.vKey.wasPressedThisFrame && m_Siege != null) m_Siege.Volley(m_World.ReadPositions, m_World.ReadCount, m_World.ReadStep);
             if (kb.kKey.wasPressedThisFrame && m_Siege != null) m_Siege.AutoVolleys = !m_Siege.AutoVolleys;
             if (kb.xKey.wasPressedThisFrame && m_Siege != null) { ReleaseDrag(); m_Siege.Purge(); }
+            if (kb.tKey.wasPressedThisFrame) CycleTerrain();
 #endif
         }
 
@@ -238,9 +243,10 @@ namespace Phys.Demo
                 $"{side:F1} m square, walls {plan.WallCourses} courses, towers {plan.TowerCourses}, keep {plan.KeepCourses}\n" +
                 (Snap ? $"<color=#88ddff>snapped</color>: {m_SnapJoints} joints; a snap breaks at {SnapFractureLateral:F0} N sideways, {SnapFractureTension:F0} N upward or {m_Spec.SnapBreakDistance * 100f:F1} cm apart  -  cannonball {ShotMass:F0} kg\n"
                       : $"dry-stacked (friction only)  -  cannonball {ShotMass:F0} kg\n") +
-                (m_SiegeActive ? $"<color=#ffcc88>siege</color> (volleys {(m_Siege.AutoVolleys ? "auto" : "manual")}): {m_Siege.Summary()}\n\n" : "no siege (U)\n\n") +
+                (m_SiegeActive ? $"<color=#ffcc88>siege</color> (volleys {(m_Siege.AutoVolleys ? "auto" : "manual")}): {m_Siege.Summary()}\n" : "no siege (U)\n") +
+                TerrainText(m_Plateau) + "\n\n" +
                 StatsText() + "\n\n" +
-                "1-0 castle size  , . prev/next  R rebuild  J snap bricks on/off  U siege on/off  V volley  K auto volleys  X retire the dead and spent now  Space pause  N step\n" +
+                "1-0 castle size  , . prev/next  R rebuild  J snap bricks on/off  T terrain  U siege on/off  V volley  K auto volleys  X retire the dead and spent now  Space pause  N step\n" +
                 "F1 contacts  F2 colour mode  F5 joints  F6 collision boxes  F7 shadows  +/- iterations  [ ] substeps  B/Enter cannonball  G gravity  H hide HUD\n" +
                 "LMB drag  RMB orbit  MMB pan  wheel / Q E zoom  W A S D orbit";
         }

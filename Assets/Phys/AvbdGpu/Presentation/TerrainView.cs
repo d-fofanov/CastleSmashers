@@ -11,8 +11,8 @@ namespace Phys.AvbdGpu.Presentation
     /// field on a scene-authored Terrain, whose TerrainData is cloned so that the edits (a castle's plateau) never touch the asset.</summary>
     public sealed class TerrainView : IDisposable
     {
-        /// <summary>Colour of the runtime terrain's single layer (the demos' ground tint).</summary>
-        public Color GroundColor = new Color32(78, 112, 58, 255);
+        /// <summary>Colour of the runtime terrain's single layer (the demos' ground tint, a shade lighter for the PBR terrain shader).</summary>
+        public Color GroundColor = new Color32(92, 130, 68, 255);
         /// <summary>Metres per tile of the flat-colour texture (any value: the texture is one colour).</summary>
         public float TileSize = 8f;
         public bool CastShadows = true;
@@ -24,9 +24,13 @@ namespace Phys.AvbdGpu.Presentation
         Texture2D m_Texture;
         Terrain m_SceneTerrain;
         TerrainData m_SceneOriginal, m_SceneClone;
+        Vector3 m_ScenePosition;
 
         /// <summary>The Terrain currently showing the field (the view's own or the scene's), or null.</summary>
         public Terrain Terrain => m_SceneTerrain != null ? m_SceneTerrain : m_Terrain;
+
+        /// <summary>The data a scene terrain had before the view showed a field on it (its own data while it shows none).</summary>
+        public TerrainData OriginalData(Terrain sceneTerrain) => sceneTerrain == m_SceneTerrain && m_SceneOriginal != null ? m_SceneOriginal : sceneTerrain.terrainData;
         public bool Visible => Terrain != null && Terrain.gameObject.activeSelf;
 
         /// <summary>Shows the field: on <paramref name="sceneTerrain"/> when given (its data cloned on first use, restored by
@@ -37,7 +41,13 @@ namespace Phys.AvbdGpu.Presentation
             if (sceneTerrain != null)
             {
                 if (m_Terrain != null) m_Terrain.gameObject.SetActive(false);
-                if (m_SceneTerrain != sceneTerrain) { RestoreSceneTerrain(); m_SceneTerrain = sceneTerrain; m_SceneOriginal = sceneTerrain.terrainData; m_SceneClone = UnityEngine.Object.Instantiate(m_SceneOriginal); m_SceneClone.name = m_SceneOriginal.name + " (view)"; }
+                if (m_SceneTerrain != sceneTerrain)
+                {
+                    RestoreSceneTerrain();
+                    m_SceneTerrain = sceneTerrain; m_SceneOriginal = sceneTerrain.terrainData; m_ScenePosition = sceneTerrain.transform.position;
+                    m_SceneClone = UnityEngine.Object.Instantiate(m_SceneOriginal);
+                    m_SceneClone.name = m_SceneOriginal.name + " (view)";
+                }
                 Apply(m_SceneClone, field);
                 Assign(sceneTerrain, m_SceneClone);
                 Place(sceneTerrain, field);
@@ -59,10 +69,20 @@ namespace Phys.AvbdGpu.Presentation
                 m_Terrain = m_Root.GetComponent<Terrain>();
                 m_Terrain.drawInstanced = true;
                 m_Terrain.heightmapPixelError = 3f;
+                // the URP terrain material shipped in Resources: a player strips the pipeline default when no scene has a terrain
+                // (the terrain then draws flat and grey, its instanced patches undisplaced)
+                var material = Resources.Load<Material>("AvbdGpu/AvbdTerrainLit");
+                if (material != null) m_Terrain.materialTemplate = material;
             }
             m_Terrain.shadowCastingMode = CastShadows ? ShadowCastingMode.On : ShadowCastingMode.Off;
             Apply(m_Data, field);
             m_Data.terrainLayers = new[] { m_Layer };
+            // a layer assigned from script gets no weight (the control map stays zero and the terrain draws black): paint it in full
+            const int alphaRes = 16;
+            m_Data.alphamapResolution = alphaRes;
+            var weights = new float[alphaRes, alphaRes, 1];
+            for (int z = 0; z < alphaRes; z++) for (int x = 0; x < alphaRes; x++) weights[z, x, 0] = 1f;
+            m_Data.SetAlphamaps(0, 0, weights);
             Assign(m_Terrain, m_Data);
             Place(m_Terrain, field);
             m_Root.SetActive(true);
@@ -78,7 +98,7 @@ namespace Phys.AvbdGpu.Presentation
         void RestoreSceneTerrain()
         {
             if (m_SceneTerrain == null) return;
-            if (m_SceneOriginal != null) Assign(m_SceneTerrain, m_SceneOriginal);
+            if (m_SceneOriginal != null) { Assign(m_SceneTerrain, m_SceneOriginal); m_SceneTerrain.transform.position = m_ScenePosition; }
             if (m_SceneClone != null) UnityEngine.Object.Destroy(m_SceneClone);
             m_SceneTerrain = null; m_SceneOriginal = null; m_SceneClone = null;
         }
@@ -131,16 +151,18 @@ namespace Phys.AvbdGpu.Presentation
 
         /// <summary>The heightfield of a Unity terrain (world-unit heights, the terrain's position included), taking every
         /// second sample repeatedly while the resolution exceeds <paramref name="maxResolution"/>.</summary>
-        public static Heightfield FromTerrain(Terrain terrain, int maxResolution = 2049)
+        public static Heightfield FromTerrain(Terrain terrain, int maxResolution = 2049) => FromTerrainData(terrain.terrainData, terrain.transform.position, maxResolution);
+
+        /// <summary>The heightfield of terrain data placed at <paramref name="position"/>.</summary>
+        public static Heightfield FromTerrainData(TerrainData td, Vector3 position, int maxResolution = 2049)
         {
-            var td = terrain.terrainData;
             int res = td.heightmapResolution;
             float[,] n = td.GetHeights(0, 0, res, res);
             int stride = 1;
             while ((res - 1) / stride + 1 > maxResolution && (res - 1) % (stride * 2) == 0) stride *= 2;
             int outRes = (res - 1) / stride + 1;
             var cell = new float2(td.size.x / (res - 1) * stride, td.size.z / (res - 1) * stride);
-            Vector3 pos = terrain.transform.position;
+            Vector3 pos = position;
             var h = new float[outRes * outRes];
             for (int z = 0; z < outRes; z++)
                 for (int x = 0; x < outRes; x++)

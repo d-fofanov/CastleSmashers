@@ -2,6 +2,7 @@ using System.Collections;
 using NUnit.Framework;
 using Phys.AvbdGpu;
 using Phys.AvbdGpu.Scenes;
+using Phys.AvbdGpu.Siege;
 using Phys.Demo;
 using Unity.Mathematics;
 using UnityEngine;
@@ -162,6 +163,82 @@ namespace Phys.AvbdGpu.Tests
             Assert.Less(broken, m_Demo.World.JointCount / 2, "most of the castle stays snapped");
             m_Demo.World.GetPosesSync(out var pos, out _);
             for (int i = 0; i < m_Demo.World.BodyCount; i++) Assert.IsTrue(math.all(math.isfinite(pos[i])), $"body {i} position");
+        }
+
+        /// <summary>The Outpost on hills: a plateau is levelled under it, the bricks rest on the plateau, the castle stands, and the
+        /// armies of its siege spawn on the surface around it and march in over the slopes.</summary>
+        [UnityTest]
+        public IEnumerator CastleStandsOnHillsAndTheArmiesWalkThem()
+        {
+            m_Demo.TerrainParams.Preset = TerrainPreset.Hills;
+            m_Demo.TerrainParams.Seed = 3;
+            m_Demo.Load(0);
+            var field = m_Demo.World.Terrain;
+            Assert.IsNotNull(field, "the demo set a terrain");
+            Assert.IsTrue(m_Demo.TerrainView.Visible, "and draws it");
+            Assert.Greater(field.MaxHeight - field.MinHeight, 4f, "hills");
+            float plateau = m_Demo.Plateau;
+            Assert.AreEqual(plateau, m_Demo.Spec.Origin.y, "the castle stands on the plateau");
+            float side = CastlePlan.Presets[0].Side * Brick.Pitch * m_Demo.Spec.Scale;
+            Assert.AreEqual(plateau, field.Height(new float2(0.4f * side, -0.4f * side)), 1e-4f, "the plateau is level across the footprint");
+            Assert.GreaterOrEqual(field.MaxOver(new float2(-0.45f * side), new float2(0.45f * side)), plateau - 1e-3f, "the mip bounds it (its 8 m blocks reach into the skirt)");
+            var stats0 = m_Demo.World.GetStatsSync();
+            Assert.Greater(stats0.TerrainManifolds, 100, "the ground course rests on the terrain");
+
+            m_Demo.World.GetPosesSync(out var start, out _);
+            float maxMove = 0f;
+            for (int f = 1; f <= 120; f++)
+            {
+                yield return null;
+                if (f % 30 != 0) continue;
+                m_Demo.World.GetPosesSync(out var pos, out _);
+                maxMove = 0f;
+                for (int i = m_Demo.FirstBrick; i < m_Demo.FirstBrick + m_Demo.BrickCount; i++)
+                {
+                    Assert.IsTrue(math.all(math.isfinite(pos[i])), $"brick {i} position");
+                    maxMove = math.max(maxMove, math.distance(pos[i].xyz, start[i].xyz));
+                }
+            }
+            Assert.Less(maxMove, 0.25f * Brick.BodyHeight * m_Demo.Spec.Scale, "the castle stands on its plateau");
+
+            // the siege: units spawn standing on the surface wherever it is, and the attackers walk in over the slopes
+            m_Demo.ToggleSiege();
+            var siege = m_Demo.Siege;
+            Assert.AreSame(field, siege.Terrain);
+            yield return null;
+            yield return null;
+            m_Demo.World.GetPosesSync(out var spawned, out _);
+            float meanDistance0 = 0f;
+            int attackers = 0;
+            foreach (var u in siege.UnitList)
+            {
+                float3 p = spawned[u.Body].xyz;
+                Assert.AreEqual(siege.StandHeight(p.xz), p.y, 0.3f, $"unit {u.Body} ({u.Kind}, team {u.Team}) stands on the ground at {p}");
+                if (u.Team == SiegeSystem.Attackers) { meanDistance0 += math.length(p.xz); attackers++; }
+            }
+            meanDistance0 /= attackers;
+            for (int f = 0; f < 240; f++) yield return null;
+            m_Demo.World.GetPosesSync(out var later, out _);
+            float meanDistance1 = 0f;
+            foreach (var u in siege.UnitList)
+            {
+                float3 p = later[u.Body].xyz;
+                Assert.IsTrue(math.all(math.isfinite(p)), $"unit {u.Body} position");
+                Assert.Greater(p.y, siege.GroundHeight(p.xz) - 1f, $"unit {u.Body} stays above the terrain at {p}");
+                if (u.Team == SiegeSystem.Attackers) meanDistance1 += math.length(p.xz);
+            }
+            meanDistance1 /= attackers;
+            Debug.Log($"siege on hills: plateau {plateau:F2} m, terrain {field.MinHeight:F1} .. {field.MaxHeight:F1} m, attackers {meanDistance0:F1} -> {meanDistance1:F1} m from the centre after 4 s");
+            Assert.Less(meanDistance1, meanDistance0 - 2f, "the attackers marched in over the slopes");
+            var stats = m_Demo.World.GetStatsSync();
+            Assert.AreEqual(0, stats.OverflowFlags, $"capacity overflow {stats.OverflowFlags}");
+
+            // back to the flat ground: the terrain goes away
+            m_Demo.TerrainParams.Preset = TerrainPreset.None;
+            m_Demo.Load(0);
+            Assert.IsNull(m_Demo.World.Terrain);
+            Assert.IsFalse(m_Demo.TerrainView.Visible);
+            Assert.AreEqual(0f, m_Demo.Plateau);
         }
 
         int BrokenJoints()

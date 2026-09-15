@@ -49,6 +49,7 @@ namespace Phys.Demo
         AssemblyBuilder.Diagnostics m_Diagnostics;
         string m_Error;
         int m_SnapJoints;
+        float m_Plateau;
         uint[] m_Tints;
         static readonly Color32 s_Iron = new Color32(70, 72, 78, 255);
 
@@ -69,10 +70,12 @@ namespace Phys.Demo
         public string Error => m_Error;
         public int PartCount => m_Assembly?.Parts.Count ?? 0;
         public int SnapJoints => m_SnapJoints;
+        /// <summary>Ground height under the castle (the plateau levelled into the terrain; 0 on the flat ground).</summary>
+        public float Plateau => m_Plateau;
 
         protected override int SceneCount => math.max(1, m_Documents.Length);
         protected override string SceneName(int index) => index < m_Documents.Length ? m_Documents[index].name : "(no castles)";
-        protected override float HudHeight => 265f;
+        protected override float HudHeight => 283f;
         protected override float3 ShotSize => ShotCube * BrickScale;
         protected override float ShotDensity => ShotMass / math.pow(ShotCube * BrickScale, 3f);
         /// <summary>Speeds scale with the square root of lengths under the same gravity (dynamic similarity).</summary>
@@ -145,23 +148,27 @@ namespace Phys.Demo
 
         protected override void BuildScene(int index, out float3 cameraTarget, out float cameraDistance)
         {
-            m_Assembly = null; m_Bodies = null; m_Error = null; m_SnapJoints = 0; m_Diagnostics = default;
+            m_Assembly = null; m_Bodies = null; m_Error = null; m_SnapJoints = 0; m_Diagnostics = default; m_Plateau = 0f;
             cameraTarget = new float3(0f, 2f * BrickScale, 0f);
             cameraDistance = 20f * BrickScale;
-            float ground = 2000f;                             // out to the horizon
-            int groundBody = m_World.AddBody(new float3(ground, 1f, ground), 0f, BrickFriction, new float3(0f, -0.5f, 0f), quaternion.identity, float3.zero);
             if (m_Tints == null || m_Tints.Length < 1024) m_Tints = new uint[1024];
+            if (index < m_Documents.Length)
+            {
+                try { m_Assembly = BrickAssembly.Parse(m_Documents[index].text); }
+                catch (BrickAssemblyException e)
+                {
+                    m_Error = e.Message;
+                    Debug.LogError($"PreviewDemo: {m_Documents[index].name}.json rejected: {e.Message}");
+                }
+            }
+            else m_Error = $"no documents in Resources/{CastleFolder}";
+
+            // the terrain (or the flat ground), with a plateau under the castle's footprint and two studs around it
+            float2 half = m_Assembly != null ? (m_Assembly.Extent.xz * 0.5f) * (PieceCatalog.GridToUnity * BrickScale) : new float2(4f * BrickScale);
+            m_Plateau = AddGround(CreateTerrain(), BrickFriction, half, 2f * PieceCatalog.GridToUnity * BrickScale, out int groundBody);
             m_Tints[groundBody] = AvbdGpuRenderer.Tint(new Color32(78, 112, 58, 255));
             m_Renderer.SetTints(m_Tints, groundBody, 1);
-            if (index >= m_Documents.Length) { m_Error = $"no documents in Resources/{CastleFolder}"; return; }
-
-            try { m_Assembly = BrickAssembly.Parse(m_Documents[index].text); }
-            catch (BrickAssemblyException e)
-            {
-                m_Error = e.Message;
-                Debug.LogError($"PreviewDemo: {m_Documents[index].name}.json rejected: {e.Message}");
-                return;
-            }
+            if (m_Assembly == null) return;
             m_Diagnostics = AssemblyBuilder.Diagnose(m_Assembly);
             if (!m_Diagnostics.Clean)
                 Debug.LogWarning($"PreviewDemo: {m_Documents[index].name}.json: {m_Diagnostics.Floating} floating, {m_Diagnostics.PoorlySupported} poorly supported, {m_Diagnostics.Intersections} intersecting pieces ({m_Diagnostics.Sample})");
@@ -170,7 +177,7 @@ namespace Phys.Demo
             m_Spec = new AssemblySpec
             {
                 Scale = BrickScale, Density = BrickMass / (2f * 3f * 1.2f * unit * unit * unit), Friction = BrickFriction, Margin = AvbdGpuConstants.CollisionMargin,
-                Clearance = Clearance, Origin = new float3(-centre.x, 0f, -centre.z) * unit,   // the footprint centred on the world origin, the ground where it is
+                Clearance = Clearance, Origin = new float3(-centre.x * unit, m_Plateau, -centre.z * unit),   // the footprint centred on the world origin, on the plateau
             };
             m_Bodies = AssemblyBuilder.Build(m_World, m_Assembly, m_Spec);
             if (Snap) m_SnapJoints = AssemblyBuilder.AddSnapJoints(m_World, m_Assembly, m_Bodies, m_Spec, SnapFractureLateral, SnapFractureTension);
@@ -193,7 +200,7 @@ namespace Phys.Demo
             // fewer substeps for the big castles: their cannonball crosses a fraction of the wall thickness per step even at one
             m_World.Params.Substeps = n > 20000 ? 1 : n > 8000 ? 2 : 3;
             float3 extent = m_Assembly.Extent * unit;
-            cameraTarget = new float3(0f, 0.4f * extent.y, 0f);
+            cameraTarget = new float3(0f, m_Plateau + 0.4f * extent.y, 0f);
             cameraDistance = 1.4f * math.max(math.max(extent.x, extent.z), extent.y);
         }
 
@@ -211,6 +218,7 @@ namespace Phys.Demo
             if (kb.jKey.wasPressedThisFrame) { Snap = !Snap; Load(m_Scene); }
             if (kb.f6Key.wasPressedThisFrame) m_Renderer.DrawCollisionBoxes = !m_Renderer.DrawCollisionBoxes;
             if (kb.f7Key.wasPressedThisFrame) { Shadows = !Shadows; m_Renderer.Shadows = Shadows; }
+            if (kb.tKey.wasPressedThisFrame) CycleTerrain();
 #endif
         }
 
@@ -233,13 +241,13 @@ namespace Phys.Demo
                     $"{e.x:F0} x {e.z:F0} studs, {e.y:F1} tall = {e.x * unit:F1} x {e.z * unit:F1} x {e.y * unit:F1} m at model x {BrickScale:G3}; 2 x 3 brick {m_Spec.BrickMass:F2} kg\n" +
                     (Snap ? $"<color=#88ddff>snapped</color>: {m_SnapJoints} joints; a snap breaks at {SnapFractureLateral:F0} N sideways, {SnapFractureTension:F0} N upward or {m_Spec.SnapBreakDistance * 100f:F1} cm apart  -  cannonball {ShotMass:F0} kg\n"
                           : $"dry-stacked (friction only)  -  cannonball {ShotMass:F0} kg\n") +
-                    (m_Diagnostics.Clean ? "every piece rests on at least half its footprint, nothing intersects\n\n"
-                          : $"<color=#ffcc55>{m_Diagnostics.Floating} floating, {m_Diagnostics.PoorlySupported} on less than half their footprint, {m_Diagnostics.Intersections} intersecting</color> ({m_Diagnostics.Sample})\n\n");
+                    (m_Diagnostics.Clean ? "every piece rests on at least half its footprint, nothing intersects\n"
+                          : $"<color=#ffcc55>{m_Diagnostics.Floating} floating, {m_Diagnostics.PoorlySupported} on less than half their footprint, {m_Diagnostics.Intersections} intersecting</color> ({m_Diagnostics.Sample})\n");
             }
             return
-                $"{title}{PausedText}\n" + castle +
+                $"{title}{PausedText}\n" + castle + TerrainText(m_Plateau) + "\n\n" +
                 StatsText() + "\n\n" +
-                $"1-0 castle (Resources/{CastleFolder})  , . prev/next  R rebuild  J snap pieces on/off  Space pause  N step\n" +
+                $"1-0 castle (Resources/{CastleFolder})  , . prev/next  R rebuild  J snap pieces on/off  T terrain  Space pause  N step\n" +
                 "F1 contacts  F2 colour mode  F5 joints  F6 collision boxes  F7 shadows  +/- iterations  [ ] substeps  B/Enter cannonball  G gravity  H hide HUD\n" +
                 "LMB drag  RMB orbit  MMB pan  wheel / Q E zoom  W A S D orbit";
         }

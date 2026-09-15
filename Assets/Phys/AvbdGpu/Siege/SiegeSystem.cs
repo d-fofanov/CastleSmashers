@@ -107,6 +107,8 @@ namespace Phys.AvbdGpu.Siege
         public readonly AvbdGpuWorld World;
         public readonly SiegeSpec Spec;
         public SiegeSettings Settings;
+        /// <summary>The ground the units stand on (null: flat at y = 0).</summary>
+        public Heightfield Terrain;
         /// <summary>Units, arrow-shaped projectiles (arrows, rockets: drawn with the arrow model) and cube projectiles
         /// (cannonballs, bolts: drawn as their boxes); each pool is one contiguous body range.</summary>
         public readonly BodyPool Units, Arrows, Shots;
@@ -142,6 +144,11 @@ namespace Phys.AvbdGpu.Siege
         }
 
         public static bool IsArrowShaped(ProjectileKind kind) => kind == ProjectileKind.Arrow || kind == ProjectileKind.Rocket;
+
+        /// <summary>Ground height at an xz (the terrain, or 0).</summary>
+        public float GroundHeight(float2 xz) => Terrain?.Height(xz) ?? 0f;
+        /// <summary>Box centre height of a unit standing at an xz (one margin deep in the ground).</summary>
+        public float StandHeight(float2 xz) => GroundHeight(xz) + Spec.UnitStandHeight;
         BodyPool PoolOf(ProjectileKind kind) => IsArrowShaped(kind) ? Arrows : Shots;
 
         /// <summary>Copies the pools' event words from the GPU synchronously (tests; the demo reads them back asynchronously).</summary>
@@ -158,7 +165,7 @@ namespace Phys.AvbdGpu.Siege
             int S = plan.Side, face = BrickCastle.TowerOut;
             float3 lo = brick.GridPoint(face, face, 0), hi = brick.GridPoint(S - face, S - face, 0);
             m_WallMin = lo.xz; m_WallMax = hi.xz;
-            m_WallTop = (plan.WallCourses + 0.5f) * Brick.BodyHeight * brick.Scale;
+            m_WallTop = brick.Origin.y + (plan.WallCourses + 0.5f) * Brick.BodyHeight * brick.Scale;
             m_HasCastle = true;
             m_Layout = layout; m_Brick = brick;
 
@@ -225,7 +232,7 @@ namespace Phys.AvbdGpu.Siege
                 {
                     if (!Free(layout, cx, cz, hw, hd)) continue;
                     float3 p = brick.GridPoint(cx, cz, 0);
-                    p.y = Spec.UnitStandHeight;
+                    p.y = StandHeight(p.xz);
                     spots.Add((p, yaw));
                 }
             }
@@ -262,8 +269,8 @@ namespace Phys.AvbdGpu.Siege
 
         public int SpawnUnit(UnitKind kind, int team, float3 start, float3 waypoint, float yaw, bool holding = false)
         {
-            start.y = Spec.UnitStandHeight;
-            waypoint.y = Spec.UnitStandHeight;
+            start.y = StandHeight(start.xz);
+            waypoint.y = StandHeight(waypoint.xz);
             var drive = GpuBodyDrive.Velocity(float3.zero, Settings.UnitForce, new float3(1, 0, 1), yaw);
             int body = Units.Spawn(Spec.UnitBoxSize, Spec.UnitDensity, Spec.Friction, start, quaternion.RotateY(yaw), float3.zero, UnitFlags, drive);
             if (body < 0) return -1;

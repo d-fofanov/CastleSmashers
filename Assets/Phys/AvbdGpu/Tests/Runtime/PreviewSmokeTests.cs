@@ -150,6 +150,25 @@ namespace Phys.AvbdGpu.Tests
             Assert.AreEqual(0, BrokenJoints(), "no snap broke under the castle's own weight: " + BrokenSummary());
         }
 
+        /// <summary>The Outpost document on a ridge: the plateau under it, the pieces resting on the terrain, the castle standing.</summary>
+        [UnityTest]
+        public IEnumerator OutpostStandsOnARidge()
+        {
+            m_Demo.TerrainParams.Preset = TerrainPreset.Ridge;
+            LoadCastle("outpost");
+            var field = m_Demo.World.Terrain;
+            Assert.IsNotNull(field, "the demo set a terrain");
+            Assert.IsTrue(m_Demo.TerrainView.Visible);
+            Assert.AreEqual(m_Demo.Plateau, m_Demo.Spec.Origin.y, "the castle stands on the plateau");
+            Assert.Greater(m_Demo.Plateau, 1f, "the ridge runs under the castle");
+            float3 extent = m_Demo.Assembly.Extent * PieceCatalog.GridToUnity * m_Demo.Spec.Scale;
+            Assert.AreEqual(m_Demo.Plateau, field.Height(new float2(0.45f * extent.x, 0.45f * extent.z)), 1e-4f, "level across the footprint");
+            Assert.Greater(m_Demo.World.GetStatsSync().TerrainManifolds, 100, "the ground course rests on the terrain");
+            yield return Run(180);
+            Assert.Less(m_Moves.max, 0.25f * BrickHeight, "no brick moved more than a quarter of its height: the castle stands on the ridge");
+            Assert.Greater(m_Moves.groundStill, 0.95f, "the pieces on the plateau stay put");
+        }
+
         struct Moves { public float max, mean; public int still; public float groundStill; }
 
         /// <summary>Runs the demo for some frames, logging how far the pieces move; the result is in m_Moves.</summary>

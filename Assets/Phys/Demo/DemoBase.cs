@@ -1,5 +1,6 @@
 using Phys.AvbdGpu;
 using Phys.AvbdGpu.Presentation;
+using Phys.AvbdGpu.Scenes;
 using Unity.Mathematics;
 using UnityEngine;
 #if ENABLE_INPUT_SYSTEM
@@ -8,6 +9,38 @@ using UnityEngine.InputSystem;
 
 namespace Phys.Demo
 {
+    /// <summary>The procedural terrain of a demo scene (<see cref="Heightfield.Generate"/>); None keeps the flat ground box.</summary>
+    [System.Serializable]
+    public struct TerrainSettings
+    {
+        [Tooltip("Hills, a valley or a ridge under the scene; None: the flat ground box. A Terrain assigned to SceneTerrain is used instead of the preset.")]
+        public TerrainPreset Preset;
+        public uint Seed;
+        [Tooltip("Samples per axis (2^n + 1) and metres per sample.")]
+        public int Resolution;
+        public float Cell;
+        [Tooltip("Relief (m) and the size of the features (m).")]
+        public float Amplitude;
+        public float FeatureSize;
+        [Tooltip("Metres beyond the castle footprint over which its plateau blends into the terrain.")]
+        public float Skirt;
+
+        public static TerrainSettings Default => new TerrainSettings { Preset = TerrainPreset.None, Seed = 1, Resolution = 513, Cell = 1f, Amplitude = 12f, FeatureSize = 80f, Skirt = 8f };
+
+        /// <summary>Fields a scene was serialised without come out as zero.</summary>
+        public TerrainSettings WithDefaults()
+        {
+            var d = Default;
+            var t = this;
+            if (t.Resolution < 2) t.Resolution = d.Resolution;
+            if (t.Cell <= 0f) t.Cell = d.Cell;
+            if (t.Amplitude <= 0f) t.Amplitude = d.Amplitude;
+            if (t.FeatureSize <= 0f) t.FeatureSize = d.FeatureSize;
+            if (t.Skirt < 0f) t.Skirt = d.Skirt;
+            return t;
+        }
+    }
+
     /// <summary>Shared machinery of the demos: GPU world and renderer lifecycle, scene selection keys, pause / single step, mouse drag
     /// joint, box shooting, player flags and the HUD box. Derived classes build the scenes and write the HUD text.</summary>
     public abstract class DemoBase : MonoBehaviour
@@ -16,8 +49,10 @@ namespace Phys.Demo
         public bool ShowHud = true;
         /// <summary>Body capacity of the GPU world.</summary>
         public int MaxBodies = 81920;
-        [Tooltip("A Terrain of the scene to draw the world's heightfield on (its data is cloned, never edited); none: the demo creates one.")]
+        [Tooltip("A Terrain of the scene: its heights are the world's terrain and it draws the result (its data is cloned, never edited); " +
+                 "none: the procedural terrain of TerrainParams, drawn on a Terrain the demo creates.")]
         public Terrain SceneTerrain;
+        public TerrainSettings TerrainParams = TerrainSettings.Default;
 
         protected AvbdGpuWorld m_World;
         protected AvbdGpuRenderer m_Renderer;
@@ -89,7 +124,10 @@ namespace Phys.Demo
                 if (args[i] == "-avbd-yaw" && float.TryParse(args[i + 1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float yaw)) m_Yaw = yaw;
                 if (args[i] == "-avbd-pitch" && float.TryParse(args[i + 1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float pitch)) m_Pitch = pitch;
                 if (args[i] == "-avbd-distance" && float.TryParse(args[i + 1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float dist)) m_Distance = dist;
+                if (args[i] == "-avbd-terrain" && TryParseTerrain(args[i + 1], out var preset)) TerrainParams.Preset = preset;
+                if (args[i] == "-avbd-terrain-seed" && uint.TryParse(args[i + 1], out uint seed)) TerrainParams.Seed = seed;
             }
+            TerrainParams = TerrainParams.WithDefaults();
             for (int i = 0; i < args.Length; i++) if (args[i] == "-avbd-bench") m_Bench = true;
             if (!AvbdGpuKernels.Supported) { Debug.LogError("Compute shaders are not supported on this device"); enabled = false; return; }
             m_World = new AvbdGpuWorld(CreateConfig()) { ReadbackPoses = true };
@@ -201,6 +239,64 @@ namespace Phys.Demo
             if (kb.gKey.wasPressedThisFrame) m_World.Params.Gravity = math.lengthsq(m_World.Params.Gravity) > 0f ? float3.zero : new float3(0, -10f, 0);
             HandleSceneKeys();
 #endif
+        }
+
+        static bool TryParseTerrain(string s, out TerrainPreset preset)
+        {
+            if (int.TryParse(s, out int n) && n >= 0 && n <= (int)TerrainPreset.Ridge) { preset = (TerrainPreset)n; return true; }
+            return System.Enum.TryParse(s, true, out preset);
+        }
+
+        /// <summary>The heightfield of the scene being built, or null for the flat ground: the scene terrain's heights when one is
+        /// assigned, otherwise the procedural preset (a fresh field every load, so a plateau can be cut into it).</summary>
+        protected Heightfield CreateTerrain()
+        {
+            if (SceneTerrain != null) return TerrainView.FromTerrainData(m_TerrainView.OriginalData(SceneTerrain), SceneTerrain.transform.position);
+            var t = TerrainParams;
+            if (t.Preset == TerrainPreset.None) return null;
+            return Heightfield.Generate(t.Preset, t.Seed, t.Resolution, t.Cell, t.Amplitude, t.FeatureSize);
+        }
+
+        /// <summary>Levels a plateau for a footprint centred on the origin (half extents <paramref name="halfExtent"/> plus
+        /// <paramref name="border"/>) at the mean terrain height under it, blending over the skirt; returns the plateau height.</summary>
+        protected float CutPlateau(Heightfield field, float2 halfExtent, float border)
+        {
+            float2 lo = -halfExtent - border, hi = halfExtent + border;
+            float plateau = field.MeanHeight(lo, hi);
+            field.Flatten(lo, hi, plateau, TerrainParams.Skirt);
+            return plateau;
+        }
+
+        /// <summary>The terrain, or the flat ground box the scenes had before it: one or the other under every demo scene.
+        /// Returns the ground height at the origin (the plateau).</summary>
+        protected float AddGround(Heightfield field, float friction, float2 plateauHalfExtent, float plateauBorder, out int groundBody)
+        {
+            if (field != null)
+            {
+                float plateau = CutPlateau(field, plateauHalfExtent, plateauBorder);
+                groundBody = m_World.SetTerrain(field, friction);
+                return plateau;
+            }
+            const float ground = 2000f;                             // out to the horizon
+            groundBody = m_World.AddBody(new float3(ground, 1f, ground), 0f, friction, new float3(0f, -0.5f, 0f), quaternion.identity, float3.zero);
+            return 0f;
+        }
+
+        /// <summary>The terrain line of the HUD.</summary>
+        protected string TerrainText(float plateau)
+        {
+            var field = m_World.Terrain;
+            if (field == null) return "flat ground (T: terrain)";
+            string source = SceneTerrain != null ? $"scene terrain {SceneTerrain.name}" : $"{TerrainParams.Preset.ToString().ToLowerInvariant()} (seed {TerrainParams.Seed})";
+            return $"<color=#a8d878>terrain</color> {source}: {field.ResX} x {field.ResZ} samples {field.Cell.x:G3} m apart, heights {field.MinHeight:F1} .. {field.MaxHeight:F1} m, plateau at {plateau:F1} m";
+        }
+
+        /// <summary>Next procedural preset (T key): None, Hills, Valley, Ridge, None ...; a scene terrain is left alone.</summary>
+        protected void CycleTerrain()
+        {
+            if (SceneTerrain != null) return;
+            TerrainParams.Preset = (TerrainPreset)(((int)TerrainParams.Preset + 1) % ((int)TerrainPreset.Ridge + 1));
+            Load(m_Scene);
         }
 
         /// <summary>Shoots a box from the camera along its view direction.</summary>
