@@ -1,0 +1,326 @@
+[
+  {
+    "name": "Brick_1x1",
+    "dimensions_xyz_m": [
+      0.10000000149011612,
+      0.10000000149011612,
+      0.14249999821186066
+    ],
+    "triangles": 892,
+    "vertices": 448,
+    "non_manifold_edges": 0,
+    "fbx_roundtrip_verified": true
+  },
+  {
+    "name": "Brick_1x2",
+    "dimensions_xyz_m": [
+      0.10000000149011612,
+      0.20000000298023224,
+      0.14249999821186066
+    ],
+    "triangles": 1916,
+    "vertices": 960,
+    "non_manifold_edges": 0,
+    "fbx_roundtrip_verified": true
+  },
+  {
+    "name": "Brick_1x3",
+    "dimensions_xyz_m": [
+      0.10000000149011612,
+      0.30000001192092896,
+      0.14249999821186066
+    ],
+    "triangles": 2956,
+    "vertices": 1480,
+    "non_manifold_edges": 0,
+    "fbx_roundtrip_verified": true
+  },
+  {
+    "name": "Brick_1x4",
+    "dimensions_xyz_m": [
+      0.10000000149011612,
+      0.4000000059604645,
+      0.14249999821186066
+    ],
+    "triangles": 4012,
+    "vertices": 2008,
+    "non_manifold_edges": 0,
+    "fbx_roundtrip_verified": true
+  },
+  {
+    "name": "Brick_1x6",
+    "dimensions_xyz_m": [
+      0.10000000149011612,
+      0.6000000238418579,
+      0.14249999821186066
+    ],
+    "triangles": 6108,
+    "vertices": 3056,
+    "non_manifold_edges": 0,
+    "fbx_roundtrip_verified": true
+  },
+  {
+    "name": "Brick_1x8",
+    "dimensions_xyz_m": [
+      0.10000000149011612,
+      0.800000011920929,
+      0.14249999821186066
+    ],
+    "triangles": 8188,
+    "vertices": 4096,
+    "non_manifold_edges": 0,
+    "fbx_roundtrip_verified": true
+  },
+  {
+    "name": "Brick_2x2",
+    "dimensions_xyz_m": [
+      0.20000000298023224,
+      0.20000000298023224,
+      0.14249999821186066
+    ],
+    "triangles": 3476,
+    "vertices": 1740,
+    "non_manifold_edges": 0,
+    "fbx_roundtrip_verified": true
+  },
+  {
+    "name": "Brick_2x3",
+    "dimensions_xyz_m": [
+      0.20000000298023224,
+      0.30000001192092896,
+      0.14249999821186066
+    ],
+    "triangles": 5564,
+    "vertices": 2784,
+    "non_manifold_edges": 0,
+    "fbx_roundtrip_verified": true
+  },
+  {
+    "name": "Brick_2x4",
+    "dimensions_xyz_m": [
+      0.20000000298023224,
+      0.4000000059604645,
+      0.14249999821186066
+    ],
+    "triangles": 7652,
+    "vertices": 3828,
+    "non_manifold_edges": 0,
+    "fbx_roundtrip_verified": true
+  },
+  {
+    "name": "Brick_2x6",
+    "dimensions_xyz_m": [
+      0.20000000298023224,
+      0.6000000238418579,
+      0.14249999821186066
+    ],
+    "triangles": 11788,
+    "vertices": 5896,
+    "non_manifold_edges": 0,
+    "fbx_roundtrip_verified": true
+  },
+  {
+    "name": "Brick_2x8",
+    "dimensions_xyz_m": [
+      0.20000000298023224,
+      0.800000011920929,
+      0.14249999821186066
+    ],
+    "triangles": 15940,
+    "vertices": 7972,
+    "non_manifold_edges": 0,
+    "fbx_roundtrip_verified": true
+  },
+  {
+    "name": "Plate_1x1",
+    "dimensions_xyz_m": [
+      0.10000000149011612,
+      0.10000000149011612,
+      0.0625
+    ],
+    "triangles": 892,
+    "vertices": 448,
+    "non_manifold_edges": 0,
+    "fbx_roundtrip_verified": true
+  },
+  {
+    "name": "Plate_1x2",
+    "dimensions_xyz_m": [
+      0.10000000149011612,
+      0.20000000298023224,
+      0.0625
+    ],
+    "triangles": 1916,
+    "vertices": 960,
+    "non_manifold_edges": 0,
+    "fbx_roundtrip_verified": true
+  },
+  {
+    "name": "Plate_1x4",
+    "dimensions_xyz_m": [
+      0.10000000149011612,
+      0.4000000059604645,
+      0.0625
+    ],
+    "triangles": 4012,
+    "vertices": 2008,
+    "non_manifold_edges": 0,
+    "fbx_roundtrip_verified": true
+  },
+  {
+    "name": "Plate_2x2",
+    "dimensions_xyz_m": [
+      0.20000000298023224,
+      0.20000000298023224,
+      0.0625
+    ],
+    "triangles": 3476,
+    "vertices": 1740,
+    "non_manifold_edges": 0,
+    "fbx_roundtrip_verified": true
+  },
+  {
+    "name": "Plate_2x4",
+    "dimensions_xyz_m": [
+      0.20000000298023224,
+      0.4000000059604645,
+      0.0625
+    ],
+    "triangles": 7652,
+    "vertices": 3828,
+    "non_manifold_edges": 0,
+    "fbx_roundtrip_verified": true
+  },
+  {
+    "name": "Tile_1x1",
+    "dimensions_xyz_m": [
+      0.10000000149011612,
+      0.10000000149011612,
+      0.03999999910593033
+    ],
+    "triangles": 188,
+    "vertices": 96,
+    "non_manifold_edges": 0,
+    "fbx_roundtrip_verified": true
+  },
+  {
+    "name": "Tile_1x2",
+    "dimensions_xyz_m": [
+      0.10000000149011612,
+      0.20000000298023224,
+      0.03999999910593033
+    ],
+    "triangles": 188,
+    "vertices": 96,
+    "non_manifold_edges": 0,
+    "fbx_roundtrip_verified": true
+  },
+  {
+    "name": "Tile_2x2",
+    "dimensions_xyz_m": [
+      0.20000000298023224,
+      0.20000000298023224,
+      0.03999999910593033
+    ],
+    "triangles": 188,
+    "vertices": 96,
+    "non_manifold_edges": 0,
+    "fbx_roundtrip_verified": true
+  },
+  {
+    "name": "Tile_2x4",
+    "dimensions_xyz_m": [
+      0.20000000298023224,
+      0.4000000059604645,
+      0.03999999910593033
+    ],
+    "triangles": 188,
+    "vertices": 96,
+    "non_manifold_edges": 0,
+    "fbx_roundtrip_verified": true
+  },
+  {
+    "name": "Ramp",
+    "dimensions_xyz_m": [
+      0.20000000298023224,
+      0.20000000298023224,
+      0.11951060593128204
+    ],
+    "triangles": 188,
+    "vertices": 96,
+    "non_manifold_edges": 0,
+    "fbx_roundtrip_verified": true
+  },
+  {
+    "name": "Roof_Prism",
+    "dimensions_xyz_m": [
+      0.20000000298023224,
+      0.19890916347503662,
+      0.11927615106105804
+    ],
+    "triangles": 140,
+    "vertices": 72,
+    "non_manifold_edges": 0,
+    "fbx_roundtrip_verified": true
+  },
+  {
+    "name": "Wedge",
+    "dimensions_xyz_m": [
+      0.20000000298023224,
+      0.30000001192092896,
+      0.0796823650598526
+    ],
+    "triangles": 188,
+    "vertices": 96,
+    "non_manifold_edges": 0,
+    "fbx_roundtrip_verified": true
+  },
+  {
+    "name": "Plain_Cube",
+    "dimensions_xyz_m": [
+      0.10000000149011612,
+      0.10000000149011612,
+      0.10000000149011612
+    ],
+    "triangles": 188,
+    "vertices": 96,
+    "non_manifold_edges": 0,
+    "fbx_roundtrip_verified": true
+  },
+  {
+    "name": "Plain_Rectangular_Block",
+    "dimensions_xyz_m": [
+      0.20000000298023224,
+      0.30000001192092896,
+      0.11999999731779099
+    ],
+    "triangles": 188,
+    "vertices": 96,
+    "non_manifold_edges": 0,
+    "fbx_roundtrip_verified": true
+  },
+  {
+    "name": "Plain_Cylinder",
+    "dimensions_xyz_m": [
+      0.15000000596046448,
+      0.15000000596046448,
+      0.15000000596046448
+    ],
+    "triangles": 508,
+    "vertices": 256,
+    "non_manifold_edges": 0,
+    "fbx_roundtrip_verified": true
+  },
+  {
+    "name": "Plain_Triangular_Prism",
+    "dimensions_xyz_m": [
+      0.20000000298023224,
+      0.19890916347503662,
+      0.11927615106105804
+    ],
+    "triangles": 140,
+    "vertices": 72,
+    "non_manifold_edges": 0,
+    "fbx_roundtrip_verified": true
+  }
+]
