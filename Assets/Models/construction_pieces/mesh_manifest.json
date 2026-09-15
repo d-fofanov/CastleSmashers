@@ -6,8 +6,9 @@
       0.10000000149011612,
       0.14249999821186066
     ],
-    "triangles": 892,
-    "vertices": 448,
+    "triangles": 184,
+    "vertices": 96,
+    "shells": 2,
     "non_manifold_edges": 0,
     "fbx_roundtrip_verified": true
   },
@@ -18,8 +19,9 @@
       0.20000000298023224,
       0.14249999821186066
     ],
-    "triangles": 1916,
-    "vertices": 960,
+    "triangles": 304,
+    "vertices": 160,
+    "shells": 4,
     "non_manifold_edges": 0,
     "fbx_roundtrip_verified": true
   },
@@ -30,8 +32,9 @@
       0.30000001192092896,
       0.14249999821186066
     ],
-    "triangles": 2956,
-    "vertices": 1480,
+    "triangles": 424,
+    "vertices": 224,
+    "shells": 6,
     "non_manifold_edges": 0,
     "fbx_roundtrip_verified": true
   },
@@ -42,8 +45,9 @@
       0.4000000059604645,
       0.14249999821186066
     ],
-    "triangles": 4012,
-    "vertices": 2008,
+    "triangles": 544,
+    "vertices": 288,
+    "shells": 8,
     "non_manifold_edges": 0,
     "fbx_roundtrip_verified": true
   },
@@ -54,8 +58,9 @@
       0.6000000238418579,
       0.14249999821186066
     ],
-    "triangles": 6108,
-    "vertices": 3056,
+    "triangles": 784,
+    "vertices": 416,
+    "shells": 12,
     "non_manifold_edges": 0,
     "fbx_roundtrip_verified": true
   },
@@ -66,8 +71,9 @@
       0.800000011920929,
       0.14249999821186066
     ],
-    "triangles": 8188,
-    "vertices": 4096,
+    "triangles": 1024,
+    "vertices": 544,
+    "shells": 16,
     "non_manifold_edges": 0,
     "fbx_roundtrip_verified": true
   },
@@ -78,8 +84,9 @@
       0.20000000298023224,
       0.14249999821186066
     ],
-    "triangles": 3476,
-    "vertices": 1740,
+    "triangles": 556,
+    "vertices": 288,
+    "shells": 6,
     "non_manifold_edges": 0,
     "fbx_roundtrip_verified": true
   },
@@ -90,8 +97,9 @@
       0.30000001192092896,
       0.14249999821186066
     ],
-    "triangles": 5564,
-    "vertices": 2784,
+    "triangles": 836,
+    "vertices": 432,
+    "shells": 9,
     "non_manifold_edges": 0,
     "fbx_roundtrip_verified": true
   },
@@ -102,8 +110,9 @@
       0.4000000059604645,
       0.14249999821186066
     ],
-    "triangles": 7652,
-    "vertices": 3828,
+    "triangles": 1116,
+    "vertices": 576,
+    "shells": 12,
     "non_manifold_edges": 0,
     "fbx_roundtrip_verified": true
   },
@@ -114,8 +123,9 @@
       0.6000000238418579,
       0.14249999821186066
     ],
-    "triangles": 11788,
-    "vertices": 5896,
+    "triangles": 1676,
+    "vertices": 864,
+    "shells": 18,
     "non_manifold_edges": 0,
     "fbx_roundtrip_verified": true
   },
@@ -126,8 +136,9 @@
       0.800000011920929,
       0.14249999821186066
     ],
-    "triangles": 15940,
-    "vertices": 7972,
+    "triangles": 2236,
+    "vertices": 1152,
+    "shells": 24,
     "non_manifold_edges": 0,
     "fbx_roundtrip_verified": true
   },
@@ -138,8 +149,9 @@
       0.10000000149011612,
       0.0625
     ],
-    "triangles": 892,
-    "vertices": 448,
+    "triangles": 184,
+    "vertices": 96,
+    "shells": 2,
     "non_manifold_edges": 0,
     "fbx_roundtrip_verified": true
   },
@@ -150,8 +162,9 @@
       0.20000000298023224,
       0.0625
     ],
-    "triangles": 1916,
-    "vertices": 960,
+    "triangles": 304,
+    "vertices": 160,
+    "shells": 4,
     "non_manifold_edges": 0,
     "fbx_roundtrip_verified": true
   },
@@ -162,8 +175,9 @@
       0.4000000059604645,
       0.0625
     ],
-    "triangles": 4012,
-    "vertices": 2008,
+    "triangles": 544,
+    "vertices": 288,
+    "shells": 8,
     "non_manifold_edges": 0,
     "fbx_roundtrip_verified": true
   },
@@ -174,8 +188,9 @@
       0.20000000298023224,
       0.0625
     ],
-    "triangles": 3476,
-    "vertices": 1740,
+    "triangles": 556,
+    "vertices": 288,
+    "shells": 6,
     "non_manifold_edges": 0,
     "fbx_roundtrip_verified": true
   },
@@ -186,8 +201,9 @@
       0.4000000059604645,
       0.0625
     ],
-    "triangles": 7652,
-    "vertices": 3828,
+    "triangles": 1116,
+    "vertices": 576,
+    "shells": 12,
     "non_manifold_edges": 0,
     "fbx_roundtrip_verified": true
   },
@@ -198,8 +214,9 @@
       0.10000000149011612,
       0.03999999910593033
     ],
-    "triangles": 188,
-    "vertices": 96,
+    "triangles": 44,
+    "vertices": 24,
+    "shells": 1,
     "non_manifold_edges": 0,
     "fbx_roundtrip_verified": true
   },
@@ -210,8 +227,9 @@
       0.20000000298023224,
       0.03999999910593033
     ],
-    "triangles": 188,
-    "vertices": 96,
+    "triangles": 44,
+    "vertices": 24,
+    "shells": 1,
     "non_manifold_edges": 0,
     "fbx_roundtrip_verified": true
   },
@@ -222,8 +240,9 @@
       0.20000000298023224,
       0.03999999910593033
     ],
-    "triangles": 188,
-    "vertices": 96,
+    "triangles": 44,
+    "vertices": 24,
+    "shells": 1,
     "non_manifold_edges": 0,
     "fbx_roundtrip_verified": true
   },
@@ -234,8 +253,9 @@
       0.4000000059604645,
       0.03999999910593033
     ],
-    "triangles": 188,
-    "vertices": 96,
+    "triangles": 44,
+    "vertices": 24,
+    "shells": 1,
     "non_manifold_edges": 0,
     "fbx_roundtrip_verified": true
   },
@@ -244,10 +264,11 @@
     "dimensions_xyz_m": [
       0.20000000298023224,
       0.20000000298023224,
-      0.11951060593128204
+      0.11932917684316635
     ],
-    "triangles": 188,
-    "vertices": 96,
+    "triangles": 44,
+    "vertices": 24,
+    "shells": 1,
     "non_manifold_edges": 0,
     "fbx_roundtrip_verified": true
   },
@@ -255,11 +276,12 @@
     "name": "Roof_Prism",
     "dimensions_xyz_m": [
       0.20000000298023224,
-      0.19890916347503662,
-      0.11927615106105804
+      0.198079451918602,
+      0.11884766817092896
     ],
-    "triangles": 140,
-    "vertices": 72,
+    "triangles": 32,
+    "vertices": 18,
+    "shells": 1,
     "non_manifold_edges": 0,
     "fbx_roundtrip_verified": true
   },
@@ -270,8 +292,9 @@
       0.30000001192092896,
       0.0796823650598526
     ],
-    "triangles": 188,
-    "vertices": 96,
+    "triangles": 44,
+    "vertices": 24,
+    "shells": 1,
     "non_manifold_edges": 0,
     "fbx_roundtrip_verified": true
   },
@@ -282,8 +305,9 @@
       0.10000000149011612,
       0.10000000149011612
     ],
-    "triangles": 188,
-    "vertices": 96,
+    "triangles": 44,
+    "vertices": 24,
+    "shells": 1,
     "non_manifold_edges": 0,
     "fbx_roundtrip_verified": true
   },
@@ -294,8 +318,9 @@
       0.30000001192092896,
       0.11999999731779099
     ],
-    "triangles": 188,
-    "vertices": 96,
+    "triangles": 44,
+    "vertices": 24,
+    "shells": 1,
     "non_manifold_edges": 0,
     "fbx_roundtrip_verified": true
   },
@@ -306,8 +331,9 @@
       0.15000000596046448,
       0.15000000596046448
     ],
-    "triangles": 508,
-    "vertices": 256,
+    "triangles": 188,
+    "vertices": 96,
+    "shells": 1,
     "non_manifold_edges": 0,
     "fbx_roundtrip_verified": true
   },
@@ -315,11 +341,12 @@
     "name": "Plain_Triangular_Prism",
     "dimensions_xyz_m": [
       0.20000000298023224,
-      0.19890916347503662,
-      0.11927615106105804
+      0.198079451918602,
+      0.11884766817092896
     ],
-    "triangles": 140,
-    "vertices": 72,
+    "triangles": 32,
+    "vertices": 18,
+    "shells": 1,
     "non_manifold_edges": 0,
     "fbx_roundtrip_verified": true
   }
