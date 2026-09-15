@@ -45,9 +45,11 @@ namespace Phys.AvbdRef
             // Compute friction
             friction = math.sqrt(bodyA.friction * bodyB.friction);
 
-            // Compute new contacts
+            // Compute new contacts (against the heightfield when body B is the terrain body)
             var newContacts = new Contact[MaxContacts];
-            int newNumContacts = RefCollide.Collide(bodyA, bodyB, newContacts, out basis);
+            int newNumContacts = bodyB.terrain
+                ? RefCollide.CollideTerrain(bodyA, bodyB, solver.terrain, newContacts, out basis)
+                : RefCollide.Collide(bodyA, bodyB, newContacts, out basis);
 
             // Merge old contact data with new contacts
             for (int i = 0; i < newNumContacts; i++)

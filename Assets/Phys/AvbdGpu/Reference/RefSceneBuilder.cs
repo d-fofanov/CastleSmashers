@@ -49,6 +49,15 @@ namespace Phys.AvbdRef
             new IgnoreCollision(Solver, Bodies[bodyA], Bodies[bodyB]);
         }
 
+        public int SetTerrain(Heightfield field, float friction)
+        {
+            var body = new Rigid(Solver, float3.zero, 0f, friction, float3.zero) { terrain = true };
+            Solver.terrain = field;
+            Solver.terrainBody = body;
+            Bodies.Add(body);
+            return Bodies.Count - 1;
+        }
+
         public float3 Position(int i) => Bodies[i].positionLin;
         public quaternion Rotation(int i) => Bodies[i].positionAng.ToUnity();
         public float3 Velocity(int i) => Bodies[i].velocityLin;

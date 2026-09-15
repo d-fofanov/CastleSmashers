@@ -137,6 +137,7 @@ namespace Phys.AvbdGpu.Tests
                 => Joints.Add((bodyA, bodyB, rA, rB));
             public void AddSpring(int bodyA, int bodyB, float3 rA, float3 rB, float stiffness, float rest) { }
             public void AddIgnoreCollision(int bodyA, int bodyB) { }
+            public int SetTerrain(Heightfield field, float friction) { Bodies.Add((float3.zero, quaternion.identity)); return Bodies.Count - 1; }
         }
     }
 }

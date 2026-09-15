@@ -85,6 +85,9 @@ namespace Phys.AvbdRef
         /// <summary>Orientation set to point +z along the velocity while faster than 1 m/s (implies lockRotation).</summary>
         public bool alignVelocity;
         public Drive drive;
+        /// <summary>The terrain body (mirror of the GPU solver's terrain slot): static, at the identity pose, colliding through the
+        /// solver's heightfield instead of its (empty) box.</summary>
+        public bool terrain;
         public bool LockedRotation => lockRotation || heading || alignVelocity;
 
         public Rigid(Solver solver, float3 size, float density, float friction, float3 position, float3 velocity = default)

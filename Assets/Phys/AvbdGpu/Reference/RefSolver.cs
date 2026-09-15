@@ -11,6 +11,7 @@
 //
 // Deviation from the C++: gravity is a vector (the reference is Z-up with a scalar gravity along Z; Unity is Y-up).
 
+using Phys.AvbdGpu.Scenes;
 using Unity.Mathematics;
 
 namespace Phys.AvbdRef
@@ -30,6 +31,10 @@ namespace Phys.AvbdRef
 
         public Rigid bodies;
         public Force forces;
+        /// <summary>The terrain (an extension mirrored from the GPU solver): every dynamic body collides with the heightfield
+        /// through a manifold against <see cref="terrainBody"/>, which is body A's partner exactly like a static box.</summary>
+        public Heightfield terrain;
+        public Rigid terrainBody;
 
         /// <summary>Manifold body order. The C++ demo iterates its newest-first body list, so body A is the newer body; the GPU
         /// solver keys pairs by index and makes the lower index body A. Set for like-for-like comparisons (the contact basis
@@ -113,6 +118,8 @@ namespace Phys.AvbdRef
                 forces.Destroy();
             while (bodies != null)
                 bodies.Destroy();
+            terrain = null;
+            terrainBody = null;
         }
 
         public void DefaultParams()
@@ -190,12 +197,21 @@ namespace Phys.AvbdRef
                     body.positionAng = new Quat(0, math.sin(body.drive.yaw * 0.5f), 0, math.cos(body.drive.yaw * 0.5f));
             }
 
+            // Terrain: one manifold per dynamic body against the terrain body (the GPU's CollideTerrain kernel); the dynamic body
+            // is always body A, whatever the pair convention
+            if (terrain != null && terrainBody != null)
+                for (Rigid body = bodies; body != null; body = body.next)
+                    if (body.mass > 0 && !body.terrain && !body.ConstrainedTo(terrainBody))
+                        new Manifold(this, body, terrainBody);
+
             // Perform broadphase collision detection
             // This is a naive O(n^2) approach, but it is sufficient for small numbers of bodies in this sample.
             for (Rigid bodyA = bodies; bodyA != null; bodyA = bodyA.next)
             {
+                if (bodyA.terrain) continue;
                 for (Rigid bodyB = bodyA.next; bodyB != null; bodyB = bodyB.next)
                 {
+                    if (bodyB.terrain) continue;
                     float3 dp = bodyA.positionLin - bodyB.positionLin;
                     float r = bodyA.radius + bodyB.radius;
                     if (math.dot(dp, dp) <= r * r && !bodyA.ConstrainedTo(bodyB))

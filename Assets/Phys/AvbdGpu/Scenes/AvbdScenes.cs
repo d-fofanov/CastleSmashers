@@ -24,6 +24,10 @@ namespace Phys.AvbdGpu.Scenes
         void AddSpring(int bodyA, int bodyB, float3 rA, float3 rB, float stiffness, float rest);
 
         void AddIgnoreCollision(int bodyA, int bodyB);
+
+        /// <summary>The terrain every dynamic body collides with (one per world; replaces an earlier one). It occupies a body index
+        /// (a static body at the identity pose) so that manifolds against it work like manifolds against a static box.</summary>
+        int SetTerrain(Heightfield field, float friction);
     }
 
     public static class SceneBuilderExtensions
@@ -55,7 +59,8 @@ namespace Phys.AvbdGpu.Scenes
     public static class AvbdScenes
     {
         public const int Empty = 0, Ground = 1, DynamicFriction = 2, StaticFriction = 3, Pyramid = 4, Rope = 5, HeavyRope = 6, Spring = 7,
-            SpringsRatio = 8, Stack = 9, StackRatio = 10, SoftBody = 11, Bridge = 12, Breakable = 13, PyramidLarge = 14, Pile = 15, PyramidHuge = 16;
+            SpringsRatio = 8, Stack = 9, StackRatio = 10, SoftBody = 11, Bridge = 12, Breakable = 13, PyramidLarge = 14, Pile = 15, PyramidHuge = 16,
+            Terrain = 17;
 
         public static readonly SceneInfo[] All =
         {
@@ -76,6 +81,7 @@ namespace Phys.AvbdGpu.Scenes
             new SceneInfo { Name = "Pyramid 22k", Description = "GPU benchmark: square pyramid, base 40 x 40, 22 140 cubes.", CameraTarget = new float3(0, 12, 0), CameraDistance = 90, Bodies = 22141 },
             new SceneInfo { Name = "Pile 50k", Description = "GPU benchmark: 50 x 20 x 50 cubes dropped as a block.", CameraTarget = new float3(0, 12, 0), CameraDistance = 110, Bodies = 50001 },
             new SceneInfo { Name = "Pyramid 74k", Description = "GPU benchmark: square pyramid, base 60 x 60, 73 810 cubes.", CameraTarget = new float3(0, 18, 0), CameraDistance = 130, Bodies = 73811 },
+            new SceneInfo { Name = "Terrain", Description = "A hundred boxes, some tilted, dropped on 128 x 128 m of hills (a heightfield, cell 1 m).", CameraTarget = new float3(0, 4, 0), CameraDistance = 45, Bodies = 101 },
         };
 
         public static int Count => All.Length;
@@ -104,6 +110,7 @@ namespace Phys.AvbdGpu.Scenes
                 case PyramidLarge: ScenePyramid3D(s, 40); break;
                 case Pile: ScenePile(s, 50, 20, 50); break;
                 case PyramidHuge: ScenePyramid3D(s, 60); break;
+                case Terrain: SceneTerrain(s); break;
             }
         }
 
@@ -363,6 +370,28 @@ namespace Phys.AvbdGpu.Scenes
                         s.AddBody(new float3(1, 1, 1), 1.0f, 0.5f, new float3(offset + i * pitch, y, offset + j * pitch));
             }
         }
+
+        /// <summary>Boxes of three sizes dropped from 6 m onto rolling hills, every third one tilted, so that corners, edges and
+        /// faces meet the slopes; the terrain is the same on both solvers (<see cref="Heightfield.Generate"/> is deterministic).</summary>
+        public static void SceneTerrain(ISceneBuilder s)
+        {
+            var field = TerrainField();
+            s.SetTerrain(field, 0.6f);
+            var rng = new Unity.Mathematics.Random(2024u);
+            for (int x = 0; x < 10; x++)
+                for (int z = 0; z < 10; z++)
+                {
+                    int i = x * 10 + z;
+                    float3 size = i % 3 == 0 ? new float3(2, 0.5f, 1) : i % 3 == 1 ? new float3(1, 1, 1) : new float3(0.6f, 0.6f, 1.4f);
+                    float2 xz = new float2(-13.5f + x * 3f, -13.5f + z * 3f);
+                    float3 pos = new float3(xz.x, field.Height(xz) + 6f + (i % 4) * 0.7f, xz.y);
+                    quaternion rot = i % 3 == 2 ? quaternion.Euler(rng.NextFloat3(-0.6f, 0.6f)) : quaternion.RotateY(rng.NextFloat(0f, math.PI));
+                    s.AddBody(size, 1.0f, 0.5f, pos, rot, float3.zero);
+                }
+        }
+
+        /// <summary>The Terrain scene's heightfield: 129 x 129 samples 1 m apart centred on the origin, hills of about 4 m.</summary>
+        public static Heightfield TerrainField() => Heightfield.Generate(TerrainPreset.Hills, 7u, 129, 1f, 4f, 24f);
 
         /// <summary>w x h x d block of unit cubes with 0.3 m gaps dropped from 2 m, slightly jittered.</summary>
         public static void ScenePile(ISceneBuilder s, int w, int h, int d)

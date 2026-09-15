@@ -96,8 +96,14 @@ namespace Phys.AvbdGpu
         /// <summary>Incremented when a full set of event ranges has arrived.</summary>
         public int EventsFrame { get; private set; }
 
+        Heightfield m_Terrain;
+        int m_TerrainBody = -1;
+
         public int BodyCount => m_BodyCount;
         public int JointCount => m_JointCount;
+        /// <summary>The heightfield the dynamic bodies collide with (null: none) and its body slot (-1: none).</summary>
+        public Heightfield Terrain => m_Terrain;
+        public int TerrainBody => m_TerrainBody;
         public int SpringCount => m_SpringCount;
         public AvbdGpuStats Stats => m_Stats;
         public int ActiveColors => m_ActiveColors;
@@ -173,6 +179,23 @@ namespace Phys.AvbdGpu
                 Radius = math.length(size * 0.5f),
                 Flags = flags,
             };
+        }
+
+        /// <summary>Sets the terrain: a static body slot at the identity pose flagged <see cref="GpuBodyDef.FlagTerrain"/> (the partner
+        /// of every terrain manifold, friction = <paramref name="friction"/>) and the heightfield sampled by the narrowphase. A
+        /// second call replaces the field and keeps the slot.</summary>
+        public int SetTerrain(Heightfield field, float friction)
+        {
+            if (field == null) throw new ArgumentNullException(nameof(field));
+            if (m_TerrainBody < 0)
+                m_TerrainBody = AddBody(float3.zero, 0f, friction, float3.zero, quaternion.identity, float3.zero, GpuBodyDef.FlagTerrain);
+            else
+            {
+                m_BodyDefs[m_TerrainBody].Friction = friction;
+                MarkDef(m_TerrainBody);
+            }
+            m_Terrain = field;
+            return m_TerrainBody;
         }
 
         // ------------------------------------------------------------------------------------------------ body pools
@@ -370,6 +393,7 @@ namespace Phys.AvbdGpu
             m_Links.Clear();
             m_LinksDirty = true;
             m_ExtentSum = 0; m_ExtentCount = 0;
+            m_Terrain = null; m_TerrainBody = -1;
             m_StepMsSum = 0; m_StepCount = 0;
             m_Stats = default;
             StepIndex = 0;

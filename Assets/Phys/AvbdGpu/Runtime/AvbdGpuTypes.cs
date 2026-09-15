@@ -29,12 +29,16 @@ namespace Phys.AvbdGpu
         public const uint FlagReportEvents = 32;
         /// <summary>The body has a <see cref="GpuBodyDrive"/> record.</summary>
         public const uint FlagDriven = 64;
+        /// <summary>The terrain slot: a static body at the identity pose that collides through the world's heightfield (in no grid
+        /// cell, drawn as nothing); the partner of every terrain manifold.</summary>
+        public const uint FlagTerrain = 128;
         public const int KindShift = 8;
         public const uint KindMask = 3u << KindShift;
         public const uint KindPlain = 0, KindUnit = 1, KindProjectile = 2;
         public static uint Kind(uint kind) => (kind << KindShift) & KindMask;
         public bool IsStatic => Mass <= 0f || IsDead;
         public bool IsDead => (Flags & FlagDead) != 0;
+        public bool IsTerrain => (Flags & FlagTerrain) != 0;
         public uint KindOf => (Flags & KindMask) >> KindShift;
     }
 

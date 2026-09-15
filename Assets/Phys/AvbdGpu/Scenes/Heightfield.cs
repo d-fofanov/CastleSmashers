@@ -1,7 +1,9 @@
 // The terrain both solvers collide with: a regular grid of heights over the xz plane. The surface between samples is the
-// bilinear patch of the cell (Unity's TerrainData.GetInterpolatedHeight), its normal the patch's analytic gradient; beyond
-// the border the terrain continues flat at the edge height (nothing falls off the world). AvbdTerrain.hlsl mirrors Sample()
-// and MaxOver() operation for operation.
+// bilinear patch of the cell (Unity's TerrainData.GetInterpolatedHeight); the normal comes from the samples' central-difference
+// gradients interpolated the same way (Unity's GetInterpolatedNormal), so it is continuous across the cell borders where the
+// bilinear surface itself has a crease - a contact point on a sample line would otherwise get the one-sided slope of one
+// neighbouring cell. Beyond the border the terrain continues flat at the edge height (nothing falls off the world).
+// AvbdTerrain.hlsl mirrors Sample() and MaxOver() operation for operation.
 
 using System;
 using Unity.Mathematics;
@@ -90,7 +92,8 @@ namespace Phys.AvbdGpu.Scenes
 
         // ------------------------------------------------------------------------------------------------ sampling
 
-        /// <summary>Height and unit normal of the surface at a world xz (bilinear patch; flat continuation beyond the border).</summary>
+        /// <summary>Height and unit normal of the surface at a world xz (bilinear patch, interpolated sample gradients; flat
+        /// continuation beyond the border).</summary>
         public void Sample(float2 xz, out float height, out float3 normal)
         {
             float2 u = (xz - Origin) / Cell;
@@ -104,9 +107,22 @@ namespace Phys.AvbdGpu.Scenes
             // the border continues flat: no slope across an axis the point lies outside of
             float inX = u.x >= 0f && u.x <= ResX - 1 ? 1f : 0f;
             float inZ = u.y >= 0f && u.y <= ResZ - 1 ? 1f : 0f;
-            float dhdx = math.lerp(h10 - h00, h11 - h01, fz) / Cell.x * inX;
-            float dhdz = math.lerp(h01 - h00, h11 - h10, fx) / Cell.y * inZ;
+            float dhdx = math.lerp(math.lerp(GradX(ix, iz), GradX(ix + 1, iz), fx), math.lerp(GradX(ix, iz + 1), GradX(ix + 1, iz + 1), fx), fz) * inX;
+            float dhdz = math.lerp(math.lerp(GradZ(ix, iz), GradZ(ix + 1, iz), fx), math.lerp(GradZ(ix, iz + 1), GradZ(ix + 1, iz + 1), fx), fz) * inZ;
             normal = math.normalize(new float3(-dhdx, 1f, -dhdz));
+        }
+
+        /// <summary>dh/dx at a sample: the central difference, one-sided on the border.</summary>
+        float GradX(int x, int z)
+        {
+            int x0 = math.max(x - 1, 0), x1 = math.min(x + 1, ResX - 1);
+            return (Heights[z * ResX + x1] - Heights[z * ResX + x0]) / ((x1 - x0) * Cell.x);
+        }
+
+        float GradZ(int x, int z)
+        {
+            int z0 = math.max(z - 1, 0), z1 = math.min(z + 1, ResZ - 1);
+            return (Heights[z1 * ResX + x] - Heights[z0 * ResX + x]) / ((z1 - z0) * Cell.y);
         }
 
         public float Height(float2 xz)

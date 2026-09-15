@@ -9,13 +9,19 @@
 // of this software for any purpose.
 // It is provided "as is" without express or implied warranty.
 
+using Phys.AvbdGpu.Scenes;
 using Unity.Mathematics;
 
 namespace Phys.AvbdRef
 {
-    /// <summary>OBB vs OBB contact generation: SAT over 15 axes, face clipping (up to 8 points) or edge-edge closest points.</summary>
+    /// <summary>OBB vs OBB contact generation: SAT over 15 axes, face clipping (up to 8 points) or edge-edge closest points;
+    /// OBB vs heightfield by sampling the box's lattice points (an extension mirrored by the GPU's CollideTerrain kernel).</summary>
     public static class RefCollide
     {
+        public const int AXIS_TERRAIN = 3;
+        /// <summary>Lattice points of a box tested against the terrain: the 8 corners, then the 12 edge midpoints, then the 6 face
+        /// centres (the order breaks depth ties, so a face resting flat keeps its corners).</summary>
+        public const int LatticePoints = 26;
         const int MAX_CONTACTS = 8;
         const int MAX_POLY_VERTS = 16;
         const float SAT_AXIS_EPSILON = 1.0e-6f;
@@ -407,6 +413,81 @@ namespace Phys.AvbdRef
             }
 
             return contactCount;
+        }
+
+        /// <summary>Lattice point <paramref name="k"/> (0 .. 25) in box-local units of the half extents (AvbdTerrain.hlsl latticePoint).</summary>
+        public static float3 LatticePoint(int k)
+        {
+            if (k < 8)   // corners: bits x, y, z
+                return new float3((k & 1) != 0 ? 1f : -1f, (k & 2) != 0 ? 1f : -1f, (k & 4) != 0 ? 1f : -1f);
+            if (k < 20)  // edge midpoints: zero along axis (k - 8) / 4, the other two coordinates from the two low bits
+            {
+                int e = k - 8, axis = e >> 2;
+                float a = (e & 1) != 0 ? 1f : -1f, b = (e & 2) != 0 ? 1f : -1f;
+                return axis == 0 ? new float3(0f, a, b) : axis == 1 ? new float3(a, 0f, b) : new float3(a, b, 0f);
+            }
+            int f = k - 20, faceAxis = f >> 1;   // face centres: +-1 along axis (k - 20) / 2
+            float sgn = (f & 1) != 0 ? 1f : -1f;
+            return faceAxis == 0 ? new float3(sgn, 0f, 0f) : faceAxis == 1 ? new float3(0f, sgn, 0f) : new float3(0f, 0f, sgn);
+        }
+
+        /// <summary>Contacts between a box and the terrain. The box's 26 lattice points are sampled against the heightfield; the
+        /// at most 8 deepest points at or below the surface (depth measured along the local surface normal) become the contacts,
+        /// keyed by their lattice index so that the warm start finds them again. The manifold normal is the normalised sum of the
+        /// selected points' local normals (pointing up, from the terrain B to the box A); every contact's terrain point is the
+        /// lattice point projected along that normal onto the local tangent plane, so the tangential error at x- is zero exactly
+        /// as for the clipped points of a box pair.</summary>
+        public static int CollideTerrain(Rigid bodyA, Rigid terrainBody, Heightfield field, Manifold.Contact[] contacts, out Mat3 basisOut)
+        {
+            basisOut = default;
+            float3 half = bodyA.size * 0.5f;
+            var dist = new float[LatticePoints];
+            var point = new float3[LatticePoints];
+            var height = new float[LatticePoints];
+            var normal = new float3[LatticePoints];
+            for (int k = 0; k < LatticePoints; k++)
+            {
+                float3 p = RefMath.Transform(bodyA.positionLin, bodyA.positionAng, LatticePoint(k) * half);
+                field.Sample(p.xz, out float h, out float3 n);
+                point[k] = p; height[k] = h; normal[k] = n;
+                dist[k] = n.y * (p.y - h);   // signed distance to the local tangent plane (the plane through (x, h, z) with normal n)
+            }
+
+            // the deepest touching points, ties to the lower lattice index
+            var selected = new int[MAX_CONTACTS];
+            var used = new bool[LatticePoints];
+            int count = 0;
+            for (int slot = 0; slot < MAX_CONTACTS; slot++)
+            {
+                int best = -1;
+                float bestDist = 0f;
+                for (int k = 0; k < LatticePoints; k++)
+                    if (!used[k] && dist[k] <= 0f && (best < 0 || dist[k] < bestDist)) { best = k; bestDist = dist[k]; }
+                if (best < 0) break;
+                used[best] = true;
+                selected[count++] = best;
+            }
+            if (count == 0) return 0;
+
+            float3 sum = float3.zero;
+            for (int i = 0; i < count; i++) sum += normal[selected[i]];
+            float3 N = math.normalize(sum);
+            basisOut = RefMath.Orthonormal(N);
+
+            Quat invA = RefMath.Conjugate(bodyA.positionAng), invB = RefMath.Conjugate(terrainBody.positionAng);
+            for (int i = 0; i < count; i++)
+            {
+                int k = selected[i];
+                float3 p = point[k];
+                float3 s = new float3(p.x, height[k], p.z);
+                float3 xB = p - N * math.dot(N, p - s);
+                Manifold.Contact c = default;
+                c.feature = (AXIS_TERRAIN << 24) | k;
+                c.rA = RefMath.Rotate(invA, p - bodyA.positionLin);
+                c.rB = RefMath.Rotate(invB, xB - terrainBody.positionLin);
+                contacts[i] = c;
+            }
+            return count;
         }
 
         /// <summary>Contacts between two boxes; the basis has the normal (pointing from B to A) in row 0 and the tangents in rows 1 and 2.</summary>
