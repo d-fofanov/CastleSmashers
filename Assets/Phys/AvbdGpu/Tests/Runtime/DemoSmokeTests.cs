@@ -59,6 +59,38 @@ namespace Phys.AvbdGpu.Tests
             }
         }
 
+        /// <summary>The Terrain scene: the world gets a heightfield, the view draws it with a Unity terrain of the same extent and
+        /// height range, the boxes land on it, and the terrain imports back as the same field (16-bit heightmap quantisation).</summary>
+        [UnityTest]
+        public IEnumerator TerrainSceneIsDrawnAndImportsBack()
+        {
+            var demo = m_Root.GetComponent<DemoBootstrap>();
+            demo.Load(AvbdScenes.Terrain);
+            yield return null;
+            var field = demo.World.Terrain;
+            Assert.IsNotNull(field, "the scene set a terrain");
+            var terrain = demo.TerrainView.Terrain;
+            Assert.IsNotNull(terrain, "a Terrain object draws it");
+            Assert.IsTrue(terrain.gameObject.activeInHierarchy);
+            Assert.AreEqual(field.Extent.x, terrain.terrainData.size.x, 1e-3f);
+            Assert.AreEqual(field.MinHeight, terrain.transform.position.y, 1e-5f);
+            var back = Phys.AvbdGpu.Presentation.TerrainView.FromTerrain(terrain);
+            Assert.AreEqual(field.ResX, back.ResX);
+            for (int z = 0; z < field.ResZ; z += 7)
+                for (int x = 0; x < field.ResX; x += 5)
+                    Assert.AreEqual(field[x, z], back[x, z], 1e-3f, $"sample ({x}, {z}) survives the round trip");
+            for (int f = 0; f < 90; f++) yield return null;
+            var stats = demo.World.GetStatsSync();
+            Assert.Greater(stats.TerrainManifolds, 50, "the boxes have landed on the hills");
+            Assert.AreEqual(0, stats.OverflowFlags);
+            demo.World.GetPosesSync(out var pos, out _);
+            for (int i = 1; i < demo.World.BodyCount; i++)
+                Assert.Greater(pos[i].y, field.Height(pos[i].xz) - 0.5f, $"body {i} stays above the surface");
+            demo.Load(AvbdScenes.Ground);
+            yield return null;
+            Assert.IsFalse(demo.TerrainView.Visible, "a scene without terrain hides it");
+        }
+
         [UnityTest]
         public IEnumerator ShootingAndDraggingWork()
         {

@@ -168,6 +168,17 @@ namespace Phys.AvbdGpu.Scenes
             MinHeight = lo; MaxHeight = hi;
         }
 
+        /// <summary>The same surface sampled on another grid over the same extent (bilinear: exact when refining a bilinear surface).</summary>
+        public Heightfield Resampled(int resX, int resZ)
+        {
+            var cell = new float2(Extent.x / (resX - 1), Extent.y / (resZ - 1));
+            var h = new float[resX * resZ];
+            for (int z = 0; z < resZ; z++)
+                for (int x = 0; x < resX; x++)
+                    h[z * resX + x] = Height(Origin + new float2(x * cell.x, z * cell.y));
+            return new Heightfield(resX, resZ, cell, Origin, h);
+        }
+
         // ------------------------------------------------------------------------------------------------ editing
 
         /// <summary>Mean sample height over the xz rectangle (the samples inside it, or the nearest one).</summary>

@@ -440,19 +440,29 @@ int findPrevManifold(uint a, uint b)
     return -1;
 }
 
-// Writes the manifold of pair (a, b) from the n contact points in thread t's scratch (gs_xA / gs_xB / gs_feature, world
-// points on A and B): warm start from the previous step's manifold by feature key, C0 at x-, the events, the manifold record
-// and its hash entry. Returns false when the manifold or contact pool is full.
-bool emitManifold(uint t, int n, uint a, uint b, BodyDef dA, BodyDef dB, float3 posA, float4 rotA, float3 posB, float4 rotB, float3x3 basis)
+// Reserves a manifold record and n contacts of the pools; false (and the overflow flag) when either is full.
+// (single exit: FXC warns about an uninitialised return value when a bool function returns early next to an atomic)
+bool reserveManifold(int n, out uint midx, out uint cstart)
 {
-    uint dummy;
-    uint cstart;
+    uint dummy = 0;
+    midx = 0;
     InterlockedAdd(_Counters[CNT_CONTACTS], (uint)n, cstart);
-    if (cstart + (uint)n > _MaxContacts) { InterlockedOr(_Counters[CNT_OVERFLOW], OVERFLOW_CONTACTS, dummy); return false; }
-    uint midx;
-    InterlockedAdd(_Counters[CNT_MANIFOLDS], 1, midx);
-    if (midx >= _MaxManifolds) { InterlockedOr(_Counters[CNT_OVERFLOW], OVERFLOW_MANIFOLDS, dummy); return false; }
+    bool ok = cstart + (uint)n <= _MaxContacts;
+    if (ok)
+    {
+        InterlockedAdd(_Counters[CNT_MANIFOLDS], 1, midx);
+        ok = midx < _MaxManifolds;
+        if (!ok) InterlockedOr(_Counters[CNT_OVERFLOW], OVERFLOW_MANIFOLDS, dummy);
+    }
+    else InterlockedOr(_Counters[CNT_OVERFLOW], OVERFLOW_CONTACTS, dummy);
+    return ok;
+}
 
+// Writes manifold midx of pair (a, b) from the n contact points in thread t's scratch (gs_xA / gs_xB / gs_feature, world
+// points on A and B) into contacts cstart ..: warm start from the previous step's manifold by feature key, C0 at x-, the
+// events, the manifold record and its hash entry.
+void emitManifold(uint t, int n, uint midx, uint cstart, uint a, uint b, BodyDef dA, BodyDef dB, float3 posA, float4 rotA, float3 posB, float4 rotB, float3x3 basis)
+{
     int prev = findPrevManifold(a, b);
     Manifold pm = (Manifold)0;
     if (prev >= 0) pm = _ManifoldPrev[prev];
@@ -513,7 +523,6 @@ bool emitManifold(uint t, int n, uint a, uint b, BodyDef dA, BodyDef dB, float3 
         if (old == 0) break;
         h = (h + 1) & _HashMask;
     }
-    return true;
 }
 
 [numthreads(AVBD_THREADS, 1, 1)]
@@ -530,7 +539,9 @@ void Collide(uint3 id : SV_DispatchThreadID, uint3 gtid : SV_GroupThreadID)
     float3x3 basis;
     int n = collide(t, makeOBB(posA, rotA, dA.size), makeOBB(posB, rotB, dB.size), basis);
     if (n == 0) return;
-    emitManifold(t, n, a, b, dA, dB, posA, rotA, posB, rotB, basis);
+    uint midx, cstart;
+    if (!reserveManifold(n, midx, cstart)) return;
+    emitManifold(t, n, midx, cstart, a, b, dA, dB, posA, rotA, posB, rotB, basis);
 }
 
 // ------------------------------------------------------------------------------------------------ terrain
@@ -602,9 +613,9 @@ void CollideTerrain(uint3 id : SV_DispatchThreadID, uint3 gtid : SV_GroupThreadI
     }
 
     uint b = _TerrainSlot;
-    if (emitManifold(t, count, i, b, d, _BodyDef[b], pos, rot, _BodyPos[b].xyz, _BodyRot[b], basis))
-    {
-        uint dummy;
-        InterlockedAdd(_Counters[CNT_TERRAIN], 1, dummy);
-    }
+    uint midx, cstart;
+    if (!reserveManifold(count, midx, cstart)) return;
+    emitManifold(t, count, midx, cstart, i, b, d, _BodyDef[b], pos, rot, _BodyPos[b].xyz, _BodyRot[b], basis);
+    uint dummy;
+    InterlockedAdd(_Counters[CNT_TERRAIN], 1, dummy);
 }

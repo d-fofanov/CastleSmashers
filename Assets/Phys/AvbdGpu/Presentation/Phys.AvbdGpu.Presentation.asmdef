@@ -3,7 +3,8 @@
     "rootNamespace": "Phys.AvbdGpu.Presentation",
     "references": [
         "Unity.Mathematics",
-        "Phys.AvbdGpu"
+        "Phys.AvbdGpu",
+        "Phys.AvbdGpu.Scenes"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],

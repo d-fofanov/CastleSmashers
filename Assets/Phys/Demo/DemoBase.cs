@@ -16,9 +16,12 @@ namespace Phys.Demo
         public bool ShowHud = true;
         /// <summary>Body capacity of the GPU world.</summary>
         public int MaxBodies = 81920;
+        [Tooltip("A Terrain of the scene to draw the world's heightfield on (its data is cloned, never edited); none: the demo creates one.")]
+        public Terrain SceneTerrain;
 
         protected AvbdGpuWorld m_World;
         protected AvbdGpuRenderer m_Renderer;
+        protected TerrainView m_TerrainView;
         protected DemoCamera m_Camera;
         protected int m_Scene;
         protected bool m_Paused;
@@ -41,6 +44,7 @@ namespace Phys.Demo
 
         public AvbdGpuWorld World => m_World;
         public AvbdGpuRenderer Renderer => m_Renderer;
+        public TerrainView TerrainView => m_TerrainView;
         public int Scene => m_Scene;
         public bool Paused { get => m_Paused; set => m_Paused = value; }
 
@@ -90,12 +94,14 @@ namespace Phys.Demo
             if (!AvbdGpuKernels.Supported) { Debug.LogError("Compute shaders are not supported on this device"); enabled = false; return; }
             m_World = new AvbdGpuWorld(CreateConfig()) { ReadbackPoses = true };
             m_Renderer = new AvbdGpuRenderer(m_World);
+            m_TerrainView = new TerrainView();
             Configure();
             Load(StartScene);
         }
 
         void OnDestroy()
         {
+            m_TerrainView?.Dispose();
             m_Renderer?.Dispose();
             m_World?.Dispose();
         }
@@ -109,6 +115,7 @@ namespace Phys.Demo
             m_Renderer.ClearTints();
             m_Renderer.MeshRanges.Clear();
             BuildScene(index, out float3 target, out float distance);
+            m_TerrainView.Show(m_World.Terrain, SceneTerrain);   // hides the terrain when the scene has none
             m_World.Upload();
             if (SettleSteps > 0)
             {
@@ -255,7 +262,8 @@ namespace Phys.Demo
             string overflow = stats.OverflowFlags != 0 ? $"  <color=#ff5555>capacity overflow {stats.OverflowFlags}</color>" : "";
             return
                 $"frame {Time.smoothDeltaTime * 1000f:F1} ms ({1f / math.max(Time.smoothDeltaTime, 1e-4f):F0} fps)  step submit {stats.LastStepMs:F2} ms (avg {stats.AvgStepMs:F2})  gpu render {(FrameTimingManager.IsFeatureEnabled() ? $"{m_GpuMs:F2} ms" : "n/a")}\n" +
-                $"bodies {m_World.BodyCount}  joints {m_World.JointCount}  springs {m_World.SpringCount}  pairs {stats.Pairs}  manifolds {stats.Manifolds}  contacts {stats.Contacts}\n" +
+                $"bodies {m_World.BodyCount}  joints {m_World.JointCount}  springs {m_World.SpringCount}  pairs {stats.Pairs}  manifolds {stats.Manifolds}" +
+                (m_World.Terrain != null ? $" ({stats.TerrainManifolds} terrain)" : "") + $"  contacts {stats.Contacts}\n" +
                 $"colours {stats.ColorsUsed} / active {stats.ActiveColors}  overflow bodies {stats.OverflowBodies}  large bodies {stats.LargeBodies}{overflow}\n" +
                 $"dt 1/{math.round(1f / p.Dt)}  substeps {p.Substeps}  iterations {p.Iterations}  alpha {p.Alpha}  beta {p.BetaLin}/{p.BetaAng}  gamma {p.Gamma}  " +
                 $"post-stabilise {(p.PostStabilize ? "on" : "off")}  rotated inertia {(p.RotatedInertia ? "on" : "off")}  colour mode {m_Renderer.ColorMode}";
