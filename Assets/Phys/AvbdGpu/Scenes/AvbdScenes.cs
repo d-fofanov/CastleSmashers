@@ -355,10 +355,12 @@ namespace Phys.AvbdGpu.Scenes
                 s.AddBody(new float3(2, 1, 1), 1.0f, 0.5f, new float3(0, i * 2.0f + 8.0f, 0));
         }
 
-        /// <summary>Square pyramid of unit cubes: layer k (from the top) is k x k, base n x n; sum k^2 cubes.</summary>
-        public static void ScenePyramid3D(ISceneBuilder s, int n)
+        /// <summary>Square pyramid of unit cubes: layer k (from the top) is k x k, base n x n; sum k^2 cubes. On the ground box, or
+        /// (<paramref name="terrain"/>) on a flat heightfield of the same extent, 1 m cells (the terrain pass timed on a large pile).</summary>
+        public static void ScenePyramid3D(ISceneBuilder s, int n, bool terrain = false)
         {
-            s.AddBody(new float3(n * 4f, 1, n * 4f), 0.0f, 0.5f, new float3(0, -0.5f, 0));
+            if (terrain) s.SetTerrain(Heightfield.Flat(n * 4 + 1, n * 4 + 1, new float2(1f, 1f), new float2(-n * 2f, -n * 2f), 0f), 0.5f);
+            else s.AddBody(new float3(n * 4f, 1, n * 4f), 0.0f, 0.5f, new float3(0, -0.5f, 0));
             const float pitch = 1.02f;
             for (int layer = 0; layer < n; layer++)
             {

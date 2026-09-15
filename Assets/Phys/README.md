@@ -2,21 +2,24 @@
 
 3D rigid-box physics in compute shaders: frictional contacts, ball-socket joints with angular locks and fracture
 (torque, or directional snap limits), springs, ignore-collision links, driven bodies (external forces, velocity motors,
-locked or kinematic orientation), body pools with contact events for units and projectiles. The algorithm is Augmented
+locked or kinematic orientation), body pools with contact events for units and projectiles, a heightfield terrain
+(imported from a Unity Terrain, a heightmap texture or generated). The algorithm is Augmented
 Vertex Block Descent (Giles, Diaz, Yuksel, SIGGRAPH 2025) exactly as in the author's reference implementation
 `avbd-demo3d`; the whole step — broadphase, narrowphase with persisted manifolds, graph colouring, colour-batched primal
 sweeps, dual updates, velocities — runs on the GPU and nothing is read back for rendering. See
 [ALGORITHMS.md](ALGORITHMS.md) for the pipeline and [BRICK_ASSEMBLY.md](BRICK_ASSEMBLY.md) for the JSON format in which
 models built from the construction-piece pack are exchanged with other agents.
 
-* **Runtime** (`Phys.AvbdGpu`) — `AvbdGpuWorld` (bodies, joints, springs, links, drives, `Step()`), `BodyPool` (retired
-  slots reused by later spawns), buffers, command-buffer recording, seven `.compute` files (`Resources/AvbdGpu`).
-* **Reference** (`Phys.AvbdRef`) — line-for-line C# port of `avbd-demo3d` (the test oracle).
-* **Scenes** (`Phys.AvbdGpu.Scenes`) — the 14 reference scenes and 3 GPU benchmark scenes behind an `ISceneBuilder`
-  interface that both solvers implement; `BrickCastle`, a castle planned on the stud grid of the construction brick;
-  `BrickAssembly`, castles described as brick-assembly JSON documents (the 27-piece pack), expanded into boxes and snaps.
+* **Runtime** (`Phys.AvbdGpu`) — `AvbdGpuWorld` (bodies, joints, springs, links, drives, terrain, `Step()`), `BodyPool`
+  (retired slots reused by later spawns), buffers, command-buffer recording, seven `.compute` files (`Resources/AvbdGpu`).
+* **Reference** (`Phys.AvbdRef`) — line-for-line C# port of `avbd-demo3d` (the test oracle), plus the terrain extension.
+* **Scenes** (`Phys.AvbdGpu.Scenes`) — the 14 reference scenes, 3 GPU benchmark scenes and a terrain scene behind an
+  `ISceneBuilder` interface that both solvers implement; `Heightfield`, the terrain data type (sampling, generation,
+  editing); `BrickCastle`, a castle planned on the stud grid of the construction brick; `BrickAssembly`, castles
+  described as brick-assembly JSON documents (the 27-piece pack), expanded into boxes and snaps.
 * **Presentation** (`Phys.AvbdGpu.Presentation`) — `AvbdGpuRenderer`: instanced draws straight from the solver buffers
-  (the collision boxes, or any mesh for a range of bodies), per-body tints, shadows, GPU-written contact / joint debug lines.
+  (the collision boxes, or any mesh for a range of bodies), per-body tints, shadows, GPU-written contact / joint debug lines;
+  `TerrainView`: the heightfield drawn with Unity's terrain renderer, Unity Terrain / heightmap import.
 * **Siege** (`Phys.AvbdGpu.Siege`) — `SiegeSystem`: armies of toy figures (`Assets/Models/ConstructorFigure`) that march,
   hold a line and fire volleys of arrows (`Assets/Models/ConstructorArrow`), cannonballs, rockets and homing bolts at each
   other and at the castle; `Ballistics`, `SiegeSpec` (the models as boxes), `BodyPool`s for units and projectiles.
@@ -24,21 +27,22 @@ models built from the construction-piece pack are exchanged with other agents.
   castle and its siege) and `Preview.unity` / `PreviewDemo` (the JSON castles of `Resources/Castles`) on the shared
   `DemoBase` (scene keys, HUD, drag, shooting, player flags), `DemoCamera`.
 * **Tests** — EditMode: reference behaviour, kernel checks, GPU vs reference comparisons, invariants, drives, body pools,
-  siege, castle layout, brick assemblies, performance; PlayMode: demo, castle, siege and preview smoke tests.
+  siege, castle layout, brick assemblies, terrain, performance; PlayMode: demo, castle, siege and preview smoke tests.
 
 ## Layout
 
 ```
 Assets/Phys/AvbdGpu/Runtime            AvbdGpuWorld, BodyPool, AvbdGpuPipeline, AvbdGpuBuffers, AvbdGpuKernels, AvbdGpuTypes, AvbdGpuConstants
-Assets/Phys/AvbdGpu/Runtime/Resources  AvbdCommon.hlsl, AvbdUtil, AvbdScan, AvbdBroadphase, AvbdNarrowphase, AvbdConstraints,
+Assets/Phys/AvbdGpu/Runtime/Resources  AvbdCommon.hlsl, AvbdTerrain.hlsl, AvbdUtil, AvbdScan, AvbdBroadphase, AvbdNarrowphase, AvbdConstraints,
                                        AvbdColoring, AvbdSolver, AvbdDebug (.compute)
-Assets/Phys/AvbdGpu/Reference          RefMath, RefBodies, RefJoint (+Spring), RefManifold, RefCollide, RefSolver, RefSceneBuilder
-Assets/Phys/AvbdGpu/Scenes             AvbdScenes (catalog + ISceneBuilder), BrickCastle (brick, layout, castle plans, snap joints),
+Assets/Phys/AvbdGpu/Reference          RefMath, RefBodies, RefJoint (+Spring), RefManifold, RefCollide (boxes, terrain), RefSolver, RefSceneBuilder
+Assets/Phys/AvbdGpu/Scenes             AvbdScenes (catalog + ISceneBuilder), Heightfield (terrain samples, normals, max mip, presets, plateau),
+                                       BrickCastle (brick, layout, castle plans, snap joints),
                                        BrickAssembly (piece catalog, document parser + writer, AssemblyBuilder: boxes, snaps, diagnostics)
 Assets/Phys/AvbdGpu/Siege              SiegeSpec (figure and arrow models as boxes), Ballistics, SiegeSystem (armies, volleys, retirement)
-Assets/Phys/AvbdGpu/Presentation       AvbdGpuRenderer, Resources/AvbdGpu/AvbdBox.shader (+ AvbdBodyInstancing.hlsl), AvbdLines.shader
+Assets/Phys/AvbdGpu/Presentation       AvbdGpuRenderer, TerrainView, Resources/AvbdGpu/AvbdBox.shader (+ AvbdBodyInstancing.hlsl), AvbdLines.shader
 Assets/Phys/AvbdGpu/Tests/Editor       ReferenceTests, GpuKernelTests, GpuVsReferenceTests, InvariantTests, DriveTests, BodyPoolTests, SiegeTests,
-                                       SnapFractureTests, BrickCastleTests, BrickAssemblyTests, PerformanceTests, DiagnosticTests
+                                       SnapFractureTests, BrickCastleTests, BrickAssemblyTests, TerrainTests, PerformanceTests, DiagnosticTests
 Assets/Phys/AvbdGpu/Tests/Runtime      DemoSmokeTests, CastleSmokeTests, SiegeSmokeTests, PreviewSmokeTests
 Assets/Phys/Demo                       Demo.unity, Castle.unity, Preview.unity, DemoBase, DemoBootstrap, CastleDemo, PreviewDemo, DemoCamera,
                                        Editor/BuildDemo (player builds, mesh assignment, the Outpost export)
@@ -70,6 +74,31 @@ world.GetPosesSync(out var pos, out var rot);   // synchronous readback (tests, 
 `new AvbdGpuRenderer(world).Render()` once per frame; `renderer.MeshRanges` draws a body range with a mesh instead of its
 box (`Mesh`, `Scale`, `Offset` of the model pivot in body space), `renderer.SetTints(rgba, start, count)` colours bodies
 (RGBA8, alpha 0 = hash palette), `renderer.Shadows` casts and receives the main light's shadows.
+
+### Terrain
+
+```csharp
+var field = Heightfield.Generate(TerrainPreset.Hills, seed: 7, res: 513, cell: 1f, amplitude: 12f, featureSize: 80f);
+// or TerrainView.FromTerrain(sceneTerrain), TerrainView.FromTexture(r16Heightmap, cell, origin, heightScale),
+// or new Heightfield(resX, resZ, cell, originXZ, heights[z * resX + x])
+field.Flatten(min, max, field.MeanHeight(min, max), skirt: 8f);   // a plateau for a building
+int terrain = world.SetTerrain(field, friction: 0.6f);             // one per world; a static body slot at the identity pose
+field.Sample(xz, out float height, out float3 normal);            // what the solver sees (gameplay: spawn heights)
+world.UpdateTerrain();                                            // after editing field.Heights in place (BuildMaxMip first)
+var view = new TerrainView(); view.Show(field);                   // Unity terrain renderer; view.Show(field, sceneTerrain) draws on a scene terrain
+```
+
+A `Heightfield` is a grid of world-unit heights over xz (`Origin`, `Cell` per axis, `ResX x ResZ`); the surface between samples is
+the bilinear patch (Unity's `GetInterpolatedHeight`), the normal comes from the samples' central-difference gradients
+interpolated the same way (continuous across the cell borders, where the bilinear surface has a crease), and beyond the
+border the terrain continues flat at the edge height. Every dynamic body collides with it: its 26 lattice points (corners,
+edge midpoints, face centres) are sampled, the at most 8 deepest at or below the surface become one manifold against the
+terrain slot (feature keys = lattice indices, so the warm start and sticking friction work as on a box), with one normal
+per manifold (the normalised sum of the points' surface normals) and every contact's terrain point projected along it onto
+the local tangent plane. Bodies whose AABB stays above a max-height mip of 8 x 8-cell blocks are skipped. The CPU reference
+does the same (`RefCollide.CollideTerrain`), and the GPU matches it to rounding (below). Static bodies never touch the
+terrain; a terrain has one friction value; features smaller than about half a box extent can poke into a face between
+the sample points, and a body buried deeper than its size is pushed out along the local normal.
 
 ### Driven bodies, pools and events
 
@@ -144,8 +173,9 @@ memory.
 Open `Assets/Phys/Demo/Demo.unity` and press Play, or build with `Phys / Build Demo Player`
 (`Unity.exe -batchmode -quit -executeMethod Phys.Demo.Editor.BuildDemo.Build -buildPath C:/out/Demo.exe`).
 
-Keys: `1-0` scene, `,` `.` previous / next scene (17 scenes: the 14 reference scenes, then pyramid 22k, pile 50k,
-pyramid 74k), `R` reset, `Space` pause, `N` step, `F1` contact crosses (red sliding, green sticking), `F2` colour mode
+Keys: `1-0` scene, `,` `.` previous / next scene (18 scenes: the 14 reference scenes, then pyramid 22k, pile 50k,
+pyramid 74k, and Terrain: a hundred boxes dropped on hills), `R` reset, `Space` pause, `N` step, `F1` contact crosses
+(red sliding, green sticking), `F2` colour mode
 (palette / graph colour / uniform), `F3` post-stabilise, `F4` rotated inertia, `F5` joint lines, `+/-` iterations,
 `[ ]` substeps, `B` / `Enter` shoot a box, `G` gravity on/off, `H` hide HUD. Left drag pulls a body with a soft world
 joint (5000 N/m), right drag orbits, middle drag pans, wheel / `Q` `E` zoom, `W A S D` orbit.
@@ -199,9 +229,19 @@ planned by `BrickCastle` on the stud grid (`CastlePlan.Presets`):
   and blows the hit section out; the rest stays snapped. Jointed bodies do not collide until a joint breaks (the reference's rule),
   and the angular lock assumes equal orientations, hence four points per overlap rather than one lock.
 
-Keys as the main demo plus `J` snap on/off, `F6` collision boxes, `F7` shadows; `B` / `Enter` fires a 30 kg cannonball
-at 24 model m/s (× √5 in the solver). Flags: `-avbd-scene 0..9`, `-avbd-snap`, `-avbd-siege`, and the screenshot / bench /
-camera flags above.
+Keys as the main demo plus `J` snap on/off, `T` terrain (flat, hills, valley, ridge), `F6` collision boxes, `F7` shadows;
+`B` / `Enter` fires a 30 kg cannonball at 24 model m/s (× √5 in the solver). Flags: `-avbd-scene 0..9`, `-avbd-snap`,
+`-avbd-siege`, `-avbd-terrain hills|valley|ridge|none`, `-avbd-terrain-seed n`, and the screenshot / bench / camera flags above.
+
+Terrain (`TerrainParams` on the demo, shared with the preview demo through `DemoBase`): a procedural heightfield of 513
+samples 1 m apart (512 x 512 m, relief 12 m, features 80 m across) generated from the seed, or, when a scene `Terrain` is
+assigned to `SceneTerrain`, that terrain's heights (drawn on it; its data is cloned, so the asset is never edited). A
+plateau is levelled under the castle's footprint plus four studs at the mean terrain height there and blended into the
+hills over `Skirt` (8 m); the castle's `Origin.y` and the camera move up with it, the HUD reports the field and the plateau
+height. The armies spawn standing on the surface wherever it is (`SiegeSystem.Terrain`, `StandHeight`), walk in over the
+slopes on their xz motors and aim at the wall crest above the plateau; arrows that stick in the hillside are spent like
+those in the ground. `Preview.unity` gets the same terrain settings and keys; its plateau spans the document's footprint
+plus two studs.
 
 ### Siege
 
@@ -275,7 +315,8 @@ the roof deck, a post inside each side hall, two more beams under the bridge dec
 changes, with the gatehouse banner a fifth of a stud lower). Re-bonded, the citadel stands dry-stacked (33 mm of
 settling at most) and holds snapped with no joint breaking; the seven pieces still reported as resting on nothing — the
 portcullis teeth and the trees' outer foliage — hang from the bricks above them when snapped. Flags: `-avbd-castle name`
-(a file name), `-avbd-scene n`, `-avbd-snap`, and the screenshot / bench / camera flags above.
+(a file name), `-avbd-scene n`, `-avbd-snap`, `-avbd-terrain preset`, `-avbd-terrain-seed n`, and the screenshot / bench /
+camera flags above; `T` cycles the terrain like the castle demo.
 
 ## Measured behaviour
 
@@ -290,6 +331,10 @@ this GPU is capped at ~250 MHz / 17 W and everything below is 3-5x slower.
 * The narrowphase reproduces the reference `collide()` on random OBB pairs (contact count, feature keys, points
   within 1e-3; face and edge manifolds); the broadphase produces exactly the brute-force AABB pair set (owner-cell
   rule, large-body list, link filter). Two runs are bitwise identical.
+* Terrain, GPU vs the reference: a box set down on a flat field is bitwise identical after 300 steps (eight sticking
+  contacts carrying its weight), cubes sticking and sliding on a 30° slope 6e-5, a long box balanced across a rounded
+  ridge on its mid-face points 1e-7, a hundred boxes tumbling onto hills 2e-3 after 90 steps; the Terrain scene is
+  bitwise reproducible from run to run.
 * A resting box carries its weight in the contact multipliers (sum of -lambda_n = m g within 10 %), its normal
   penalty ramps and persists across steps and its contacts stick; the 16-row pyramid, the 1-2-4-8 stack and the
   bridge stand; the breakable chain fractures.
@@ -304,17 +349,25 @@ Step times (solver only, `PerformanceTests`, GPU synchronised once after 60-120 
 | Pyramid 22k | 22 141 | 85 k / 340 k | 6.3 ms | 3.9 ms | 8.3 ms (120 fps) |
 | Pile 50k (falling block) | 50 001 | 52 k / 200 k | 3.9 ms | 3.4 ms | 4.6 ms (219 fps) |
 | Pyramid 74k | 73 811 | 305 k / 1.19 M | | 17.4 ms | 37 ms (27 fps) |
+| Pyramid 22k on a heightfield | 22 141 | 85 k / 345 k (1 600 terrain manifolds) | 6.5 ms | | |
+| Terrain (100 boxes on hills) | 101 | 109 / 396 | 0.8 ms | | |
 
 Small scenes are bound by the ~130 indirect dispatches of a step (about 1.5 ms); large piles by the contact traffic
 of the primal sweeps (every iteration re-reads every contact from both bodies), so the iteration count is the main
 knob — the paper uses 4 for its large piles. CPU time per step is 0.1-1 ms (parameter upload, command buffer
-submission).
+submission). The terrain pass costs what the ground box did: the 22k pyramid on a flat heightfield instead of the box
+steps in 6.5 ms against 6.4 (its 1 600 base cubes carry 8 terrain contacts each instead of 4 box contacts); bodies
+above the surface leave the pass at the mip test.
 
 ## Known limits
 
 * Boxes only (the narrowphase is `collide.cpp`); no sleeping; discrete contacts at `x⁻`, so very fast small bodies
   can tunnel (the reference behaves the same); bodies are retired into pools rather than removed (a retired slot keeps
   its thread in the per-body kernels and its instance in the draw, both idle).
+* One terrain per world, with one friction value, touched by dynamic bodies only; it is sampled at a box's 26 lattice
+  points, so terrain features smaller than about half a box extent can poke into a face between them, and a body more
+  than its size below the surface is pushed out along the local normal (a heightfield has no other side). Unity terrains
+  above 2049 samples per axis are imported at every second sample.
 * Steering and aiming use the asynchronous pose readback (one or two frames old), so a siege is not bitwise reproducible
   from run to run; the solver itself still is (spawns are ordered on the CPU, events use order-independent atomics).
 * Small scenes cost ~1–2 ms per step regardless of size: every iteration is `colours + 3` dispatches. The active
@@ -337,6 +390,7 @@ submission).
 .\RunTests.ps1 -Platform PlayMode -Filter Phys.AvbdGpu.Tests.SiegeSmokeTests    # the Outpost under siege: volleys, kills, retirements
 .\RunTests.ps1 -Platform EditMode -Filter Phys.AvbdGpu.Tests.BrickAssemblyTests  # the brick-assembly format: catalog, parsing, rejection, boxes, snaps
 .\RunTests.ps1 -Platform PlayMode -Filter Phys.AvbdGpu.Tests.PreviewSmokeTests  # the JSON castles: the Outpost and the re-bonded citadel stand dry and snapped
+.\RunTests.ps1 -Platform EditMode -Filter Phys.AvbdGpu.Tests.TerrainTests        # the heightfield, the reference terrain contacts, the GPU against them
 ```
 
 `DriveTests` check the drives against the implicit Euler parabola and the reference mirror (constant force 1e-5, motor
@@ -344,7 +398,13 @@ submission).
 move, that a respawn starts from a clean state and that the events report what units and projectiles touch;
 `SiegeTests` the ballistics (closest approach 2e-3 m over three arcs), marching, a volley that kills its target, the
 retirement cooldown, the drives switched off at the first contact and a 600-step siege of the Outpost with synchronous
-readbacks (bitwise reproducible over two runs). `BrickAssemblyTests` check the piece catalog against the pack's manifest,
+readbacks (bitwise reproducible over two runs). `TerrainTests` check the heightfield (an inclined plane reproduced with its
+normal, the flat continuation past the border, the max mip as an upper bound, the plateau and its skirt, the presets), the
+reference's terrain contacts (eight sticking points under a resting box carrying its weight, cubes sticking or sliding on a
+30° slope by their friction, a long box resting on the crest of a ridge through its mid-face points) and the GPU against
+the reference on those scenes, the early-out (hovering boxes get no terrain manifold) and the bitwise determinism of the
+Terrain scene; the PlayMode smoke tests put the Outpost on hills with its siege, the Outpost document on a ridge and the
+Terrain scene through the demo with the terrain drawn and imported back. `BrickAssemblyTests` check the piece catalog against the pack's manifest,
 the rotation convention against `Quaternion.Euler`, the format's examples and error cases, the boxes of upright and lying
 pieces, the snapped bridge on the reference solver, the expansion and diagnostics of the citadel as designed and as
 re-bonded, and the Outpost round trip (planner to document to bodies: the same pivots and the same snap joints as

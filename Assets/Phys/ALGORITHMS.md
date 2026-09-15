@@ -52,6 +52,20 @@ constants (dt, gravity, α, β, γ, counts) live in one constant buffer.
    Contacts are appended to a pool (one atomic per manifold), the header to the manifold list, the pair to the new
    hash table. Bodies that report events get the kind of the other body or-ed into their event word, and an impact
    counted when the manifold is new and the other body is a projectile moving faster than 2 m/s.
+   **Terrain** (`CollideTerrain`, one thread per body, appending to the same pools): the world's heightfield is a body
+   slot — static, at the identity pose, in no grid cell — so a terrain manifold is an ordinary manifold with the dynamic
+   body as A and the slot as B, and nothing downstream knows the difference. The body is skipped when its AABB's bottom
+   is above a max-height mip (8 x 8-cell blocks) over its footprint; otherwise its 26 lattice points (corners, edge
+   midpoints, face centres, in that order) are sampled against the surface (bilinear height, the samples' central
+   differences interpolated for the normal, flat beyond the border), their signed distance to the local tangent plane
+   taken, and the at most 8 deepest touching points selected (ties to the lower index, so a face resting flat keeps its
+   corners). One normal per manifold, the normalised sum of the selected points' surface normals; each contact's terrain
+   point is the lattice point projected along that normal onto the local tangent plane, so its tangential `C0` is zero
+   like a clipped box point's, and its feature key is the lattice index, which the warm start finds again step after
+   step (a resting box keeps eight sticking anchors on the terrain as on the ground box). The selection runs in fixed-trip
+   unrolled loops over a register array of distances and re-samples the chosen points, FXC having no data-dependent
+   indexing of local arrays. `AvbdTerrain.hlsl` mirrors `Heightfield.cs` and `RefCollide.CollideTerrain` operation for
+   operation; the GPU and the CPU reference agree to rounding.
 5. **Joints** (`PrepareJoints`): `C0` of the ball-socket and the angular lock at `x⁻`, decay, penalty capped at the
    material stiffness.
 6. **Constraint lists** (`ConsCount` → scan → `ConsFill` → `ConsSort`): a CSR list per dynamic body of the manifolds,
@@ -83,6 +97,7 @@ instance id; contact crosses and joint lines are written by small kernels into v
 
 Three extensions carry units and projectiles on the same solver; none of them touches the numerics of a body that does
 not use them, so the reference comparisons hold as before (the drives and the rotation lock are mirrored in the reference).
+The terrain (above) is a fourth: a world without one records no terrain pass and pays nothing.
 
 * **Drives** are accelerations of the inertial pose, exactly where gravity enters: a constant force, a force of constant
   magnitude towards a fixed point (evaluated at `x⁻`), or a motor `F = clamp(m (v_target − v⁻) / h, F_max)` on a mask of
