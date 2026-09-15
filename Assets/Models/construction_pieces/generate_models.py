@@ -246,9 +246,11 @@ def finish(name, geo):
 for w, l in [(1, 1), (1, 2), (1, 3), (1, 4), (1, 6), (1, 8), (2, 2), (2, 3), (2, 4), (2, 6), (2, 8)]: finish(f'Brick_{w}x{l}', brick(w, l, H))
 for w, l in [(1, 1), (1, 2), (1, 4), (2, 2), (2, 4)]: finish(f'Plate_{w}x{l}', brick(w, l, .04))
 for w, l in [(1, 1), (1, 2), (2, 2), (2, 4)]: finish(f'Tile_{w}x{l}', chamfered(box_solid(w * P, l * P, .04)))
-finish('Ramp', chamfered(prism_solid([(-.1, 0), (.1, 0), (.1, .12), (-.1, .02)], .2)))
+# The slopes rise toward -Y here: the FBX export (-Z forward, Y up) and Unity's import turn +Y into Unity -Z, and the
+# brick-assembly catalog (Assets/Phys/BRICK_ASSEMBLY.md) has Ramp and Wedge rising toward +Z at zero rotation.
+finish('Ramp', chamfered(prism_solid([(-.1, 0), (.1, 0), (.1, .02), (-.1, .12)], .2)))
 finish('Roof_Prism', chamfered(prism_solid([(-.1, 0), (.1, 0), (0, .12)], .2)))
-finish('Wedge', chamfered(prism_solid([(-.15, 0), (.15, 0), (.15, .08), (-.15, .015)], .2)))
+finish('Wedge', chamfered(prism_solid([(-.15, 0), (.15, 0), (.15, .015), (-.15, .08)], .2)))
 finish('Plain_Cube', chamfered(box_solid(.1, .1, .1)))
 finish('Plain_Rectangular_Block', chamfered(box_solid(.2, .3, .12)))
 finish('Plain_Cylinder', cylinder(.075, .15))

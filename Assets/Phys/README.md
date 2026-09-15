@@ -6,7 +6,8 @@ locked or kinematic orientation), body pools with contact events for units and p
 Vertex Block Descent (Giles, Diaz, Yuksel, SIGGRAPH 2025) exactly as in the author's reference implementation
 `avbd-demo3d`; the whole step — broadphase, narrowphase with persisted manifolds, graph colouring, colour-batched primal
 sweeps, dual updates, velocities — runs on the GPU and nothing is read back for rendering. See
-[ALGORITHMS.md](ALGORITHMS.md) for the pipeline.
+[ALGORITHMS.md](ALGORITHMS.md) for the pipeline and [BRICK_ASSEMBLY.md](BRICK_ASSEMBLY.md) for the JSON format in which
+models built from the construction-piece pack are exchanged with other agents.
 
 * **Runtime** (`Phys.AvbdGpu`) — `AvbdGpuWorld` (bodies, joints, springs, links, drives, `Step()`), `BodyPool` (retired
   slots reused by later spawns), buffers, command-buffer recording, seven `.compute` files (`Resources/AvbdGpu`).
@@ -39,6 +40,8 @@ Assets/Phys/AvbdGpu/Tests/Runtime      DemoSmokeTests, CastleSmokeTests, SiegeSm
 Assets/Phys/Demo                       Demo.unity, Castle.unity, DemoBase, DemoBootstrap, CastleDemo, DemoCamera, Editor/BuildDemo
 Assets/Models/ConstructorBlock2x3      the 2 x 3 construction brick (FBX, Tools/generate_constructor_block.py)
 Assets/Models/ConstructorFigure, ConstructorArrow   the toy figure and the arrow (Tools/generate_constructor_accessories.py)
+Assets/Models/construction_pieces      the 27-piece pack (bricks, plates, tiles, ramps, prisms; generate_models.py, Blender 5.2),
+                                       the catalog generic-construction-27-v1 of BRICK_ASSEMBLY.md; not used by the scenes yet
 ```
 
 ## Using the solver

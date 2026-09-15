@@ -32,11 +32,11 @@ sloped ridges and corners lose under a millimeter to the chamfer.
 The pack is the catalog generic-construction-27-v1 of the brick-assembly
 JSON format (Assets/Phys/BRICK_ASSEMBLY.md): piece IDs are the file names,
 footprints are width x length in stud units, a placement positions the
-bottom-centre pivot. The format's zero rotation has Ramp and Wedge rising
-toward +Z; as generated here they rise toward -Z (the profiles are extruded
-along the source +Y length axis, which imports as Unity -Z; verified with the
-import check), so a loader turns those two by 180 degrees about Y until the
-generator's profiles are mirrored.
+bottom-centre pivot. The pieces import in the format's zero-rotation
+orientation: width along X, length along Z, Ramp and Wedge rising toward +Z,
+the prisms' ridge along X, the cylinder's axis Y. Since the export (-Z
+forward, Y up) and Unity's import turn the source +Y length axis into Unity
+-Z, the generator builds the two slopes rising toward -Y.
 
 preview.png is rendered from the actual meshes, not generated concept art.
 generate_models.py regenerates the pack using Blender 5.2 (segment counts and
