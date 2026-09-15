@@ -229,19 +229,22 @@ planned by `BrickCastle` on the stud grid (`CastlePlan.Presets`):
   and blows the hit section out; the rest stays snapped. Jointed bodies do not collide until a joint breaks (the reference's rule),
   and the angular lock assumes equal orientations, hence four points per overlap rather than one lock.
 
-Keys as the main demo plus `J` snap on/off, `T` terrain (flat, hills, valley, ridge), `F6` collision boxes, `F7` shadows;
+Keys as the main demo plus `J` snap on/off, `T` terrain (hills, valley, ridge, flat), `F6` collision boxes, `F7` shadows;
 `B` / `Enter` fires a 30 kg cannonball at 24 model m/s (× √5 in the solver). Flags: `-avbd-scene 0..9`, `-avbd-snap`,
 `-avbd-siege`, `-avbd-terrain hills|valley|ridge|none`, `-avbd-terrain-seed n`, and the screenshot / bench / camera flags above.
 
-Terrain (`TerrainParams` on the demo, shared with the preview demo through `DemoBase`): a procedural heightfield of 513
-samples 1 m apart (512 x 512 m, relief 12 m, features 80 m across) generated from the seed, or, when a scene `Terrain` is
-assigned to `SceneTerrain`, that terrain's heights (drawn on it; its data is cloned, so the asset is never edited). A
-plateau is levelled under the castle's footprint plus four studs at the mean terrain height there and blended into the
-hills over `Skirt` (8 m); the castle's `Origin.y` and the camera move up with it, the HUD reports the field and the plateau
-height. The armies spawn standing on the surface wherever it is (`SiegeSystem.Terrain`, `StandHeight`), walk in over the
-slopes on their xz motors and aim at the wall crest above the plateau; arrows that stick in the hillside are spent like
-those in the ground. `Preview.unity` gets the same terrain settings and keys; its plateau spans the document's footprint
-plus two studs.
+Terrain (`TerrainParams` on the demo, shared with the preview demo through `DemoBase`): a procedural heightfield generated
+from the seed, or, when a scene `Terrain` is assigned to `SceneTerrain`, that terrain's heights (drawn on it; its data is
+cloned, so the asset is never edited). A plateau is levelled under the castle's footprint plus four studs plus `Margin`
+at the mean terrain height there and blended into the hills over `Skirt`; the castle's `Origin.y` and the camera move up
+with it, the HUD reports the field and the plateau height. `Castle.unity` opens on `TerrainSettings.CastleScene` (written
+into the scene by `Phys / Set Demo Terrains`): 513 samples 3 m apart (1.5 km), hills of some 30 m every 140 m or so,
+60 m of level ground around the castle (the armies march on the flat) blending into the hills over 40 m; the runtime
+terrain is drawn with two flat-colour layers, grass and a dry hilltop tint blended in with the height, so the hills read
+under flat lighting. The armies spawn standing on the surface wherever it is (`SiegeSystem.Terrain`, `StandHeight`), walk
+in over the slopes on their xz motors and aim at the wall crest above the plateau; arrows that stick in the hillside are
+spent like those in the ground. `Preview.unity` carries the same settings with the preset off (flat ground until `T`);
+its plateau spans the document's footprint plus two studs plus the margin.
 
 ### Siege
 

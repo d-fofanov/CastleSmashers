@@ -81,6 +81,31 @@ namespace Phys.Demo.Editor
             if (missing > 0 && Application.isBatchMode) EditorApplication.Exit(1);
         }
 
+        /// <summary>Writes <see cref="TerrainSettings.CastleScene"/> into Castle.unity (hills on) and Preview.unity (the same field, flat
+        /// ground on) and saves both scenes, so that the players open on the configured terrain.</summary>
+        [MenuItem("Phys/Set Demo Terrains")]
+        public static void SetDemoTerrains()
+        {
+            var castle = UnityEditor.SceneManagement.EditorSceneManager.OpenScene("Assets/Phys/Demo/Castle.unity");
+            var castleDemo = UnityEngine.Object.FindFirstObjectByType<CastleDemo>();
+            if (castleDemo == null) { Debug.LogError("Castle.unity has no CastleDemo"); if (Application.isBatchMode) EditorApplication.Exit(1); return; }
+            castleDemo.TerrainParams = TerrainSettings.CastleScene;
+            EditorUtility.SetDirty(castleDemo);
+            UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(castle);
+            UnityEditor.SceneManagement.EditorSceneManager.SaveScene(castle);
+
+            var preview = UnityEditor.SceneManagement.EditorSceneManager.OpenScene("Assets/Phys/Demo/Preview.unity");
+            var previewDemo = UnityEngine.Object.FindFirstObjectByType<PreviewDemo>();
+            if (previewDemo == null) { Debug.LogError("Preview.unity has no PreviewDemo"); if (Application.isBatchMode) EditorApplication.Exit(1); return; }
+            var flat = TerrainSettings.CastleScene;
+            flat.Preset = Phys.AvbdGpu.Scenes.TerrainPreset.None;
+            previewDemo.TerrainParams = flat;
+            EditorUtility.SetDirty(previewDemo);
+            UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(preview);
+            UnityEditor.SceneManagement.EditorSceneManager.SaveScene(preview);
+            Debug.Log($"SetDemoTerrains: Castle.unity {castleDemo.TerrainParams.Preset} seed {castleDemo.TerrainParams.Seed}, Preview.unity {previewDemo.TerrainParams.Preset}");
+        }
+
         /// <summary>Writes the castle planner's Outpost (the smallest preset, 1 001 bricks) as a brick-assembly document into
         /// Resources/Castles, where the preview demo picks it up: a castle known to stand, dry-stacked and snapped.</summary>
         [MenuItem("Phys/Export Outpost as Brick Assembly")]

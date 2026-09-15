@@ -7,21 +7,26 @@ using UnityEngine.Rendering;
 namespace Phys.AvbdGpu.Presentation
 {
     /// <summary>Draws a <see cref="Heightfield"/> with Unity's terrain renderer and imports terrains and heightmaps into heightfields.
-    /// The view either owns a runtime Terrain object (one flat-coloured layer, so it renders in URP without any asset) or shows the
-    /// field on a scene-authored Terrain, whose TerrainData is cloned so that the edits (a castle's plateau) never touch the asset.</summary>
+    /// The view either owns a runtime Terrain object (two flat-coloured layers, grass and dry hilltop, blended by height, so it
+    /// renders in URP without any asset) or shows the field on a scene-authored Terrain, whose TerrainData is cloned so that the
+    /// edits (a castle's plateau) never touch the asset.</summary>
     public sealed class TerrainView : IDisposable
     {
-        /// <summary>Colour of the runtime terrain's single layer (the demos' ground tint, a shade lighter for the PBR terrain shader).</summary>
-        public Color GroundColor = new Color32(92, 130, 68, 255);
-        /// <summary>Metres per tile of the flat-colour texture (any value: the texture is one colour).</summary>
+        /// <summary>Colour of the runtime terrain's low ground (the demos' ground tint, a shade lighter for the PBR terrain shader).</summary>
+        public Color GroundColor = new Color32(108, 148, 78, 255);
+        /// <summary>Colour of the runtime terrain's high ground, blended in from <see cref="HighFrom"/> to <see cref="HighTo"/> of the
+        /// field's height range (so the hills read even under flat lighting).</summary>
+        public Color HighColor = new Color32(156, 150, 92, 255);
+        public float HighFrom = 0.45f, HighTo = 0.95f;
+        /// <summary>Metres per tile of the flat-colour textures (any value: the textures are one colour).</summary>
         public float TileSize = 8f;
         public bool CastShadows = true;
 
         GameObject m_Root;
         Terrain m_Terrain;
         TerrainData m_Data;
-        TerrainLayer m_Layer;
-        Texture2D m_Texture;
+        TerrainLayer m_Layer, m_HighLayer;
+        Texture2D m_Texture, m_HighTexture;
         Terrain m_SceneTerrain;
         TerrainData m_SceneOriginal, m_SceneClone;
         Vector3 m_ScenePosition;
@@ -57,10 +62,10 @@ namespace Phys.AvbdGpu.Presentation
             RestoreSceneTerrain();
             if (m_Terrain == null)
             {
-                m_Texture = new Texture2D(2, 2, TextureFormat.RGBA32, false) { name = "AvbdTerrainGround", wrapMode = TextureWrapMode.Repeat };
-                m_Texture.SetPixels(new[] { GroundColor, GroundColor, GroundColor, GroundColor });
-                m_Texture.Apply();
+                m_Texture = FlatTexture("AvbdTerrainGround", GroundColor);
+                m_HighTexture = FlatTexture("AvbdTerrainHigh", HighColor);
                 m_Layer = new TerrainLayer { name = "AvbdTerrainGround", diffuseTexture = m_Texture, tileSize = new Vector2(TileSize, TileSize) };
+                m_HighLayer = new TerrainLayer { name = "AvbdTerrainHigh", diffuseTexture = m_HighTexture, tileSize = new Vector2(TileSize, TileSize) };
                 m_Data = new TerrainData { name = "AvbdTerrain" };
                 m_Root = Terrain.CreateTerrainGameObject(m_Data);
                 m_Root.name = "AvbdTerrain";
@@ -76,12 +81,22 @@ namespace Phys.AvbdGpu.Presentation
             }
             m_Terrain.shadowCastingMode = CastShadows ? ShadowCastingMode.On : ShadowCastingMode.Off;
             Apply(m_Data, field);
-            m_Data.terrainLayers = new[] { m_Layer };
-            // a layer assigned from script gets no weight (the control map stays zero and the terrain draws black): paint it in full
-            const int alphaRes = 16;
+            m_Data.terrainLayers = new[] { m_Layer, m_HighLayer };
+            // layers assigned from script get no weight (the control map stays zero and the terrain draws black): paint the ground in
+            // full and blend the high colour in with the height
+            int alphaRes = math.clamp(math.max(field.ResX, field.ResZ), 16, 256);
             m_Data.alphamapResolution = alphaRes;
-            var weights = new float[alphaRes, alphaRes, 1];
-            for (int z = 0; z < alphaRes; z++) for (int x = 0; x < alphaRes; x++) weights[z, x, 0] = 1f;
+            var weights = new float[alphaRes, alphaRes, 2];
+            float range = math.max(field.MaxHeight - field.MinHeight, 1e-3f);
+            for (int z = 0; z < alphaRes; z++)
+                for (int x = 0; x < alphaRes; x++)
+                {
+                    float2 xz = field.Origin + field.Extent * new float2((x + 0.5f) / alphaRes, (z + 0.5f) / alphaRes);
+                    float t = (field.Height(xz) - field.MinHeight) / range;
+                    float high = math.smoothstep(HighFrom, HighTo, t);
+                    weights[z, x, 0] = 1f - high;
+                    weights[z, x, 1] = high;
+                }
             m_Data.SetAlphamaps(0, 0, weights);
             Assign(m_Terrain, m_Data);
             Place(m_Terrain, field);
@@ -122,8 +137,18 @@ namespace Phys.AvbdGpu.Presentation
             if (m_Root != null) UnityEngine.Object.Destroy(m_Root);
             if (m_Data != null) UnityEngine.Object.Destroy(m_Data);
             if (m_Layer != null) UnityEngine.Object.Destroy(m_Layer);
+            if (m_HighLayer != null) UnityEngine.Object.Destroy(m_HighLayer);
             if (m_Texture != null) UnityEngine.Object.Destroy(m_Texture);
-            m_Root = null; m_Terrain = null; m_Data = null; m_Layer = null; m_Texture = null;
+            if (m_HighTexture != null) UnityEngine.Object.Destroy(m_HighTexture);
+            m_Root = null; m_Terrain = null; m_Data = null; m_Layer = null; m_HighLayer = null; m_Texture = null; m_HighTexture = null;
+        }
+
+        static Texture2D FlatTexture(string name, Color color)
+        {
+            var tex = new Texture2D(2, 2, TextureFormat.RGBA32, false) { name = name, wrapMode = TextureWrapMode.Repeat };
+            tex.SetPixels(new[] { color, color, color, color });
+            tex.Apply();
+            return tex;
         }
 
         // ------------------------------------------------------------------------------------------------ conversions

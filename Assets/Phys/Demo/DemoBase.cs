@@ -24,8 +24,15 @@ namespace Phys.Demo
         public float FeatureSize;
         [Tooltip("Metres beyond the castle footprint over which its plateau blends into the terrain.")]
         public float Skirt;
+        [Tooltip("Level ground kept around the castle (m) on top of the few studs the demo adds around the footprint: the hills start beyond it and the skirt.")]
+        public float Margin;
 
-        public static TerrainSettings Default => new TerrainSettings { Preset = TerrainPreset.None, Seed = 1, Resolution = 513, Cell = 1f, Amplitude = 12f, FeatureSize = 80f, Skirt = 8f };
+        public static TerrainSettings Default => new TerrainSettings { Preset = TerrainPreset.None, Seed = 1, Resolution = 513, Cell = 1f, Amplitude = 12f, FeatureSize = 80f, Skirt = 8f, Margin = 0f };
+
+        /// <summary>What Castle.unity and Preview.unity carry: 513 samples 3 m apart (1.5 km), hills of some 30 m every 140 m or so,
+        /// level ground for 60 m around the castle (the armies march on the flat) blending into the hills over 40 m; the castle scene
+        /// opens on the hills, the preview scene on the flat ground (T switches either).</summary>
+        public static TerrainSettings CastleScene => new TerrainSettings { Preset = TerrainPreset.Hills, Seed = 11, Resolution = 513, Cell = 3f, Amplitude = 30f, FeatureSize = 140f, Skirt = 40f, Margin = 60f };
 
         /// <summary>Fields a scene was serialised without come out as zero.</summary>
         public TerrainSettings WithDefaults()
@@ -37,6 +44,7 @@ namespace Phys.Demo
             if (t.Amplitude <= 0f) t.Amplitude = d.Amplitude;
             if (t.FeatureSize <= 0f) t.FeatureSize = d.FeatureSize;
             if (t.Skirt < 0f) t.Skirt = d.Skirt;
+            if (t.Margin < 0f) t.Margin = d.Margin;
             return t;
         }
     }
@@ -258,10 +266,11 @@ namespace Phys.Demo
         }
 
         /// <summary>Levels a plateau for a footprint centred on the origin (half extents <paramref name="halfExtent"/> plus
-        /// <paramref name="border"/>) at the mean terrain height under it, blending over the skirt; returns the plateau height.</summary>
+        /// <paramref name="border"/> plus the settings' margin) at the mean terrain height under it, blending over the skirt;
+        /// returns the plateau height.</summary>
         protected float CutPlateau(Heightfield field, float2 halfExtent, float border)
         {
-            float2 lo = -halfExtent - border, hi = halfExtent + border;
+            float2 lo = -halfExtent - border - TerrainParams.Margin, hi = halfExtent + border + TerrainParams.Margin;
             float plateau = field.MeanHeight(lo, hi);
             field.Flatten(lo, hi, plateau, TerrainParams.Skirt);
             return plateau;
