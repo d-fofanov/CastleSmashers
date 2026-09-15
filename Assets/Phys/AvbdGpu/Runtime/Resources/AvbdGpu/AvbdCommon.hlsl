@@ -27,6 +27,7 @@
 #define FLAG_DEAD 16u           // retired slot: no collisions, no update, not drawn; reused by a later spawn
 #define FLAG_REPORT_EVENTS 32u  // the narrowphase records the kinds of bodies this one touches in _BodyEvents
 #define FLAG_DRIVEN 64u         // the body has a BodyDrive record (external force or motor)
+#define FLAG_TERRAIN 128u       // the terrain slot: static, identity pose, in no grid cell, the partner of every terrain manifold
 #define KIND_SHIFT 8            // bits 8-9: 0 plain, 1 unit, 2 projectile (event attribution only)
 #define KIND_MASK (3u << KIND_SHIFT)
 #define KIND_UNIT 1u
@@ -65,6 +66,7 @@
 #define CNT_COLORS_USED 6
 #define CNT_CONSTRAINTS 7       // manifolds + joints + springs (dual / CSR index space)
 #define CNT_ACTIVE_JOINTS 8
+#define CNT_TERRAIN 9           // manifolds against the terrain (a subset of CNT_MANIFOLDS)
 #define CNT_COUNT 16
 
 // Indirect dispatch argument slots (uint3 each, byte offset = slot * 12).
@@ -188,6 +190,16 @@ cbuffer AvbdParams
     uint _ColorRounds;
     uint _Substep;
     uint _Pad0, _Pad1;
+    // the terrain (AvbdTerrain.hlsl): the heightfield's sample (0, 0), spacing, resolution, max-mip size, body slot
+    float2 _TerrainOrigin;
+    float2 _TerrainCell;
+    float2 _TerrainInvCell;
+    uint _TerrainResX;
+    uint _TerrainResZ;
+    uint _TerrainMipX;
+    uint _TerrainMipZ;
+    uint _TerrainSlot;          // 0xFFFFFFFF: no terrain
+    float _TerrainMaxHeight;
 };
 
 // ------------------------------------------------------------------------------------------------ quaternions
@@ -415,6 +427,7 @@ bool higherPriority(uint i, uint j)
 // Static bodies and retired (dead) slots take no part in the solve.
 bool isStatic(BodyDef d) { return d.mass <= 0.0 || (d.flags & FLAG_DEAD) != 0; }
 bool isDead(BodyDef d) { return (d.flags & FLAG_DEAD) != 0; }
+bool isTerrain(BodyDef d) { return (d.flags & FLAG_TERRAIN) != 0; }
 bool lockedRotation(BodyDef d) { return (d.flags & (FLAG_LOCK_ROTATION | FLAG_HEADING | FLAG_ALIGN_VELOCITY)) != 0; }
 
 #endif

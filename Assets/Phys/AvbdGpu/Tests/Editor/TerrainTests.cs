@@ -7,7 +7,7 @@ namespace Phys.AvbdGpu.Tests
 {
     /// <summary>The heightfield: bilinear sampling and its normal, the flat continuation beyond the border, the max mip, the
     /// plateau editing and the procedural presets; then the terrain contacts of the CPU reference (the box's lattice points
-    /// against the surface), which the GPU kernel is compared against.</summary>
+    /// against the surface), and the GPU's CollideTerrain kernel against that reference.</summary>
     public class TerrainTests
     {
         static Heightfield Plane(float a, float b, float c, int res = 17, float cell = 2f)
@@ -163,15 +163,52 @@ namespace Phys.AvbdGpu.Tests
             }
         }
 
+        /// <summary>A unit cube set down 2 cm above a flat field at height 2 (a drop from height is caught up to a step of travel
+        /// deep and creeps back up over seconds, on the terrain as on the ground box: alpha leaves 99 % of the initial error per step).</summary>
+        static void BuildFlatRest(ISceneBuilder s)
+        {
+            int terrain = s.SetTerrain(Heightfield.Flat(17, 17, new float2(4f, 4f), new float2(-32f, -32f), 2f), 0.5f);
+            int box = s.AddBody(new float3(1, 1, 1), 1f, 0.5f, new float3(0.3f, 2.52f, -0.2f), quaternion.identity, float3.zero);
+            Assert.AreEqual(0, terrain); Assert.AreEqual(1, box);
+        }
+
+        /// <summary>The static-friction scene as a heightfield: a 30 degree slope of friction 1, cubes of friction 0.25 (combined 0.5,
+        /// below tan 30 = 0.58: slides, body 1) and 0.5 (combined 0.71: sticks, body 2).</summary>
+        static void BuildSlope(ISceneBuilder s)
+        {
+            float slope = math.tan(math.radians(30f));
+            var field = new Heightfield(41, 41, new float2(1f, 1f), new float2(-20f, -20f));
+            for (int z = 0; z < 41; z++) for (int x = 0; x < 41; x++) field[x, z] = (x - 20) * slope * -1f;   // rising towards -x
+            field.BuildMaxMip();
+            s.SetTerrain(field, 1f);
+            quaternion tilt = quaternion.RotateZ(-math.radians(30f));   // the bottom face of the cube on the slope
+            s.AddBody(new float3(1, 1, 1), 1f, 0.25f, new float3(0f, 0.5f / math.cos(math.radians(30f)) + 0.02f, -3f), tilt, float3.zero);
+            s.AddBody(new float3(1, 1, 1), 1f, 0.5f, new float3(0f, 0.5f / math.cos(math.radians(30f)) + 0.02f, 3f), tilt, float3.zero);
+        }
+
+        const float RidgeHeight = 1f, RidgeWidth = 2.5f;
+
+        /// <summary>A 4 x 0.5 x 1 box laid across a rounded ridge (a Gaussian along z), body 1.</summary>
+        static void BuildRidge(ISceneBuilder s)
+        {
+            var field = new Heightfield(65, 65, new float2(0.5f, 0.5f), new float2(-16f, -16f));
+            for (int z = 0; z < 65; z++)
+                for (int x = 0; x < 65; x++)
+                {
+                    float px = -16f + x * 0.5f;
+                    field[x, z] = RidgeHeight * math.exp(-(px / RidgeWidth) * (px / RidgeWidth));
+                }
+            field.BuildMaxMip();
+            s.SetTerrain(field, 0.6f);
+            s.AddBody(new float3(4f, 0.5f, 1f), 1f, 0.6f, new float3(0f, RidgeHeight + 0.25f + 0.3f, 0f), quaternion.identity, float3.zero);
+        }
+
         [Test]
         public void ReferenceBoxRestsOnAFlatFieldOneMarginDeepOnEightPoints()
         {
             var b = new RefSceneBuilder(new Solver());
-            int terrain = b.SetTerrain(Heightfield.Flat(17, 17, new float2(4f, 4f), new float2(-32f, -32f), 2f), 0.5f);
-            // set down 2 cm above the field: a drop from height is caught up to a step of travel deep and creeps back up over
-            // seconds, on the terrain as on the ground box (alpha leaves 99 % of the initial error per step)
-            int box = b.AddBody(new float3(1, 1, 1), 1f, 0.5f, new float3(0.3f, 2.52f, -0.2f), quaternion.identity, float3.zero);
-            Assert.AreEqual(0, terrain); Assert.AreEqual(1, box);
+            BuildFlatRest(b);
+            const int box = 1;
             Run(b, 300);
             var body = b.Bodies[box];
             Assert.Less(math.length(body.velocityLin), 0.02f, "at rest");
@@ -201,14 +238,9 @@ namespace Phys.AvbdGpu.Tests
         public void ReferenceCubesStickOrSlideOnASlopeByTheirFriction()
         {
             float slope = math.tan(math.radians(30f));
-            var field = new Heightfield(41, 41, new float2(1f, 1f), new float2(-20f, -20f));
-            for (int z = 0; z < 41; z++) for (int x = 0; x < 41; x++) field[x, z] = (x - 20) * slope * -1f;   // rising towards -x
-            field.BuildMaxMip();
             var b = new RefSceneBuilder(new Solver());
-            b.SetTerrain(field, 1f);
-            quaternion tilt = quaternion.RotateZ(-math.radians(30f));   // the bottom face of the cube on the slope
-            int slider = b.AddBody(new float3(1, 1, 1), 1f, 0.25f, new float3(0f, 0.5f / math.cos(math.radians(30f)) + 0.02f, -3f), tilt, float3.zero);
-            int sticker = b.AddBody(new float3(1, 1, 1), 1f, 0.5f, new float3(0f, 0.5f / math.cos(math.radians(30f)) + 0.02f, 3f), tilt, float3.zero);
+            BuildSlope(b);
+            const int slider = 1, sticker = 2;
             Run(b, 180);
             var sl = b.Bodies[slider]; var st = b.Bodies[sticker];
             Assert.Greater(sl.positionLin.x, 1.5f, "the low-friction cube slid down the slope (towards +x)");
@@ -225,22 +257,13 @@ namespace Phys.AvbdGpu.Tests
         [Test]
         public void ReferenceLongBoxRestsOnTheCrestOfARidge()
         {
-            const float A = 1f, w = 2.5f;
-            var field = new Heightfield(65, 65, new float2(0.5f, 0.5f), new float2(-16f, -16f));
-            for (int z = 0; z < 65; z++)
-                for (int x = 0; x < 65; x++)
-                {
-                    float px = -16f + x * 0.5f;
-                    field[x, z] = A * math.exp(-(px / w) * (px / w));   // a ridge along z
-                }
-            field.BuildMaxMip();
             var b = new RefSceneBuilder(new Solver());
-            b.SetTerrain(field, 0.6f);
-            int box = b.AddBody(new float3(4f, 0.5f, 1f), 1f, 0.6f, new float3(0f, A + 0.25f + 0.3f, 0f), quaternion.identity, float3.zero);
+            BuildRidge(b);
+            const int box = 1;
             Run(b, 240);
             var body = b.Bodies[box];
             Assert.Less(math.length(body.velocityLin), 0.02f, "at rest");
-            Assert.AreEqual(A + 0.25f - RefConstants.CollisionMargin, body.positionLin.y, 0.02f, "the bottom face centre rests on the crest");
+            Assert.AreEqual(RidgeHeight + 0.25f - RefConstants.CollisionMargin, body.positionLin.y, 0.02f, "the bottom face centre rests on the crest");
             Assert.Less(math.length(body.positionAng - Quat.Identity), 0.02f, "and the box lies level");
             var m = TerrainManifold(b, body);
             Assert.IsNotNull(m);
@@ -271,6 +294,116 @@ namespace Phys.AvbdGpu.Tests
                 if (math.length(body.velocityLin) < 0.05f) resting++;
             }
             Assert.Greater(resting, 60, "most boxes have come to rest on the hills");
+        }
+
+        // ------------------------------------------------------------------------------------------------ GPU
+
+        /// <summary>The same custom scene on the GPU world and on the reference (in the GPU's pair convention), stepped together.</summary>
+        static GpuTestUtil.Comparison RunBoth(System.Action<ISceneBuilder> build, int steps, AvbdGpuWorld world, out RefSceneBuilder reference)
+        {
+            world.Clear();
+            build(world);
+            reference = new RefSceneBuilder(new Solver());
+            reference.Solver.LowIndexFirst = true;
+            build(reference);
+            for (int i = 0; i < steps; i++) { world.Step(); reference.Solver.Step(); }
+            return GpuTestUtil.Compare(world, reference);
+        }
+
+        [Test]
+        public void GpuBoxRestsOnAFlatFieldLikeTheReference()
+        {
+            using var world = GpuTestUtil.NewWorld();
+            var c = RunBoth(BuildFlatRest, 300, world, out _);
+            GpuTestUtil.Log("terrain flat rest", c);
+            Assert.Less(c.MaxPositionError, 1e-4f, $"position (body {c.WorstBody})");
+            Assert.Less(c.MaxRotationError, 1e-4f, "rotation");
+            var stats = world.GetStatsSync();
+            Assert.AreEqual(1, stats.Manifolds); Assert.AreEqual(1, stats.TerrainManifolds); Assert.AreEqual(0, stats.OverflowFlags);
+            var manifolds = world.GetManifoldsSync(out var contacts);
+            Assert.AreEqual(1u, manifolds[0].BodyA, "the box is A"); Assert.AreEqual((uint)world.TerrainBody, manifolds[0].BodyB, "the terrain slot is B");
+            Assert.AreEqual(8, (int)manifolds[0].NumContacts);
+            Assert.AreEqual(1f, manifolds[0].Normal.y, 1e-6f);
+            float weight = 0f;
+            for (uint i = 0; i < 8; i++)
+            {
+                var ct = contacts[manifolds[0].ContactStart + i];
+                Assert.AreEqual((uint)RefCollide.AXIS_TERRAIN, ct.FeatureKey >> 24, "terrain feature prefix");
+                Assert.Less(ct.FeatureKey & 0xFFu, 20u, "corners and edge midpoints");
+                Assert.IsTrue(ct.Stick, "a resting contact sticks");
+                weight += -ct.Lambda.x;
+            }
+            Assert.AreEqual(10f, weight, 1f, "the multipliers carry the weight");
+        }
+
+        [Test]
+        public void GpuCubesOnTheSlopeMatchTheReference()
+        {
+            using var world = GpuTestUtil.NewWorld();
+            var c = RunBoth(BuildSlope, 180, world, out var reference);
+            GpuTestUtil.Log("terrain slope", c);
+            Assert.Less(c.MaxPositionError, 2e-3f, $"position (body {c.WorstBody})");
+            Assert.Less(c.MaxRotationError, 2e-3f, "rotation");
+            world.GetPosesSync(out var pos, out _);
+            Assert.Greater(pos[1].x, 1.5f, "the low-friction cube slid");
+            Assert.Less(math.abs(pos[2].x), 0.05f, "the high-friction cube stayed");
+        }
+
+        [Test]
+        public void GpuLongBoxOnTheRidgeMatchesTheReference()
+        {
+            using var world = GpuTestUtil.NewWorld();
+            var c = RunBoth(BuildRidge, 240, world, out _);
+            GpuTestUtil.Log("terrain ridge", c);
+            Assert.Less(c.MaxPositionError, 1e-3f, $"position (body {c.WorstBody})");
+            Assert.Less(c.MaxRotationError, 1e-3f, "rotation");
+            var manifolds = world.GetManifoldsSync(out var contacts);
+            Assert.AreEqual(1, world.GetStatsSync().TerrainManifolds);
+            Assert.AreEqual(3, (int)manifolds[0].NumContacts, "the face centre and the two long-edge midpoints");
+            for (uint i = 0; i < 3; i++)
+                Assert.AreEqual(0f, RefCollide.LatticePoint((int)(contacts[manifolds[0].ContactStart + i].FeatureKey & 0xFFu)).x, "on the crest line");
+        }
+
+        /// <summary>Only bodies whose AABB reaches the surface's max mip get a terrain manifold: hovering boxes (no gravity) none,
+        /// boxes set on the field one each.</summary>
+        [Test]
+        public void GpuTerrainEarlyOutSkipsBodiesAboveTheSurface()
+        {
+            using var world = GpuTestUtil.NewWorld();
+            world.Params.Gravity = float3.zero;
+            world.SetTerrain(Heightfield.Generate(TerrainPreset.Hills, 3u, 65, 2f, 5f), 0.5f);
+            var field = world.Terrain;
+            for (int i = 0; i < 10; i++) world.AddBody(new float3(1, 1, 1), 1f, 0.5f, new float3(-20f + i * 4f, field.MaxHeight + 3f, 5f), quaternion.identity, float3.zero);
+            for (int i = 0; i < 5; i++)
+            {
+                float2 xz = new float2(-16f + i * 8f, -7f);
+                world.AddBody(new float3(1, 1, 1), 1f, 0.5f, new float3(xz.x, field.Height(xz) + 0.5f - 0.005f, xz.y), quaternion.identity, float3.zero);
+            }
+            world.Step();
+            var stats = world.GetStatsSync();
+            Assert.AreEqual(5, stats.TerrainManifolds, "one manifold per box on the surface, none for the hovering ones");
+            Assert.AreEqual(5, stats.Manifolds);
+            Assert.AreEqual(0, stats.Pairs, "the terrain slot pairs with nothing in the grid");
+            Assert.AreEqual(0, stats.LargeBodies, "and is not a large body");
+            GpuTestUtil.AssertFinite(world);
+        }
+
+        [Test]
+        public void GpuTerrainSceneIsBitwiseDeterministic()
+        {
+            using var a = GpuTestUtil.NewWorld();
+            using var b = GpuTestUtil.NewWorld();
+            a.BuildScene(AvbdScenes.Terrain);
+            b.BuildScene(AvbdScenes.Terrain);
+            for (int i = 0; i < 90; i++) { a.Step(); b.Step(); }
+            a.GetPosesSync(out var pa, out var ra);
+            b.GetPosesSync(out var pb, out var rb);
+            for (int i = 0; i < a.BodyCount; i++)
+            {
+                Assert.IsTrue(math.all(pa[i] == pb[i]), $"body {i} position differs: {pa[i]} vs {pb[i]}");
+                Assert.IsTrue(math.all(ra[i] == rb[i]), $"body {i} rotation differs");
+            }
+            Assert.Greater(a.GetStatsSync().TerrainManifolds, 50, "most boxes are down on the hills after 1.5 s");
         }
 
         [Test]

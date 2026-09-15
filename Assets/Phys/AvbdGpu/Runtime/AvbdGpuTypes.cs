@@ -140,7 +140,7 @@ namespace Phys.AvbdGpu
         public const int Stride = 48;
     }
 
-    /// <summary>Mirror of cbuffer AvbdParams (HLSL packing: 8 float4 registers).</summary>
+    /// <summary>Mirror of cbuffer AvbdParams (HLSL packing: 11 float4 registers).</summary>
     [StructLayout(LayoutKind.Sequential)]
     public struct GpuParams
     {
@@ -152,7 +152,12 @@ namespace Phys.AvbdGpu
         public uint HashMask, CellMask, MaxPairs, MaxManifolds;
         public uint MaxContacts, MaxCellEntries, MaxLargeBodies, LargeBodyCells;
         public uint ColorRounds, Substep, Pad0, Pad1;
-        public const int Stride = 128;
+        // the terrain (AvbdTerrain.hlsl): sample (0, 0), spacing, resolution, max-mip size, body slot (NoTerrain: none)
+        public float2 TerrainOrigin, TerrainCell, TerrainInvCell;
+        public uint TerrainResX, TerrainResZ, TerrainMipX, TerrainMipZ, TerrainSlot;
+        public float TerrainMaxHeight;
+        public const int Stride = 176;
+        public const uint NoTerrain = 0xFFFFFFFFu;
     }
 
     /// <summary>Constraint reference packing shared with the shaders.</summary>
@@ -167,13 +172,16 @@ namespace Phys.AvbdGpu
     /// <summary>Counter / stats slots (AvbdCommon.hlsl CNT_*).</summary>
     public enum StatSlot
     {
-        Pairs = 0, Manifolds = 1, Contacts = 2, LargeBodies = 3, Overflow = 4, OverflowBodies = 5, ColorsUsed = 6, Constraints = 7, ActiveJoints = 8, Count = 16
+        Pairs = 0, Manifolds = 1, Contacts = 2, LargeBodies = 3, Overflow = 4, OverflowBodies = 5, ColorsUsed = 6, Constraints = 7, ActiveJoints = 8,
+        TerrainManifolds = 9, Count = 16
     }
 
     /// <summary>Per-step statistics read back asynchronously (one or two frames old).</summary>
     public struct AvbdGpuStats
     {
         public int Pairs, Manifolds, Contacts, LargeBodies, OverflowBodies, ColorsUsed, Constraints;
+        /// <summary>Manifolds against the terrain (counted in <see cref="Manifolds"/> as well).</summary>
+        public int TerrainManifolds;
         /// <summary>Capacity overflow bits: 1 pairs, 2 manifolds, 4 contacts, 8 cell entries, 16 large bodies, 32 unsorted cells.</summary>
         public int OverflowFlags;
         public int ActiveColors;

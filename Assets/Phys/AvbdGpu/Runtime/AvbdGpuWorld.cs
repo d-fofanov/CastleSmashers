@@ -182,8 +182,8 @@ namespace Phys.AvbdGpu
         }
 
         /// <summary>Sets the terrain: a static body slot at the identity pose flagged <see cref="GpuBodyDef.FlagTerrain"/> (the partner
-        /// of every terrain manifold, friction = <paramref name="friction"/>) and the heightfield sampled by the narrowphase. A
-        /// second call replaces the field and keeps the slot.</summary>
+        /// of every terrain manifold, friction = <paramref name="friction"/>) and the heightfield sampled by the narrowphase, uploaded
+        /// at once. A second call replaces the field and keeps the slot.</summary>
         public int SetTerrain(Heightfield field, float friction)
         {
             if (field == null) throw new ArgumentNullException(nameof(field));
@@ -195,7 +195,18 @@ namespace Phys.AvbdGpu
                 MarkDef(m_TerrainBody);
             }
             m_Terrain = field;
+            UpdateTerrain();
             return m_TerrainBody;
+        }
+
+        /// <summary>Re-uploads the terrain's samples and max mip after they were edited in place (call <see cref="Heightfield.BuildMaxMip"/>
+        /// or an editing method first).</summary>
+        public void UpdateTerrain()
+        {
+            if (m_Terrain == null) return;
+            Buffers.EnsureTerrain(m_Terrain.SampleCount, m_Terrain.MaxMip.Length);
+            Buffers.TerrainHeights.SetData(m_Terrain.Heights);
+            Buffers.TerrainMaxMip.SetData(m_Terrain.MaxMip);
         }
 
         // ------------------------------------------------------------------------------------------------ body pools
@@ -536,7 +547,16 @@ namespace Phys.AvbdGpu
                 HashMask = (uint)(c.HashSize - 1), CellMask = (uint)(c.CellCount - 1), MaxPairs = (uint)c.MaxPairs, MaxManifolds = (uint)c.MaxManifolds,
                 MaxContacts = (uint)c.MaxContacts, MaxCellEntries = (uint)c.MaxCellEntries, MaxLargeBodies = (uint)c.MaxLargeBodies, LargeBodyCells = (uint)c.LargeBodyCells,
                 ColorRounds = (uint)p.ColorRounds, Substep = 0,
+                TerrainSlot = GpuParams.NoTerrain,
             };
+            if (m_Terrain != null && m_TerrainBody >= 0)
+            {
+                var t = m_Terrain;
+                m_GpuParams.TerrainOrigin = t.Origin; m_GpuParams.TerrainCell = t.Cell; m_GpuParams.TerrainInvCell = 1f / t.Cell;
+                m_GpuParams.TerrainResX = (uint)t.ResX; m_GpuParams.TerrainResZ = (uint)t.ResZ;
+                m_GpuParams.TerrainMipX = (uint)t.MipX; m_GpuParams.TerrainMipZ = (uint)t.MipZ;
+                m_GpuParams.TerrainSlot = (uint)m_TerrainBody; m_GpuParams.TerrainMaxHeight = t.MaxHeight;
+            }
             m_GpuParamsArray[0] = m_GpuParams;
             Buffers.Params.SetData(m_GpuParamsArray);
         }
@@ -549,7 +569,7 @@ namespace Phys.AvbdGpu
             Upload();
             int substeps = math.max(1, Params.Substeps);
             FillParams(Params.Dt / substeps);
-            m_Pipeline.Ensure(math.max(1, Params.Iterations), m_ActiveColors, Params.PostStabilize, math.max(2, Params.ColorRounds), Params.Alpha);
+            m_Pipeline.Ensure(math.max(1, Params.Iterations), m_ActiveColors, Params.PostStabilize, math.max(2, Params.ColorRounds), Params.Alpha, m_Terrain != null);
 
             m_Watch.Restart();
             for (int s = 0; s < substeps; s++)
@@ -628,6 +648,7 @@ namespace Phys.AvbdGpu
             m_Stats.OverflowBodies = (int)data[(int)StatSlot.OverflowBodies];
             m_Stats.ColorsUsed = (int)data[(int)StatSlot.ColorsUsed];
             m_Stats.Constraints = (int)data[(int)StatSlot.Constraints];
+            m_Stats.TerrainManifolds = (int)data[(int)StatSlot.TerrainManifolds];
             m_Stats.ActiveColors = m_ActiveColors;
             m_Stats.Frame++;
             AdaptColors();
@@ -707,6 +728,7 @@ namespace Phys.AvbdGpu
             s.OverflowBodies = (int)data[(int)StatSlot.OverflowBodies];
             s.ColorsUsed = (int)data[(int)StatSlot.ColorsUsed];
             s.Constraints = (int)data[(int)StatSlot.Constraints];
+            s.TerrainManifolds = (int)data[(int)StatSlot.TerrainManifolds];
             s.ActiveColors = m_ActiveColors;
             m_Stats = s;
             AdaptColors();

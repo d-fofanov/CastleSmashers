@@ -1,9 +1,12 @@
-// Narrowphase: OBB vs OBB contact generation (port of collide.cpp of avbd-demo3d) and manifold persistence
-// (Manifold::initialize): the previous step's manifold of the same pair is found through a hash table and its
+// Narrowphase: OBB vs OBB contact generation (port of collide.cpp of avbd-demo3d), OBB vs heightfield contact generation
+// (CollideTerrain: the box's lattice points against the terrain, mirrored by RefCollide.CollideTerrain) and manifold
+// persistence (Manifold::initialize): the previous step's manifold of the same pair is found through a hash table and its
 // per-feature penalty / lambda / stick state is carried over before the warm-start decay.
 #pragma kernel Collide
+#pragma kernel CollideTerrain
 
 #include "AvbdCommon.hlsl"
+#include "AvbdTerrain.hlsl"
 
 #define MAX_POLY_VERTS 8      // a quad clipped by four planes has at most 8 vertices
 #define SAT_AXIS_EPSILON 1.0e-6
@@ -20,6 +23,8 @@ StructuredBuffer<BodyDef> _BodyDef;
 StructuredBuffer<float4> _BodyPos;
 StructuredBuffer<float4> _BodyRot;
 StructuredBuffer<float4> _BodyVelLin;      // hit reporting: a projectile only counts when it is moving
+StructuredBuffer<float4> _BodyAabbMin;     // CollideTerrain early-out (BodyAabb, margin included)
+StructuredBuffer<float4> _BodyAabbMax;
 StructuredBuffer<uint2> _Pairs;
 RWStructuredBuffer<uint> _Counters;
 StructuredBuffer<Manifold> _ManifoldPrev;
@@ -435,28 +440,18 @@ int findPrevManifold(uint a, uint b)
     return -1;
 }
 
-[numthreads(AVBD_THREADS, 1, 1)]
-void Collide(uint3 id : SV_DispatchThreadID, uint3 gtid : SV_GroupThreadID)
+// Writes the manifold of pair (a, b) from the n contact points in thread t's scratch (gs_xA / gs_xB / gs_feature, world
+// points on A and B): warm start from the previous step's manifold by feature key, C0 at x-, the events, the manifold record
+// and its hash entry. Returns false when the manifold or contact pool is full.
+bool emitManifold(uint t, int n, uint a, uint b, BodyDef dA, BodyDef dB, float3 posA, float4 rotA, float3 posB, float4 rotB, float3x3 basis)
 {
-    if (id.x >= _Counters[CNT_PAIRS]) return;
-    uint t = gtid.x;
-    uint2 pair = _Pairs[id.x];
-    uint a = pair.x, b = pair.y;
-    BodyDef dA = _BodyDef[a], dB = _BodyDef[b];
-    float3 posA = _BodyPos[a].xyz, posB = _BodyPos[b].xyz;
-    float4 rotA = _BodyRot[a], rotB = _BodyRot[b];
-
-    float3x3 basis;
-    int n = collide(t, makeOBB(posA, rotA, dA.size), makeOBB(posB, rotB, dB.size), basis);
-    if (n == 0) return;
-
     uint dummy;
     uint cstart;
     InterlockedAdd(_Counters[CNT_CONTACTS], (uint)n, cstart);
-    if (cstart + (uint)n > _MaxContacts) { InterlockedOr(_Counters[CNT_OVERFLOW], OVERFLOW_CONTACTS, dummy); return; }
+    if (cstart + (uint)n > _MaxContacts) { InterlockedOr(_Counters[CNT_OVERFLOW], OVERFLOW_CONTACTS, dummy); return false; }
     uint midx;
     InterlockedAdd(_Counters[CNT_MANIFOLDS], 1, midx);
-    if (midx >= _MaxManifolds) { InterlockedOr(_Counters[CNT_OVERFLOW], OVERFLOW_MANIFOLDS, dummy); return; }
+    if (midx >= _MaxManifolds) { InterlockedOr(_Counters[CNT_OVERFLOW], OVERFLOW_MANIFOLDS, dummy); return false; }
 
     int prev = findPrevManifold(a, b);
     Manifold pm = (Manifold)0;
@@ -517,5 +512,99 @@ void Collide(uint3 id : SV_DispatchThreadID, uint3 gtid : SV_GroupThreadID)
         InterlockedCompareExchange(_HashCur[h], 0, midx + 1, old);
         if (old == 0) break;
         h = (h + 1) & _HashMask;
+    }
+    return true;
+}
+
+[numthreads(AVBD_THREADS, 1, 1)]
+void Collide(uint3 id : SV_DispatchThreadID, uint3 gtid : SV_GroupThreadID)
+{
+    if (id.x >= _Counters[CNT_PAIRS]) return;
+    uint t = gtid.x;
+    uint2 pair = _Pairs[id.x];
+    uint a = pair.x, b = pair.y;
+    BodyDef dA = _BodyDef[a], dB = _BodyDef[b];
+    float3 posA = _BodyPos[a].xyz, posB = _BodyPos[b].xyz;
+    float4 rotA = _BodyRot[a], rotB = _BodyRot[b];
+
+    float3x3 basis;
+    int n = collide(t, makeOBB(posA, rotA, dA.size), makeOBB(posB, rotB, dB.size), basis);
+    if (n == 0) return;
+    emitManifold(t, n, a, b, dA, dB, posA, rotA, posB, rotB, basis);
+}
+
+// ------------------------------------------------------------------------------------------------ terrain
+
+// One thread per body: its 26 lattice points (corners, edge midpoints, face centres) are sampled against the heightfield and
+// the at most 8 deepest points at or below the surface become the contacts of one manifold against the terrain slot (the
+// dynamic body is always A, the terrain B, whatever their indices). The manifold normal is the normalised sum of the selected
+// points' surface normals; each contact's terrain point is the lattice point projected along that normal onto the local
+// tangent plane, so its tangential C0 is zero like a clipped box-box point's. Feature keys are the lattice indices, which the
+// warm start finds again step after step. Skipped early when the body's AABB stays above the surface's max mip.
+[numthreads(AVBD_THREADS, 1, 1)]
+void CollideTerrain(uint3 id : SV_DispatchThreadID, uint3 gtid : SV_GroupThreadID)
+{
+    uint i = id.x;
+    if (i >= _BodyCount || _TerrainSlot == NO_TERRAIN) return;
+    uint t = gtid.x;
+    BodyDef d = _BodyDef[i];
+    if (isStatic(d)) return;
+    float3 mn = _BodyAabbMin[i].xyz, mx = _BodyAabbMax[i].xyz;
+    if (mn.y > terrainMaxOver(mn.xz, mx.xz)) return;
+
+    float3 pos = _BodyPos[i].xyz;
+    float4 rot = _BodyRot[i];
+    float3 half = d.size * 0.5;
+
+    // signed distance of every lattice point to the local tangent plane (the plane through (x, h, z) with the surface normal)
+    float dist[LATTICE_POINTS];
+    [unroll]
+    for (int k = 0; k < LATTICE_POINTS; k++)
+    {
+        float3 p = qtransform(pos, rot, latticePoint(k) * half);
+        float h; float3 nrm;
+        terrainSample(p.xz, h, nrm);
+        dist[k] = nrm.y * (p.y - h);
+    }
+
+    // the deepest touching points, ties to the lower lattice index; the selected points are sampled again (the arrays of
+    // points and normals would need data-dependent indexing, which FXC cannot do on registers)
+    uint used = 0;
+    int count = 0;
+    float3 nsum = 0;
+    [unroll]
+    for (int slot = 0; slot < MAX_CONTACTS; slot++)
+    {
+        int best = -1;
+        float bestDist = 0;
+        [unroll]
+        for (int k2 = 0; k2 < LATTICE_POINTS; k2++)
+            if ((used & (1u << k2)) == 0 && dist[k2] <= 0 && (best < 0 || dist[k2] < bestDist)) { best = k2; bestDist = dist[k2]; }
+        if (best < 0) break;
+        used |= 1u << best;
+        float3 p = qtransform(pos, rot, latticePoint(best) * half);
+        float h; float3 nrm;
+        terrainSample(p.xz, h, nrm);
+        gs_xA[t][count] = p;
+        gs_xB[t][count] = float3(p.x, h, p.z);
+        gs_feature[t][count] = ((uint)AXIS_TERRAIN << 24) | (uint)best;
+        nsum += nrm;
+        count++;
+    }
+    if (count == 0) return;
+
+    float3 N = normalize(nsum);
+    float3x3 basis = orthonormal3(N);
+    for (int c = 0; c < count; c++)
+    {
+        float3 p = gs_xA[t][c], s = gs_xB[t][c];
+        gs_xB[t][c] = p - N * dot(N, p - s);
+    }
+
+    uint b = _TerrainSlot;
+    if (emitManifold(t, count, i, b, d, _BodyDef[b], pos, rot, _BodyPos[b].xyz, _BodyRot[b], basis))
+    {
+        uint dummy;
+        InterlockedAdd(_Counters[CNT_TERRAIN], 1, dummy);
     }
 }

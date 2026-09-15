@@ -11,7 +11,7 @@ namespace Phys.AvbdGpu
         public readonly int BuildArgs, HashClear, CopyStats, ClearUints, SpawnBodies;
         public readonly int ScanBlock, ScanTop, ScanAdd;
         public readonly int BodyAabb, GridClear, GridCount, GridScatter, GridSortCell, LargeSort, PairGen;
-        public readonly int Collide;
+        public readonly int Collide, CollideTerrain;
         public readonly int PrepareJoints, ConsClear, ConsCount, ConsFill, ConsSort;
         public readonly int ColorInvalidate, ColorRound, ColorFinalize, ColorScan, ColorScatter;
         public readonly int DriveKinematic, Predict, Primal, CommitOverflow, Dual, Velocity;
@@ -44,6 +44,7 @@ namespace Phys.AvbdGpu
             LargeSort = Broadphase.FindKernel("LargeSort");
             PairGen = Broadphase.FindKernel("PairGen");
             Collide = Narrowphase.FindKernel("Collide");
+            CollideTerrain = Narrowphase.FindKernel("CollideTerrain");
             PrepareJoints = Constraints.FindKernel("PrepareJoints");
             ConsClear = Constraints.FindKernel("ConsClear");
             ConsCount = Constraints.FindKernel("ConsCount");

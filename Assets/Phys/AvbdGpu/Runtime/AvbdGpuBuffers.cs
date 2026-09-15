@@ -78,6 +78,9 @@ namespace Phys.AvbdGpu
         public GraphicsBuffer BodyConsCount, BodyConsCursor, BodyConsStart, BodyConsList;
         // colours
         public GraphicsBuffer ColorCount, ColorStart, ColorCursor, ColorList;
+        // terrain (sized by the first SetTerrain, grown when a larger field arrives; TerrainVersion changes with the objects)
+        public GraphicsBuffer TerrainHeights, TerrainMaxMip;
+        public int TerrainVersion { get; private set; }
         // misc
         public GraphicsBuffer Counters, Stats, DispatchArgs, Params;
 
@@ -111,6 +114,7 @@ namespace Phys.AvbdGpu
             BodyConsList = Structured(config.MaxConstraintRefs, 4);
             ColorCount = Structured(AvbdGpuConstants.MaxColors + 1, 4); ColorStart = Structured(AvbdGpuConstants.MaxColors + 2, 4);
             ColorCursor = Structured(AvbdGpuConstants.MaxColors + 1, 4); ColorList = Structured(nb, 4);
+            TerrainHeights = Structured(1, 4); TerrainMaxMip = Structured(1, 4);
             Counters = Structured((int)StatSlot.Count, 4); Stats = Structured((int)StatSlot.Count, 4);
             DispatchArgs = Track(new GraphicsBuffer(GraphicsBuffer.Target.IndirectArguments | GraphicsBuffer.Target.Raw, ArgSlots * 3, 4));
             Params = Track(new GraphicsBuffer(GraphicsBuffer.Target.Constant, 1, GpuParams.Stride));
@@ -123,6 +127,19 @@ namespace Phys.AvbdGpu
         GraphicsBuffer Copyable(int count, int stride) => Track(new GraphicsBuffer(GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.CopySource | GraphicsBuffer.Target.CopyDestination, math.max(count, 1), stride));
 
         GraphicsBuffer Track(GraphicsBuffer b) { m_All.Add(b); return b; }
+
+        /// <summary>Makes the terrain buffers hold at least the given sample and mip block counts (reallocating: the pipeline
+        /// re-binds when <see cref="TerrainVersion"/> changes).</summary>
+        public void EnsureTerrain(int samples, int blocks)
+        {
+            int oldSamples = TerrainHeights.count, oldBlocks = TerrainMaxMip.count;
+            if (oldSamples >= samples && oldBlocks >= blocks) return;
+            m_All.Remove(TerrainHeights); TerrainHeights.Dispose();
+            m_All.Remove(TerrainMaxMip); TerrainMaxMip.Dispose();
+            TerrainHeights = Structured(math.max(samples, oldSamples), 4);
+            TerrainMaxMip = Structured(math.max(blocks, oldBlocks), 4);
+            TerrainVersion++;
+        }
 
         /// <summary>Zero every buffer (fresh GPU memory is undefined; the solver relies on zeroed counts, colours and hash tables).</summary>
         public void ClearAll()

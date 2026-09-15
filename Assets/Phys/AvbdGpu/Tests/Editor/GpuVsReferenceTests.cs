@@ -32,5 +32,7 @@ namespace Phys.AvbdGpu.Tests
         [Test] public void DynamicFriction() => Check(AvbdScenes.DynamicFriction, 60, 1e-3f, 1e-3f, "dynamic friction");
         [Test] public void StaticFriction() => Check(AvbdScenes.StaticFriction, 60, 1e-3f, 1e-3f, "static friction");
         [Test] public void Pyramid() => Check(AvbdScenes.Pyramid, 30, 5e-2f, 1e-1f, "pyramid");
+        /// <summary>Boxes tumbling onto hills: the terrain contacts are generated identically, the differences are the sweep order at the impacts.</summary>
+        [Test] public void Terrain() => Check(AvbdScenes.Terrain, 90, 2e-2f, 5e-2f, "terrain");
     }
 }

@@ -12,8 +12,8 @@ namespace Phys.AvbdGpu
         readonly AvbdGpuBuffers m_B;
         readonly CommandBuffer m_Cb = new CommandBuffer { name = "AVBD step" };
 
-        int m_Iterations = -1, m_ActiveColors = -1, m_ColorRounds = -1;
-        bool m_PostStabilize;
+        int m_Iterations = -1, m_ActiveColors = -1, m_ColorRounds = -1, m_TerrainVersion = -1;
+        bool m_PostStabilize, m_Terrain;
 
         public CommandBuffer CommandBuffer => m_Cb;
 
@@ -42,11 +42,15 @@ namespace Phys.AvbdGpu
 
         static int Groups(int n, int per = Threads) => math.max(1, (n + per - 1) / per);
 
-        /// <summary>Re-records the step when the configuration changed.</summary>
-        public void Ensure(int iterations, int activeColors, bool postStabilize, int colorRounds, float alpha)
+        /// <summary>Re-records the step when the configuration changed (<paramref name="terrain"/>: the world has a terrain, so the
+        /// CollideTerrain pass is recorded and bound to the current terrain buffers).</summary>
+        public void Ensure(int iterations, int activeColors, bool postStabilize, int colorRounds, float alpha, bool terrain)
         {
-            if (iterations == m_Iterations && activeColors == m_ActiveColors && postStabilize == m_PostStabilize && colorRounds == m_ColorRounds && alpha == m_Alpha) return;
+            int terrainVersion = terrain ? m_B.TerrainVersion : -1;
+            if (iterations == m_Iterations && activeColors == m_ActiveColors && postStabilize == m_PostStabilize && colorRounds == m_ColorRounds && alpha == m_Alpha
+                && terrain == m_Terrain && terrainVersion == m_TerrainVersion) return;
             m_Iterations = iterations; m_ActiveColors = activeColors; m_PostStabilize = postStabilize; m_ColorRounds = colorRounds; m_Alpha = alpha;
+            m_Terrain = terrain; m_TerrainVersion = terrainVersion;
             Record();
         }
 
@@ -103,10 +107,12 @@ namespace Phys.AvbdGpu
                     ("_LinkStart", b.LinkStart), ("_LinkList", b.LinkList), ("_JointState", b.JointState));
 
             // ---------------------------------------------------------------- narrowphase bindings
-            BindAll(k.Narrowphase, k.Collide,
-                ("_BodyDef", b.BodyDef), ("_BodyPos", b.BodyPos), ("_BodyRot", b.BodyRot), ("_BodyVelLin", b.BodyVelLin), ("_Pairs", b.Pairs), ("_Counters", b.Counters),
-                ("_ManifoldPrev", b.ManifoldPrev), ("_ContactsPrev", b.ContactsPrev), ("_HashPrev", b.HashPrev),
-                ("_ManifoldCur", b.ManifoldCur), ("_ContactsCur", b.ContactsCur), ("_HashCur", b.HashCur), ("_BodyEvents", b.BodyEvents));
+            foreach (int kk in new[] { k.Collide, k.CollideTerrain })
+                BindAll(k.Narrowphase, kk,
+                    ("_BodyDef", b.BodyDef), ("_BodyPos", b.BodyPos), ("_BodyRot", b.BodyRot), ("_BodyVelLin", b.BodyVelLin), ("_Pairs", b.Pairs), ("_Counters", b.Counters),
+                    ("_ManifoldPrev", b.ManifoldPrev), ("_ContactsPrev", b.ContactsPrev), ("_HashPrev", b.HashPrev),
+                    ("_ManifoldCur", b.ManifoldCur), ("_ContactsCur", b.ContactsCur), ("_HashCur", b.HashCur), ("_BodyEvents", b.BodyEvents),
+                    ("_BodyAabbMin", b.BodyAabbMin), ("_BodyAabbMax", b.BodyAabbMax), ("_TerrainHeights", b.TerrainHeights), ("_TerrainMaxMip", b.TerrainMaxMip));
 
             // ---------------------------------------------------------------- constraint bindings
             foreach (int kk in new[] { k.PrepareJoints, k.ConsClear, k.ConsCount, k.ConsFill, k.ConsSort })
@@ -161,6 +167,7 @@ namespace Phys.AvbdGpu
 
             cb.BeginSample("AVBD narrowphase");
             Indirect(k.Narrowphase, k.Collide, ArgPairs);
+            if (m_Terrain) Indirect(k.Narrowphase, k.CollideTerrain, ArgBodies);   // appends to the same manifold pool
             cb.SetComputeIntParam(k.Util, s_Phase, 2);
             Direct(k.Util, k.BuildArgs, 1);
             cb.EndSample("AVBD narrowphase");
