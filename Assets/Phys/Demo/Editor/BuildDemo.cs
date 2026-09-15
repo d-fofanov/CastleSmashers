@@ -7,7 +7,8 @@ using UnityEngine;
 namespace Phys.Demo.Editor
 {
     /// <summary>Batch build of the demo players: Unity.exe -batchmode -quit -executeMethod Phys.Demo.Editor.BuildDemo.Build
-    /// [-buildScene Demo|Castle] [-buildPath C:/out/Demo.exe]. Menu: Phys / Build Demo Player, Phys / Build Castle Player.</summary>
+    /// [-buildScene Demo|Castle|Preview] [-buildPath C:/out/Demo.exe]. Menu: Phys / Build Demo Player, Build Castle Player,
+    /// Build Preview Player.</summary>
     public static class BuildDemo
     {
         [MenuItem("Phys/Build Demo Player")]
@@ -15,6 +16,9 @@ namespace Phys.Demo.Editor
 
         [MenuItem("Phys/Build Castle Player")]
         public static void BuildCastle() => BuildPlayer("Castle");
+
+        [MenuItem("Phys/Build Preview Player")]
+        public static void BuildPreview() => BuildPlayer("Preview");
 
         static void BuildPlayer(string scene)
         {
@@ -52,6 +56,43 @@ namespace Phys.Demo.Editor
             UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(scene);
             UnityEditor.SceneManagement.EditorSceneManager.SaveScene(scene);
             Debug.Log($"AssignCastleMeshes: brick {demo.BrickMesh}, figure {demo.FigureMesh}, arrow {demo.ArrowMesh}");
+        }
+
+        /// <summary>Assigns the 27 piece meshes of the construction pack, in catalog order, to the PreviewDemo of Preview.unity and saves
+        /// the scene (the player needs the references serialised; the editor falls back to loading them by path).</summary>
+        [MenuItem("Phys/Assign Preview Meshes")]
+        public static void AssignPreviewMeshes()
+        {
+            var scene = UnityEditor.SceneManagement.EditorSceneManager.OpenScene("Assets/Phys/Demo/Preview.unity");
+            var demo = UnityEngine.Object.FindFirstObjectByType<PreviewDemo>();
+            if (demo == null) { Debug.LogError("Preview.unity has no PreviewDemo"); if (Application.isBatchMode) EditorApplication.Exit(1); return; }
+            var pieces = Phys.AvbdGpu.Scenes.PieceCatalog.Pieces;
+            demo.PieceMeshes = new Mesh[pieces.Length];
+            int missing = 0;
+            for (int i = 0; i < pieces.Length; i++)
+            {
+                demo.PieceMeshes[i] = AssetDatabase.LoadAssetAtPath<Mesh>($"Assets/Models/construction_pieces/{pieces[i].Id}.fbx");
+                if (demo.PieceMeshes[i] == null) { missing++; Debug.LogError($"AssignPreviewMeshes: no mesh for {pieces[i].Id}"); }
+            }
+            EditorUtility.SetDirty(demo);
+            UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(scene);
+            UnityEditor.SceneManagement.EditorSceneManager.SaveScene(scene);
+            Debug.Log($"AssignPreviewMeshes: {pieces.Length - missing} of {pieces.Length} piece meshes assigned");
+            if (missing > 0 && Application.isBatchMode) EditorApplication.Exit(1);
+        }
+
+        /// <summary>Writes the castle planner's Outpost (the smallest preset, 1 001 bricks) as a brick-assembly document into
+        /// Resources/Castles, where the preview demo picks it up: a castle known to stand, dry-stacked and snapped.</summary>
+        [MenuItem("Phys/Export Outpost as Brick Assembly")]
+        public static void ExportOutpostAssembly()
+        {
+            var plan = Phys.AvbdGpu.Scenes.CastlePlan.Presets[0];
+            var layout = Phys.AvbdGpu.Scenes.BrickCastle.Generate(plan);
+            string path = "Assets/Resources/Castles/outpost.json";
+            Directory.CreateDirectory(Path.GetDirectoryName(path));
+            File.WriteAllText(path, Phys.AvbdGpu.Scenes.BrickAssembly.WriteLayout(layout, plan.Name));
+            AssetDatabase.ImportAsset(path);
+            Debug.Log($"ExportOutpostAssembly: {layout.Bricks.Count} bricks -> {path}");
         }
 
         /// <summary>Logs the guid / local id of the brick mesh (the reference serialised in Castle.unity).</summary>

@@ -1,0 +1,247 @@
+using System.Collections.Generic;
+using Phys.AvbdGpu;
+using Phys.AvbdGpu.Presentation;
+using Phys.AvbdGpu.Scenes;
+using Unity.Mathematics;
+using UnityEngine;
+#if ENABLE_INPUT_SYSTEM
+using UnityEngine.InputSystem;
+#endif
+
+namespace Phys.Demo
+{
+    /// <summary>Castles described as brick-assembly documents (Assets/Phys/BRICK_ASSEMBLY.md) on the GPU solver (Preview.unity): every
+    /// piece is a box body, sloped and round pieces included, drawn with its model from the construction-piece pack. The documents
+    /// are the JSON files of Resources/Castles (keys 1-0 and , . choose between them); snap, cannonball, camera and player flags
+    /// as in the castle demo. No siege: the armies need the procedural plan's wall geometry.</summary>
+    public class PreviewDemo : DemoBase
+    {
+        [Tooltip("The 27 piece models in catalog order (PieceCatalog.Pieces; Phys / Assign Preview Meshes fills them in). Unset pieces are drawn as boxes.")]
+        public Mesh[] PieceMeshes;
+        [Tooltip("Resources folder holding the brick-assembly JSON documents.")]
+        public string CastleFolder = "Castles";
+        [Tooltip("Solver metres per model metre. 1 simulates the true 0.1 m stud pitch; the default 5 puts the pieces in the metre / kilogram " +
+                 "regime the solver's penalty ramp is tuned for (and slows the motion accordingly).")]
+        public float BrickScale = 5f;
+        [Tooltip("Mass of a 2 x 3 brick (kg); every piece gets the same density.")]
+        public float BrickMass = 0.25f;
+        public float BrickFriction = 0.6f;
+        [Tooltip("Clearance of the collision boxes from the pieces' footprints, per side, in model metres (real bricks: about 1.25 % of the pitch). " +
+                 "Neighbouring boxes that touch pass loads that snapped bricks are not built to take; the models are drawn at full size.")]
+        public float Clearance = AssemblySpec.DefaultClearance;
+        [Tooltip("Snap the pieces together with hard ball-socket joints that break under load (also the -avbd-snap flag).")]
+        public bool Snap;
+        [Tooltip("Sideways force (N) that breaks a snap connection.")]
+        public float SnapFractureLateral = 300f;
+        [Tooltip("Upward pull (N) that breaks a snap connection; a snap also comes apart once the pieces separate by half the stud height.")]
+        public float SnapFractureTension = 50f;
+        public bool Shadows = true;
+        [Tooltip("Cannonball: cube size (model metres), mass (kg) and speed (model metres per second).")]
+        public float ShotCube = 0.12f;
+        public float ShotMass = 30f;
+        public float ShotVelocity = 24f;
+
+        TextAsset[] m_Documents = new TextAsset[0];
+        string m_StartCastle;
+        BrickAssembly m_Assembly;
+        AssemblyBodies m_Bodies;
+        AssemblySpec m_Spec;
+        AssemblyBuilder.Diagnostics m_Diagnostics;
+        string m_Error;
+        int m_SnapJoints;
+        uint[] m_Tints;
+        static readonly Color32 s_Iron = new Color32(70, 72, 78, 255);
+
+        void Reset()
+        {
+            MaxBodies = 40960;
+        }
+
+        /// <summary>The documents of the Resources folder, by file name.</summary>
+        public TextAsset[] Documents => m_Documents;
+        /// <summary>The loaded assembly (null when the current document was rejected or the folder is empty).</summary>
+        public BrickAssembly Assembly => m_Assembly;
+        public AssemblyBodies Bodies => m_Bodies;
+        public AssemblySpec Spec => m_Spec;
+        /// <summary>Floating, poorly supported and intersecting pieces of the current document (reported, never corrected).</summary>
+        public AssemblyBuilder.Diagnostics Diagnostics => m_Diagnostics;
+        /// <summary>Why the current document could not be loaded, or null.</summary>
+        public string Error => m_Error;
+        public int PartCount => m_Assembly?.Parts.Count ?? 0;
+        public int SnapJoints => m_SnapJoints;
+
+        protected override int SceneCount => math.max(1, m_Documents.Length);
+        protected override string SceneName(int index) => index < m_Documents.Length ? m_Documents[index].name : "(no castles)";
+        protected override float HudHeight => 265f;
+        protected override float3 ShotSize => ShotCube * BrickScale;
+        protected override float ShotDensity => ShotMass / math.pow(ShotCube * BrickScale, 3f);
+        /// <summary>Speeds scale with the square root of lengths under the same gravity (dynamic similarity).</summary>
+        protected override float ShotSpeed => ShotVelocity * math.sqrt(BrickScale);
+        protected override float ShotDistance => 0.5f * BrickScale;
+        /// <summary>Same frequency as the reference's 5000 N/m on a 1 kg box.</summary>
+        protected override float DragStiffness => 5000f * math.max(m_Spec.BrickMass, 0.01f);
+        /// <summary>The contact penalties ramp up from their minimum over the first steps and the stacks sink a few centimetres
+        /// meanwhile; settle that before showing the castle (single substeps: nothing moves fast yet).</summary>
+        protected override int SettleSteps => 180;
+        protected override int SettleSubsteps => 1;
+
+        protected override AvbdGpuConfig CreateConfig()
+        {
+            var cfg = AvbdGpuConfig.ForBodies(MaxBodies);
+            cfg.MaxJoints = MaxBodies * 12;                   // four snap joints per overlap (about ten per piece) plus drag joints
+            cfg.MaxLinks = cfg.MaxJoints * 2 + 4096;
+            return cfg;
+        }
+
+        /// <summary>Index of the document with the file name (without extension), or -1.</summary>
+        public int IndexOf(string castle)
+        {
+            for (int i = 0; i < m_Documents.Length; i++) if (m_Documents[i].name == castle) return i;
+            return -1;
+        }
+
+        protected override void Configure()
+        {
+            var args = System.Environment.GetCommandLineArgs();
+            for (int i = 0; i < args.Length; i++)
+            {
+                if (args[i] == "-avbd-snap") Snap = true;
+                if (args[i] == "-avbd-castle" && i + 1 < args.Length) m_StartCastle = args[i + 1];
+            }
+            m_Renderer.Shadows = Shadows;
+            m_Renderer.DrawJoints = false;
+            LoadDocuments();
+            if (m_StartCastle != null)
+            {
+                int index = IndexOf(m_StartCastle);
+                if (index >= 0) StartScene = index;
+                else Debug.LogWarning($"PreviewDemo: no castle '{m_StartCastle}' in Resources/{CastleFolder}");
+            }
+        }
+
+        /// <summary>Reads the folder again (new files show up after R).</summary>
+        public void LoadDocuments()
+        {
+            var docs = new List<TextAsset>(Resources.LoadAll<TextAsset>(CastleFolder));
+            docs.Sort((a, b) => string.CompareOrdinal(a.name, b.name));
+            m_Documents = docs.ToArray();
+            if (m_Documents.Length == 0) Debug.LogWarning($"PreviewDemo: no documents in Resources/{CastleFolder}");
+        }
+
+        Mesh MeshOf(int piece)
+        {
+            if (PieceMeshes != null && piece < PieceMeshes.Length && PieceMeshes[piece] != null) return PieceMeshes[piece];
+#if UNITY_EDITOR
+            var mesh = UnityEditor.AssetDatabase.LoadAssetAtPath<Mesh>($"Assets/Models/construction_pieces/{PieceCatalog.Pieces[piece].Id}.fbx");
+            if (mesh != null)
+            {
+                if (PieceMeshes == null || PieceMeshes.Length < PieceCatalog.Pieces.Length) System.Array.Resize(ref PieceMeshes, PieceCatalog.Pieces.Length);
+                PieceMeshes[piece] = mesh;
+                return mesh;
+            }
+#endif
+            return null;
+        }
+
+        protected override void BuildScene(int index, out float3 cameraTarget, out float cameraDistance)
+        {
+            m_Assembly = null; m_Bodies = null; m_Error = null; m_SnapJoints = 0; m_Diagnostics = default;
+            cameraTarget = new float3(0f, 2f * BrickScale, 0f);
+            cameraDistance = 20f * BrickScale;
+            float ground = 2000f;                             // out to the horizon
+            int groundBody = m_World.AddBody(new float3(ground, 1f, ground), 0f, BrickFriction, new float3(0f, -0.5f, 0f), quaternion.identity, float3.zero);
+            if (m_Tints == null || m_Tints.Length < 1024) m_Tints = new uint[1024];
+            m_Tints[groundBody] = AvbdGpuRenderer.Tint(new Color32(78, 112, 58, 255));
+            m_Renderer.SetTints(m_Tints, groundBody, 1);
+            if (index >= m_Documents.Length) { m_Error = $"no documents in Resources/{CastleFolder}"; return; }
+
+            try { m_Assembly = BrickAssembly.Parse(m_Documents[index].text); }
+            catch (BrickAssemblyException e)
+            {
+                m_Error = e.Message;
+                Debug.LogError($"PreviewDemo: {m_Documents[index].name}.json rejected: {e.Message}");
+                return;
+            }
+            m_Diagnostics = AssemblyBuilder.Diagnose(m_Assembly);
+            if (!m_Diagnostics.Clean)
+                Debug.LogWarning($"PreviewDemo: {m_Documents[index].name}.json: {m_Diagnostics.Floating} floating, {m_Diagnostics.PoorlySupported} poorly supported, {m_Diagnostics.Intersections} intersecting pieces ({m_Diagnostics.Sample})");
+            float unit = PieceCatalog.GridToUnity * BrickScale;
+            float3 centre = (m_Assembly.Min + m_Assembly.Max) * 0.5f;
+            m_Spec = new AssemblySpec
+            {
+                Scale = BrickScale, Density = BrickMass / (2f * 3f * 1.2f * unit * unit * unit), Friction = BrickFriction, Margin = AvbdGpuConstants.CollisionMargin,
+                Clearance = Clearance, Origin = new float3(-centre.x, 0f, -centre.z) * unit,   // the footprint centred on the world origin, the ground where it is
+            };
+            m_Bodies = AssemblyBuilder.Build(m_World, m_Assembly, m_Spec);
+            if (Snap) m_SnapJoints = AssemblyBuilder.AddSnapJoints(m_World, m_Assembly, m_Bodies, m_Spec, SnapFractureLateral, SnapFractureTension);
+
+            // colours: one tint per body from its part's colour
+            int n = m_Bodies.Count;
+            if (m_Tints.Length < m_Bodies.First + n) System.Array.Resize(ref m_Tints, m_Bodies.First + n);
+            for (int i = 0; i < n; i++)
+            {
+                uint rgb = m_Assembly.Parts[m_Bodies.PartOfBody[i]].Rgb;
+                m_Tints[m_Bodies.First + i] = AvbdGpuRenderer.Tint(new Color32((byte)(rgb >> 16), (byte)(rgb >> 8), (byte)rgb, 255));
+            }
+            m_Renderer.SetTints(m_Tints, 0, m_Bodies.First + n);
+            foreach (var g in m_Bodies.Groups)
+            {
+                var mesh = MeshOf(g.Piece);
+                if (mesh != null) m_Renderer.MeshRanges.Add(new AvbdGpuRenderer.MeshRange { Mesh = mesh, Scale = BrickScale, Offset = g.MeshOffset, Start = g.Start, Count = g.Count });
+            }
+
+            // fewer substeps for the big castles: their cannonball crosses a fraction of the wall thickness per step even at one
+            m_World.Params.Substeps = n > 20000 ? 1 : n > 8000 ? 2 : 3;
+            float3 extent = m_Assembly.Extent * unit;
+            cameraTarget = new float3(0f, 0.4f * extent.y, 0f);
+            cameraDistance = 1.4f * math.max(math.max(extent.x, extent.z), extent.y);
+        }
+
+        protected override void OnShot(int body)
+        {
+            if (m_Tints.Length <= body) System.Array.Resize(ref m_Tints, math.max(body + 1, 1024));
+            m_Tints[body] = AvbdGpuRenderer.Tint(s_Iron);
+            m_Renderer.SetTints(m_Tints, body, 1);
+        }
+
+        protected override void HandleSceneKeys()
+        {
+#if ENABLE_INPUT_SYSTEM
+            var kb = Keyboard.current;
+            if (kb.jKey.wasPressedThisFrame) { Snap = !Snap; Load(m_Scene); }
+            if (kb.f6Key.wasPressedThisFrame) m_Renderer.DrawCollisionBoxes = !m_Renderer.DrawCollisionBoxes;
+            if (kb.f7Key.wasPressedThisFrame) { Shadows = !Shadows; m_Renderer.Shadows = Shadows; }
+#endif
+        }
+
+        protected override string HudText()
+        {
+            string title = m_Documents.Length > 0 ? $"<b>[{m_Scene + 1}/{m_Documents.Length}] {m_Assembly?.Name ?? m_Documents[m_Scene].name}</b> ({m_Documents[m_Scene].name}.json)" : "<b>no castles</b>";
+            string castle;
+            if (m_Assembly == null)
+                castle = $"<color=#ff5555>{m_Error}</color>\n\n";
+            else
+            {
+                float unit = PieceCatalog.GridToUnity * BrickScale;
+                var counts = m_Assembly.PieceCounts();
+                var pieces = new System.Text.StringBuilder();
+                for (int i = 0; i < counts.Count && i < 6; i++) pieces.Append(i > 0 ? ", " : "").Append(counts[i].count).Append(' ').Append(PieceCatalog.Pieces[counts[i].piece].Id);
+                if (counts.Count > 6) pieces.Append(", ...");
+                float3 e = m_Assembly.Extent;
+                castle =
+                    $"{PartCount} pieces of {counts.Count} kinds: {pieces}\n" +
+                    $"{e.x:F0} x {e.z:F0} studs, {e.y:F1} tall = {e.x * unit:F1} x {e.z * unit:F1} x {e.y * unit:F1} m at model x {BrickScale:G3}; 2 x 3 brick {m_Spec.BrickMass:F2} kg\n" +
+                    (Snap ? $"<color=#88ddff>snapped</color>: {m_SnapJoints} joints; a snap breaks at {SnapFractureLateral:F0} N sideways, {SnapFractureTension:F0} N upward or {m_Spec.SnapBreakDistance * 100f:F1} cm apart  -  cannonball {ShotMass:F0} kg\n"
+                          : $"dry-stacked (friction only)  -  cannonball {ShotMass:F0} kg\n") +
+                    (m_Diagnostics.Clean ? "every piece rests on at least half its footprint, nothing intersects\n\n"
+                          : $"<color=#ffcc55>{m_Diagnostics.Floating} floating, {m_Diagnostics.PoorlySupported} on less than half their footprint, {m_Diagnostics.Intersections} intersecting</color> ({m_Diagnostics.Sample})\n\n");
+            }
+            return
+                $"{title}{PausedText}\n" + castle +
+                StatsText() + "\n\n" +
+                $"1-0 castle (Resources/{CastleFolder})  , . prev/next  R rebuild  J snap pieces on/off  Space pause  N step\n" +
+                "F1 contacts  F2 colour mode  F5 joints  F6 collision boxes  F7 shadows  +/- iterations  [ ] substeps  B/Enter cannonball  G gravity  H hide HUD\n" +
+                "LMB drag  RMB orbit  MMB pan  wheel / Q E zoom  W A S D orbit";
+        }
+    }
+}

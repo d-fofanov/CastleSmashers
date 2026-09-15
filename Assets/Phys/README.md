@@ -13,16 +13,18 @@ models built from the construction-piece pack are exchanged with other agents.
   slots reused by later spawns), buffers, command-buffer recording, seven `.compute` files (`Resources/AvbdGpu`).
 * **Reference** (`Phys.AvbdRef`) — line-for-line C# port of `avbd-demo3d` (the test oracle).
 * **Scenes** (`Phys.AvbdGpu.Scenes`) — the 14 reference scenes and 3 GPU benchmark scenes behind an `ISceneBuilder`
-  interface that both solvers implement; `BrickCastle`, a castle planned on the stud grid of the construction brick.
+  interface that both solvers implement; `BrickCastle`, a castle planned on the stud grid of the construction brick;
+  `BrickAssembly`, castles described as brick-assembly JSON documents (the 27-piece pack), expanded into boxes and snaps.
 * **Presentation** (`Phys.AvbdGpu.Presentation`) — `AvbdGpuRenderer`: instanced draws straight from the solver buffers
   (the collision boxes, or any mesh for a range of bodies), per-body tints, shadows, GPU-written contact / joint debug lines.
 * **Siege** (`Phys.AvbdGpu.Siege`) — `SiegeSystem`: armies of toy figures (`Assets/Models/ConstructorFigure`) that march,
   hold a line and fire volleys of arrows (`Assets/Models/ConstructorArrow`), cannonballs, rockets and homing bolts at each
   other and at the castle; `Ballistics`, `SiegeSpec` (the models as boxes), `BodyPool`s for units and projectiles.
-* **Demo** (`Phys.Demo`) — `Demo.unity` / `DemoBootstrap` (the catalog scenes) and `Castle.unity` / `CastleDemo` (the brick
-  castle and its siege) on the shared `DemoBase` (scene keys, HUD, drag, shooting, player flags), `DemoCamera`.
+* **Demo** (`Phys.Demo`) — `Demo.unity` / `DemoBootstrap` (the catalog scenes), `Castle.unity` / `CastleDemo` (the brick
+  castle and its siege) and `Preview.unity` / `PreviewDemo` (the JSON castles of `Resources/Castles`) on the shared
+  `DemoBase` (scene keys, HUD, drag, shooting, player flags), `DemoCamera`.
 * **Tests** — EditMode: reference behaviour, kernel checks, GPU vs reference comparisons, invariants, drives, body pools,
-  siege, castle layout, performance; PlayMode: demo, castle and siege smoke tests.
+  siege, castle layout, brick assemblies, performance; PlayMode: demo, castle, siege and preview smoke tests.
 
 ## Layout
 
@@ -31,17 +33,20 @@ Assets/Phys/AvbdGpu/Runtime            AvbdGpuWorld, BodyPool, AvbdGpuPipeline, 
 Assets/Phys/AvbdGpu/Runtime/Resources  AvbdCommon.hlsl, AvbdUtil, AvbdScan, AvbdBroadphase, AvbdNarrowphase, AvbdConstraints,
                                        AvbdColoring, AvbdSolver, AvbdDebug (.compute)
 Assets/Phys/AvbdGpu/Reference          RefMath, RefBodies, RefJoint (+Spring), RefManifold, RefCollide, RefSolver, RefSceneBuilder
-Assets/Phys/AvbdGpu/Scenes             AvbdScenes (catalog + ISceneBuilder), BrickCastle (brick, layout, castle plans, snap joints)
+Assets/Phys/AvbdGpu/Scenes             AvbdScenes (catalog + ISceneBuilder), BrickCastle (brick, layout, castle plans, snap joints),
+                                       BrickAssembly (piece catalog, document parser + writer, AssemblyBuilder: boxes, snaps, diagnostics)
 Assets/Phys/AvbdGpu/Siege              SiegeSpec (figure and arrow models as boxes), Ballistics, SiegeSystem (armies, volleys, retirement)
 Assets/Phys/AvbdGpu/Presentation       AvbdGpuRenderer, Resources/AvbdGpu/AvbdBox.shader (+ AvbdBodyInstancing.hlsl), AvbdLines.shader
 Assets/Phys/AvbdGpu/Tests/Editor       ReferenceTests, GpuKernelTests, GpuVsReferenceTests, InvariantTests, DriveTests, BodyPoolTests, SiegeTests,
-                                       SnapFractureTests, BrickCastleTests, PerformanceTests, DiagnosticTests
-Assets/Phys/AvbdGpu/Tests/Runtime      DemoSmokeTests, CastleSmokeTests, SiegeSmokeTests
-Assets/Phys/Demo                       Demo.unity, Castle.unity, DemoBase, DemoBootstrap, CastleDemo, DemoCamera, Editor/BuildDemo
+                                       SnapFractureTests, BrickCastleTests, BrickAssemblyTests, PerformanceTests, DiagnosticTests
+Assets/Phys/AvbdGpu/Tests/Runtime      DemoSmokeTests, CastleSmokeTests, SiegeSmokeTests, PreviewSmokeTests
+Assets/Phys/Demo                       Demo.unity, Castle.unity, Preview.unity, DemoBase, DemoBootstrap, CastleDemo, PreviewDemo, DemoCamera,
+                                       Editor/BuildDemo (player builds, mesh assignment, the Outpost export)
+Assets/Resources/Castles               the brick-assembly documents the preview demo offers (emerald_crown_citadel.json, outpost.json)
 Assets/Models/ConstructorBlock2x3      the 2 x 3 construction brick (FBX, Tools/generate_constructor_block.py)
 Assets/Models/ConstructorFigure, ConstructorArrow   the toy figure and the arrow (Tools/generate_constructor_accessories.py)
 Assets/Models/construction_pieces      the 27-piece pack (bricks, plates, tiles, ramps, prisms; generate_models.py, Blender 5.2),
-                                       the catalog generic-construction-27-v1 of BRICK_ASSEMBLY.md; not used by the scenes yet
+                                       the catalog generic-construction-27-v1 of BRICK_ASSEMBLY.md, drawn by the preview demo
 ```
 
 ## Using the solver
@@ -225,6 +230,38 @@ a spent slot is free for the next spawn one step later.
 * Cost: the siege of the Outpost (109 units, a few hundred projectiles in flight) adds ~0.5 ms to the 7.6 ms frame; on the
   Royal citadel it is lost in the noise (38 ms either way).
 
+## Preview demo
+
+`Assets/Phys/Demo/Preview.unity` (`Phys / Build Preview Player`, or `-buildScene Preview`) is the castle demo for castles
+described as data: every `.json` file of `Assets/Resources/Castles` is a brick-assembly document
+([BRICK_ASSEMBLY.md](BRICK_ASSEMBLY.md)) built from the 27-piece pack, and keys `1` .. `0` and `,` `.` choose between them
+(by file name; `R` re-reads the folder). `BrickAssembly.Parse` validates and expands the document (modules, instances,
+palette; a rejected file shows its error in the HUD and leaves the ground), `AssemblyBuilder.Build` adds one box body per
+piece and `AvbdGpuRenderer.MeshRanges` draws each group of pieces with its model (`PreviewDemo.PieceMeshes`, the 27 meshes
+in catalog order, assigned by `Phys / Assign Preview Meshes`).
+
+* A piece's box is its body without the studs (sloped and round pieces take their bounding box for now), grown by one
+  collision margin along the body axis that faces down — the castle demo's rule, so that stacked models meet with neither
+  gap nor overlap — and shrunk by `Clearance` (1.25 mm per side of the model, real bricks' 1.25 % of the pitch) on the two
+  other axes: the pack's pieces fill their stud pitch exactly, and side-by-side boxes that touch pass loads that snapped
+  bricks are not built to take (the Outpost's gatehouse pier broke ten snaps under its own weight without the clearance).
+  `BrickScale`, `BrickMass` (of a 2 x 3 brick; every piece gets the same density), friction, snap limits, cannonball and the
+  180 settle steps are the castle demo's; the footprint is centred on the world origin.
+* `J` snaps the pieces: four joints at the inset corners of every overlap in which an upright, stud-aligned piece rests
+  exactly one body height on a studded top (bricks and plates), plus world joints for the gripping pieces on the ground;
+  tiles, slopes and prisms grip studs, the plain pieces do not, and nothing holds on a smooth top. The exported Outpost
+  gets the same 8 336 joints as the castle demo's own planner.
+* The HUD reports what the format asks a loader to report and never corrects: pieces resting on nothing, pieces resting on
+  less than half their footprint (a piece a stud height above a top counts as resting on the studs) and intersecting
+  pairs, with the first offending IDs (`AssemblyBuilder.Diagnose`; the full counts go to the log).
+* No siege: the armies need the procedural plan's wall geometry and the layout's occupancy map.
+
+`Phys / Export Outpost as Brick Assembly` writes the castle planner's Outpost as `outpost.json` (`BrickAssembly.WriteLayout`),
+a castle that stands dry-stacked and snapped; `emerald_crown_citadel.json` is an agent's design whose curtain walls and
+towers repeat one brick pattern on every course (unbonded columns two studs thick and up to seventeen tall), so it loads,
+is diagnosed (45 floating pieces) and then loses its rear walls and keep. Flags: `-avbd-castle name` (a file name),
+`-avbd-scene n`, `-avbd-snap`, and the screenshot / bench / camera flags above.
+
 ## Measured behaviour
 
 Numbers from the EditMode suite and the player on an RTX 4070 Laptop GPU (i7-14700HX, D3D12), plugged in. On battery
@@ -283,6 +320,8 @@ submission).
 .\RunTests.ps1 -Platform EditMode -Filter "Phys.AvbdGpu.Tests.DriveTests;Phys.AvbdGpu.Tests.BodyPoolTests;Phys.AvbdGpu.Tests.SiegeTests"
 .\RunTests.ps1 -Platform PlayMode -Filter Phys.AvbdGpu.Tests.CastleSmokeTests   # the smallest and largest castles stand, cannonball, snaps break
 .\RunTests.ps1 -Platform PlayMode -Filter Phys.AvbdGpu.Tests.SiegeSmokeTests    # the Outpost under siege: volleys, kills, retirements
+.\RunTests.ps1 -Platform EditMode -Filter Phys.AvbdGpu.Tests.BrickAssemblyTests  # the brick-assembly format: catalog, parsing, rejection, boxes, snaps
+.\RunTests.ps1 -Platform PlayMode -Filter Phys.AvbdGpu.Tests.PreviewSmokeTests  # the JSON castles: the Outpost stands and snaps, the citadel is diagnosed
 ```
 
 `DriveTests` check the drives against the implicit Euler parabola and the reference mirror (constant force 1e-5, motor
@@ -290,7 +329,10 @@ submission).
 move, that a respawn starts from a clean state and that the events report what units and projectiles touch;
 `SiegeTests` the ballistics (closest approach 2e-3 m over three arcs), marching, a volley that kills its target, the
 retirement cooldown, the drives switched off at the first contact and a 600-step siege of the Outpost with synchronous
-readbacks (bitwise reproducible over two runs).
+readbacks (bitwise reproducible over two runs). `BrickAssemblyTests` check the piece catalog against the pack's manifest,
+the rotation convention against `Quaternion.Euler`, the format's examples and error cases, the boxes of upright and lying
+pieces, the snapped bridge on the reference solver, the citadel's expansion and diagnostics, and the Outpost round trip
+(planner to document to bodies: the same pivots and the same snap joints as `BrickCastle`).
 
 The runner forces D3D12 (`-GraphicsApi ""` for the editor default). `DiagnosticTests` only log traces and are
 excluded from the default runs, like `PerformanceTests`.

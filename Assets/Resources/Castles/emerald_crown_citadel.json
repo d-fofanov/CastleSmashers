@@ -1,0 +1,7721 @@
+{
+  "format": "brick-assembly",
+  "version": 1,
+  "catalog": "generic-construction-27-v1",
+  "name": "Emerald Crown Citadel",
+  "units": {
+    "gridToUnity": 0.1,
+    "axes": "unity"
+  },
+  "palette": {
+    "stone": "#8D969F",
+    "stone_dark": "#586470",
+    "trim": "#CFD5D6",
+    "roof": "#175E48",
+    "roof_light": "#237A58",
+    "gold": "#D6A343",
+    "banner": "#922E42",
+    "wood": "#66452F",
+    "water": "#258F99",
+    "paving": "#78818B",
+    "foliage": "#32694A"
+  },
+  "parts": [
+    {
+      "id": "p0000",
+      "piece": "Brick_2x2",
+      "position": [
+        -3,
+        1.6,
+        -39
+      ],
+      "color": "trim"
+    },
+    {
+      "id": "p0001",
+      "piece": "Plain_Cylinder",
+      "position": [
+        -3,
+        3.025,
+        -39
+      ],
+      "color": "gold"
+    },
+    {
+      "id": "p0002",
+      "piece": "Brick_2x2",
+      "position": [
+        -3,
+        1.6,
+        -35
+      ],
+      "color": "trim"
+    },
+    {
+      "id": "p0003",
+      "piece": "Plain_Cylinder",
+      "position": [
+        -3,
+        3.025,
+        -35
+      ],
+      "color": "gold"
+    },
+    {
+      "id": "p0004",
+      "piece": "Brick_2x2",
+      "position": [
+        3,
+        1.6,
+        -39
+      ],
+      "color": "trim"
+    },
+    {
+      "id": "p0005",
+      "piece": "Plain_Cylinder",
+      "position": [
+        3,
+        3.025,
+        -39
+      ],
+      "color": "gold"
+    },
+    {
+      "id": "p0006",
+      "piece": "Brick_2x2",
+      "position": [
+        3,
+        1.6,
+        -35
+      ],
+      "color": "trim"
+    },
+    {
+      "id": "p0007",
+      "piece": "Plain_Cylinder",
+      "position": [
+        3,
+        3.025,
+        -35
+      ],
+      "color": "gold"
+    }
+  ],
+  "modules": {
+    "island_cell_8x8": {
+      "parts": [
+        {
+          "id": "p0000",
+          "piece": "Brick_2x8",
+          "position": [
+            -3.0,
+            0,
+            0.0
+          ],
+          "color": "stone_dark"
+        },
+        {
+          "id": "p0001",
+          "piece": "Brick_2x8",
+          "position": [
+            -1.0,
+            0,
+            0.0
+          ],
+          "color": "stone_dark"
+        },
+        {
+          "id": "p0002",
+          "piece": "Brick_2x8",
+          "position": [
+            1.0,
+            0,
+            0.0
+          ],
+          "color": "stone_dark"
+        },
+        {
+          "id": "p0003",
+          "piece": "Brick_2x8",
+          "position": [
+            3.0,
+            0,
+            0.0
+          ],
+          "color": "stone_dark"
+        },
+        {
+          "id": "p0004",
+          "piece": "Plate_2x4",
+          "position": [
+            -3.0,
+            1.2,
+            -2.0
+          ],
+          "color": "paving"
+        },
+        {
+          "id": "p0005",
+          "piece": "Plate_2x4",
+          "position": [
+            -3.0,
+            1.2,
+            2.0
+          ],
+          "color": "paving"
+        },
+        {
+          "id": "p0006",
+          "piece": "Plate_2x4",
+          "position": [
+            -1.0,
+            1.2,
+            -2.0
+          ],
+          "color": "paving"
+        },
+        {
+          "id": "p0007",
+          "piece": "Plate_2x4",
+          "position": [
+            -1.0,
+            1.2,
+            2.0
+          ],
+          "color": "paving"
+        },
+        {
+          "id": "p0008",
+          "piece": "Plate_2x4",
+          "position": [
+            1.0,
+            1.2,
+            -2.0
+          ],
+          "color": "paving"
+        },
+        {
+          "id": "p0009",
+          "piece": "Plate_2x4",
+          "position": [
+            1.0,
+            1.2,
+            2.0
+          ],
+          "color": "paving"
+        },
+        {
+          "id": "p0010",
+          "piece": "Plate_2x4",
+          "position": [
+            3.0,
+            1.2,
+            -2.0
+          ],
+          "color": "paving"
+        },
+        {
+          "id": "p0011",
+          "piece": "Plate_2x4",
+          "position": [
+            3.0,
+            1.2,
+            2.0
+          ],
+          "color": "paving"
+        }
+      ]
+    },
+    "water_cell_8x8": {
+      "parts": [
+        {
+          "id": "p0000",
+          "piece": "Tile_2x4",
+          "position": [
+            -3.0,
+            0,
+            -2.0
+          ],
+          "color": "water"
+        },
+        {
+          "id": "p0001",
+          "piece": "Tile_2x4",
+          "position": [
+            -3.0,
+            0,
+            2.0
+          ],
+          "color": "water"
+        },
+        {
+          "id": "p0002",
+          "piece": "Tile_2x4",
+          "position": [
+            -1.0,
+            0,
+            -2.0
+          ],
+          "color": "water"
+        },
+        {
+          "id": "p0003",
+          "piece": "Tile_2x4",
+          "position": [
+            -1.0,
+            0,
+            2.0
+          ],
+          "color": "water"
+        },
+        {
+          "id": "p0004",
+          "piece": "Tile_2x4",
+          "position": [
+            1.0,
+            0,
+            -2.0
+          ],
+          "color": "water"
+        },
+        {
+          "id": "p0005",
+          "piece": "Tile_2x4",
+          "position": [
+            1.0,
+            0,
+            2.0
+          ],
+          "color": "water"
+        },
+        {
+          "id": "p0006",
+          "piece": "Tile_2x4",
+          "position": [
+            3.0,
+            0,
+            -2.0
+          ],
+          "color": "water"
+        },
+        {
+          "id": "p0007",
+          "piece": "Tile_2x4",
+          "position": [
+            3.0,
+            0,
+            2.0
+          ],
+          "color": "water"
+        }
+      ]
+    },
+    "curtain_wall_8": {
+      "parts": [
+        {
+          "id": "p0000",
+          "piece": "Brick_2x8",
+          "position": [
+            0,
+            0.0,
+            0
+          ],
+          "color": "stone_dark"
+        },
+        {
+          "id": "p0001",
+          "piece": "Brick_2x8",
+          "position": [
+            0,
+            1.2,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0002",
+          "piece": "Brick_2x8",
+          "position": [
+            0,
+            2.4,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0003",
+          "piece": "Brick_2x8",
+          "position": [
+            0,
+            3.6,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0004",
+          "piece": "Brick_2x8",
+          "position": [
+            0,
+            4.8,
+            0
+          ],
+          "color": "stone_dark"
+        },
+        {
+          "id": "p0005",
+          "piece": "Brick_2x8",
+          "position": [
+            0,
+            6.0,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0006",
+          "piece": "Brick_2x8",
+          "position": [
+            0,
+            7.2,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0007",
+          "piece": "Brick_2x8",
+          "position": [
+            0,
+            8.4,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0008",
+          "piece": "Plate_2x4",
+          "position": [
+            0,
+            9.6,
+            -2
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0009",
+          "piece": "Plate_2x4",
+          "position": [
+            0,
+            9.6,
+            2
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0010",
+          "piece": "Brick_1x2",
+          "position": [
+            0.5,
+            10,
+            -3
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0011",
+          "piece": "Brick_1x2",
+          "position": [
+            0.5,
+            10,
+            1
+          ],
+          "color": "trim"
+        }
+      ]
+    },
+    "tower_shell": {
+      "parts": [
+        {
+          "id": "p0000",
+          "piece": "Brick_2x8",
+          "position": [
+            -3,
+            0.0,
+            0
+          ],
+          "color": "stone_dark"
+        },
+        {
+          "id": "p0001",
+          "piece": "Brick_2x8",
+          "position": [
+            3,
+            0.0,
+            0
+          ],
+          "color": "stone_dark"
+        },
+        {
+          "id": "p0002",
+          "piece": "Brick_2x4",
+          "position": [
+            0,
+            0.0,
+            -3
+          ],
+          "color": "stone_dark",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0003",
+          "piece": "Brick_2x4",
+          "position": [
+            0,
+            0.0,
+            3
+          ],
+          "color": "stone_dark",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0004",
+          "piece": "Brick_2x8",
+          "position": [
+            -3,
+            1.2,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0005",
+          "piece": "Brick_2x8",
+          "position": [
+            3,
+            1.2,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0006",
+          "piece": "Brick_2x4",
+          "position": [
+            0,
+            1.2,
+            -3
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0007",
+          "piece": "Brick_2x4",
+          "position": [
+            0,
+            1.2,
+            3
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0008",
+          "piece": "Brick_2x8",
+          "position": [
+            -3,
+            2.4,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0009",
+          "piece": "Brick_2x8",
+          "position": [
+            3,
+            2.4,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0010",
+          "piece": "Brick_2x4",
+          "position": [
+            0,
+            2.4,
+            -3
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0011",
+          "piece": "Brick_2x4",
+          "position": [
+            0,
+            2.4,
+            3
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0012",
+          "piece": "Brick_2x8",
+          "position": [
+            -3,
+            3.6,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0013",
+          "piece": "Brick_2x8",
+          "position": [
+            3,
+            3.6,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0014",
+          "piece": "Brick_2x4",
+          "position": [
+            0,
+            3.6,
+            -3
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0015",
+          "piece": "Brick_2x4",
+          "position": [
+            0,
+            3.6,
+            3
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0016",
+          "piece": "Brick_2x8",
+          "position": [
+            -3,
+            4.8,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0017",
+          "piece": "Brick_2x8",
+          "position": [
+            3,
+            4.8,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0018",
+          "piece": "Brick_2x4",
+          "position": [
+            0,
+            4.8,
+            -3
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0019",
+          "piece": "Brick_2x4",
+          "position": [
+            0,
+            4.8,
+            3
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0020",
+          "piece": "Brick_2x8",
+          "position": [
+            -3,
+            6.0,
+            0
+          ],
+          "color": "stone_dark"
+        },
+        {
+          "id": "p0021",
+          "piece": "Brick_2x8",
+          "position": [
+            3,
+            6.0,
+            0
+          ],
+          "color": "stone_dark"
+        },
+        {
+          "id": "p0022",
+          "piece": "Brick_2x4",
+          "position": [
+            0,
+            6.0,
+            -3
+          ],
+          "color": "stone_dark",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0023",
+          "piece": "Brick_2x4",
+          "position": [
+            0,
+            6.0,
+            3
+          ],
+          "color": "stone_dark",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0024",
+          "piece": "Brick_2x8",
+          "position": [
+            -3,
+            7.2,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0025",
+          "piece": "Brick_2x8",
+          "position": [
+            3,
+            7.2,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0026",
+          "piece": "Brick_2x4",
+          "position": [
+            0,
+            7.2,
+            -3
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0027",
+          "piece": "Brick_2x4",
+          "position": [
+            0,
+            7.2,
+            3
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0028",
+          "piece": "Brick_2x3",
+          "position": [
+            -3,
+            8.4,
+            -2.5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0029",
+          "piece": "Brick_2x3",
+          "position": [
+            -3,
+            8.4,
+            2.5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0030",
+          "piece": "Brick_2x3",
+          "position": [
+            3,
+            8.4,
+            -2.5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0031",
+          "piece": "Brick_2x3",
+          "position": [
+            3,
+            8.4,
+            2.5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0032",
+          "piece": "Brick_1x2",
+          "position": [
+            -1.5,
+            8.4,
+            -3
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0033",
+          "piece": "Brick_1x2",
+          "position": [
+            1.5,
+            8.4,
+            -3
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0034",
+          "piece": "Brick_1x2",
+          "position": [
+            -1.5,
+            8.4,
+            3
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0035",
+          "piece": "Brick_1x2",
+          "position": [
+            1.5,
+            8.4,
+            3
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0036",
+          "piece": "Brick_2x3",
+          "position": [
+            -3,
+            9.6,
+            -2.5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0037",
+          "piece": "Brick_2x3",
+          "position": [
+            -3,
+            9.6,
+            2.5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0038",
+          "piece": "Brick_2x3",
+          "position": [
+            3,
+            9.6,
+            -2.5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0039",
+          "piece": "Brick_2x3",
+          "position": [
+            3,
+            9.6,
+            2.5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0040",
+          "piece": "Brick_1x2",
+          "position": [
+            -1.5,
+            9.6,
+            -3
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0041",
+          "piece": "Brick_1x2",
+          "position": [
+            1.5,
+            9.6,
+            -3
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0042",
+          "piece": "Brick_1x2",
+          "position": [
+            -1.5,
+            9.6,
+            3
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0043",
+          "piece": "Brick_1x2",
+          "position": [
+            1.5,
+            9.6,
+            3
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0044",
+          "piece": "Brick_2x3",
+          "position": [
+            -3,
+            10.8,
+            -2.5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0045",
+          "piece": "Brick_2x3",
+          "position": [
+            -3,
+            10.8,
+            2.5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0046",
+          "piece": "Brick_2x3",
+          "position": [
+            3,
+            10.8,
+            -2.5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0047",
+          "piece": "Brick_2x3",
+          "position": [
+            3,
+            10.8,
+            2.5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0048",
+          "piece": "Brick_1x2",
+          "position": [
+            -1.5,
+            10.8,
+            -3
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0049",
+          "piece": "Brick_1x2",
+          "position": [
+            1.5,
+            10.8,
+            -3
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0050",
+          "piece": "Brick_1x2",
+          "position": [
+            -1.5,
+            10.8,
+            3
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0051",
+          "piece": "Brick_1x2",
+          "position": [
+            1.5,
+            10.8,
+            3
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0052",
+          "piece": "Brick_2x8",
+          "position": [
+            -3,
+            12.0,
+            0
+          ],
+          "color": "stone_dark"
+        },
+        {
+          "id": "p0053",
+          "piece": "Brick_2x8",
+          "position": [
+            3,
+            12.0,
+            0
+          ],
+          "color": "stone_dark"
+        },
+        {
+          "id": "p0054",
+          "piece": "Brick_2x4",
+          "position": [
+            0,
+            12.0,
+            -3
+          ],
+          "color": "stone_dark",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0055",
+          "piece": "Brick_2x4",
+          "position": [
+            0,
+            12.0,
+            3
+          ],
+          "color": "stone_dark",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0056",
+          "piece": "Brick_2x8",
+          "position": [
+            -3,
+            13.2,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0057",
+          "piece": "Brick_2x8",
+          "position": [
+            3,
+            13.2,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0058",
+          "piece": "Brick_2x4",
+          "position": [
+            0,
+            13.2,
+            -3
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0059",
+          "piece": "Brick_2x4",
+          "position": [
+            0,
+            13.2,
+            3
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0060",
+          "piece": "Brick_2x8",
+          "position": [
+            -3,
+            14.4,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0061",
+          "piece": "Brick_2x8",
+          "position": [
+            3,
+            14.4,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0062",
+          "piece": "Brick_2x4",
+          "position": [
+            0,
+            14.4,
+            -3
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0063",
+          "piece": "Brick_2x4",
+          "position": [
+            0,
+            14.4,
+            3
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0064",
+          "piece": "Brick_2x8",
+          "position": [
+            -3,
+            15.6,
+            0
+          ],
+          "color": "stone_dark"
+        },
+        {
+          "id": "p0065",
+          "piece": "Brick_2x8",
+          "position": [
+            3,
+            15.6,
+            0
+          ],
+          "color": "stone_dark"
+        },
+        {
+          "id": "p0066",
+          "piece": "Brick_2x4",
+          "position": [
+            0,
+            15.6,
+            -3
+          ],
+          "color": "stone_dark",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0067",
+          "piece": "Brick_2x4",
+          "position": [
+            0,
+            15.6,
+            3
+          ],
+          "color": "stone_dark",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0068",
+          "piece": "Plate_2x4",
+          "position": [
+            -3.0,
+            16.8,
+            -2.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0069",
+          "piece": "Plate_2x4",
+          "position": [
+            -3.0,
+            16.8,
+            2.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0070",
+          "piece": "Plate_2x4",
+          "position": [
+            -1.0,
+            16.8,
+            -2.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0071",
+          "piece": "Plate_2x4",
+          "position": [
+            -1.0,
+            16.8,
+            2.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0072",
+          "piece": "Plate_2x4",
+          "position": [
+            1.0,
+            16.8,
+            -2.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0073",
+          "piece": "Plate_2x4",
+          "position": [
+            1.0,
+            16.8,
+            2.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0074",
+          "piece": "Plate_2x4",
+          "position": [
+            3.0,
+            16.8,
+            -2.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0075",
+          "piece": "Plate_2x4",
+          "position": [
+            3.0,
+            16.8,
+            2.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0076",
+          "piece": "Tile_2x4",
+          "position": [
+            0,
+            4.8,
+            -4.4
+          ],
+          "color": "banner",
+          "rotation": [
+            90,
+            0,
+            0
+          ]
+        },
+        {
+          "id": "p0077",
+          "piece": "Tile_1x1",
+          "position": [
+            0,
+            4.8,
+            -4.8
+          ],
+          "color": "gold",
+          "rotation": [
+            90,
+            0,
+            0
+          ]
+        }
+      ]
+    },
+    "battlement_tower": {
+      "parts": [
+        {
+          "id": "p0000",
+          "piece": "Brick_2x2",
+          "position": [
+            -3,
+            17.2,
+            -3
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0001",
+          "piece": "Brick_2x2",
+          "position": [
+            -3,
+            17.2,
+            0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0002",
+          "piece": "Brick_2x2",
+          "position": [
+            -3,
+            17.2,
+            3
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0003",
+          "piece": "Brick_2x2",
+          "position": [
+            0,
+            17.2,
+            -3
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0004",
+          "piece": "Brick_2x2",
+          "position": [
+            0,
+            17.2,
+            3
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0005",
+          "piece": "Brick_2x2",
+          "position": [
+            3,
+            17.2,
+            -3
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0006",
+          "piece": "Brick_2x2",
+          "position": [
+            3,
+            17.2,
+            0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0007",
+          "piece": "Brick_2x2",
+          "position": [
+            3,
+            17.2,
+            3
+          ],
+          "color": "trim"
+        }
+      ],
+      "instances": [
+        {
+          "id": "tower_shell_000",
+          "module": "tower_shell",
+          "position": [
+            0,
+            0,
+            0
+          ]
+        }
+      ]
+    },
+    "spire_tower": {
+      "parts": [
+        {
+          "id": "p0000",
+          "piece": "Brick_2x8",
+          "position": [
+            -3.0,
+            17.2,
+            0.0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0001",
+          "piece": "Brick_2x8",
+          "position": [
+            -1.0,
+            17.2,
+            0.0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0002",
+          "piece": "Brick_2x8",
+          "position": [
+            1.0,
+            17.2,
+            0.0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0003",
+          "piece": "Brick_2x8",
+          "position": [
+            3.0,
+            17.2,
+            0.0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0004",
+          "piece": "Brick_2x6",
+          "position": [
+            -2.0,
+            18.4,
+            0.0
+          ],
+          "color": "roof_light"
+        },
+        {
+          "id": "p0005",
+          "piece": "Brick_2x6",
+          "position": [
+            0.0,
+            18.4,
+            0.0
+          ],
+          "color": "roof_light"
+        },
+        {
+          "id": "p0006",
+          "piece": "Brick_2x6",
+          "position": [
+            2.0,
+            18.4,
+            0.0
+          ],
+          "color": "roof_light"
+        },
+        {
+          "id": "p0007",
+          "piece": "Brick_2x4",
+          "position": [
+            -1.0,
+            19.6,
+            0.0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0008",
+          "piece": "Brick_2x4",
+          "position": [
+            1.0,
+            19.6,
+            0.0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0009",
+          "piece": "Brick_2x2",
+          "position": [
+            0.0,
+            20.8,
+            0.0
+          ],
+          "color": "roof_light"
+        },
+        {
+          "id": "p0010",
+          "piece": "Brick_2x2",
+          "position": [
+            0,
+            22.0,
+            0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0011",
+          "piece": "Brick_2x2",
+          "position": [
+            0,
+            23.2,
+            0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0012",
+          "piece": "Brick_2x2",
+          "position": [
+            0,
+            24.4,
+            0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0013",
+          "piece": "Plain_Cylinder",
+          "position": [
+            0,
+            25.825,
+            0
+          ],
+          "color": "gold"
+        }
+      ],
+      "instances": [
+        {
+          "id": "tower_shell_000",
+          "module": "tower_shell",
+          "position": [
+            0,
+            0,
+            0
+          ]
+        }
+      ]
+    },
+    "gatehouse": {
+      "parts": [
+        {
+          "id": "p0000",
+          "piece": "Brick_2x8",
+          "position": [
+            -3,
+            0.0,
+            0
+          ],
+          "color": "stone_dark"
+        },
+        {
+          "id": "p0001",
+          "piece": "Brick_2x8",
+          "position": [
+            3,
+            0.0,
+            0
+          ],
+          "color": "stone_dark"
+        },
+        {
+          "id": "p0002",
+          "piece": "Brick_2x8",
+          "position": [
+            -3,
+            1.2,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0003",
+          "piece": "Brick_2x8",
+          "position": [
+            3,
+            1.2,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0004",
+          "piece": "Brick_2x8",
+          "position": [
+            -3,
+            2.4,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0005",
+          "piece": "Brick_2x8",
+          "position": [
+            3,
+            2.4,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0006",
+          "piece": "Brick_2x8",
+          "position": [
+            -3,
+            3.6,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0007",
+          "piece": "Brick_2x8",
+          "position": [
+            3,
+            3.6,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0008",
+          "piece": "Brick_2x8",
+          "position": [
+            -3,
+            4.8,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0009",
+          "piece": "Brick_2x8",
+          "position": [
+            3,
+            4.8,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0010",
+          "piece": "Brick_2x8",
+          "position": [
+            -3,
+            6.0,
+            0
+          ],
+          "color": "stone_dark"
+        },
+        {
+          "id": "p0011",
+          "piece": "Brick_2x8",
+          "position": [
+            3,
+            6.0,
+            0
+          ],
+          "color": "stone_dark"
+        },
+        {
+          "id": "p0012",
+          "piece": "Brick_2x8",
+          "position": [
+            -3,
+            7.2,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0013",
+          "piece": "Brick_2x8",
+          "position": [
+            3,
+            7.2,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0014",
+          "piece": "Brick_2x4",
+          "position": [
+            0,
+            7.2,
+            -3
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0015",
+          "piece": "Brick_2x4",
+          "position": [
+            0,
+            7.2,
+            3
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0016",
+          "piece": "Brick_2x8",
+          "position": [
+            -3,
+            8.4,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0017",
+          "piece": "Brick_2x8",
+          "position": [
+            3,
+            8.4,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0018",
+          "piece": "Brick_2x4",
+          "position": [
+            0,
+            8.4,
+            -3
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0019",
+          "piece": "Brick_2x4",
+          "position": [
+            0,
+            8.4,
+            3
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0020",
+          "piece": "Brick_2x8",
+          "position": [
+            -3,
+            9.6,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0021",
+          "piece": "Brick_2x8",
+          "position": [
+            3,
+            9.6,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0022",
+          "piece": "Brick_2x4",
+          "position": [
+            0,
+            9.6,
+            -3
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0023",
+          "piece": "Brick_2x4",
+          "position": [
+            0,
+            9.6,
+            3
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0024",
+          "piece": "Brick_2x8",
+          "position": [
+            -3,
+            10.8,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0025",
+          "piece": "Brick_2x8",
+          "position": [
+            3,
+            10.8,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0026",
+          "piece": "Brick_2x4",
+          "position": [
+            0,
+            10.8,
+            -3
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0027",
+          "piece": "Brick_2x4",
+          "position": [
+            0,
+            10.8,
+            3
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0028",
+          "piece": "Plate_2x4",
+          "position": [
+            -3.0,
+            12,
+            -2.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0029",
+          "piece": "Plate_2x4",
+          "position": [
+            -3.0,
+            12,
+            2.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0030",
+          "piece": "Plate_2x4",
+          "position": [
+            -1.0,
+            12,
+            -2.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0031",
+          "piece": "Plate_2x4",
+          "position": [
+            -1.0,
+            12,
+            2.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0032",
+          "piece": "Plate_2x4",
+          "position": [
+            1.0,
+            12,
+            -2.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0033",
+          "piece": "Plate_2x4",
+          "position": [
+            1.0,
+            12,
+            2.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0034",
+          "piece": "Plate_2x4",
+          "position": [
+            3.0,
+            12,
+            -2.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0035",
+          "piece": "Plate_2x4",
+          "position": [
+            3.0,
+            12,
+            2.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0036",
+          "piece": "Brick_2x2",
+          "position": [
+            -3,
+            12.4,
+            -3
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0037",
+          "piece": "Brick_2x2",
+          "position": [
+            -3,
+            12.4,
+            0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0038",
+          "piece": "Brick_2x2",
+          "position": [
+            -3,
+            12.4,
+            3
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0039",
+          "piece": "Brick_2x2",
+          "position": [
+            0,
+            12.4,
+            -3
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0040",
+          "piece": "Brick_2x2",
+          "position": [
+            0,
+            12.4,
+            3
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0041",
+          "piece": "Brick_2x2",
+          "position": [
+            3,
+            12.4,
+            -3
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0042",
+          "piece": "Brick_2x2",
+          "position": [
+            3,
+            12.4,
+            0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0043",
+          "piece": "Brick_2x2",
+          "position": [
+            3,
+            12.4,
+            3
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0044",
+          "piece": "Brick_1x1",
+          "position": [
+            -1.5,
+            4.8,
+            -3
+          ],
+          "color": "stone_dark"
+        },
+        {
+          "id": "p0045",
+          "piece": "Brick_1x1",
+          "position": [
+            -1.5,
+            6,
+            -3
+          ],
+          "color": "stone_dark"
+        },
+        {
+          "id": "p0046",
+          "piece": "Brick_1x1",
+          "position": [
+            0,
+            4.8,
+            -3
+          ],
+          "color": "stone_dark"
+        },
+        {
+          "id": "p0047",
+          "piece": "Brick_1x1",
+          "position": [
+            0,
+            6,
+            -3
+          ],
+          "color": "stone_dark"
+        },
+        {
+          "id": "p0048",
+          "piece": "Brick_1x1",
+          "position": [
+            1.5,
+            4.8,
+            -3
+          ],
+          "color": "stone_dark"
+        },
+        {
+          "id": "p0049",
+          "piece": "Brick_1x1",
+          "position": [
+            1.5,
+            6,
+            -3
+          ],
+          "color": "stone_dark"
+        },
+        {
+          "id": "p0050",
+          "piece": "Tile_2x2",
+          "position": [
+            0,
+            10,
+            -4.4
+          ],
+          "color": "banner",
+          "rotation": [
+            90,
+            0,
+            0
+          ]
+        }
+      ]
+    },
+    "bridge_8x8": {
+      "parts": [
+        {
+          "id": "p0000",
+          "piece": "Brick_2x8",
+          "position": [
+            -3,
+            0,
+            0
+          ],
+          "color": "stone_dark"
+        },
+        {
+          "id": "p0001",
+          "piece": "Brick_2x8",
+          "position": [
+            3,
+            0,
+            0
+          ],
+          "color": "stone_dark"
+        },
+        {
+          "id": "p0002",
+          "piece": "Plate_2x4",
+          "position": [
+            -3.0,
+            1.2,
+            -2.0
+          ],
+          "color": "wood"
+        },
+        {
+          "id": "p0003",
+          "piece": "Plate_2x4",
+          "position": [
+            -3.0,
+            1.2,
+            2.0
+          ],
+          "color": "wood"
+        },
+        {
+          "id": "p0004",
+          "piece": "Plate_2x4",
+          "position": [
+            -1.0,
+            1.2,
+            -2.0
+          ],
+          "color": "wood"
+        },
+        {
+          "id": "p0005",
+          "piece": "Plate_2x4",
+          "position": [
+            -1.0,
+            1.2,
+            2.0
+          ],
+          "color": "wood"
+        },
+        {
+          "id": "p0006",
+          "piece": "Plate_2x4",
+          "position": [
+            1.0,
+            1.2,
+            -2.0
+          ],
+          "color": "wood"
+        },
+        {
+          "id": "p0007",
+          "piece": "Plate_2x4",
+          "position": [
+            1.0,
+            1.2,
+            2.0
+          ],
+          "color": "wood"
+        },
+        {
+          "id": "p0008",
+          "piece": "Plate_2x4",
+          "position": [
+            3.0,
+            1.2,
+            -2.0
+          ],
+          "color": "wood"
+        },
+        {
+          "id": "p0009",
+          "piece": "Plate_2x4",
+          "position": [
+            3.0,
+            1.2,
+            2.0
+          ],
+          "color": "wood"
+        },
+        {
+          "id": "p0010",
+          "piece": "Brick_1x2",
+          "position": [
+            -3.5,
+            1.6,
+            -3
+          ],
+          "color": "wood"
+        },
+        {
+          "id": "p0011",
+          "piece": "Brick_1x2",
+          "position": [
+            -3.5,
+            1.6,
+            3
+          ],
+          "color": "wood"
+        },
+        {
+          "id": "p0012",
+          "piece": "Brick_1x8",
+          "position": [
+            -3.5,
+            2.8,
+            0
+          ],
+          "color": "wood"
+        },
+        {
+          "id": "p0013",
+          "piece": "Brick_1x2",
+          "position": [
+            3.5,
+            1.6,
+            -3
+          ],
+          "color": "wood"
+        },
+        {
+          "id": "p0014",
+          "piece": "Brick_1x2",
+          "position": [
+            3.5,
+            1.6,
+            3
+          ],
+          "color": "wood"
+        },
+        {
+          "id": "p0015",
+          "piece": "Brick_1x8",
+          "position": [
+            3.5,
+            2.8,
+            0
+          ],
+          "color": "wood"
+        }
+      ]
+    },
+    "great_keep": {
+      "parts": [
+        {
+          "id": "p0000",
+          "piece": "Brick_2x8",
+          "position": [
+            -9,
+            0.0,
+            -4
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0001",
+          "piece": "Brick_2x8",
+          "position": [
+            -9,
+            0.0,
+            4
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0002",
+          "piece": "Brick_2x8",
+          "position": [
+            9,
+            0.0,
+            -4
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0003",
+          "piece": "Brick_2x8",
+          "position": [
+            9,
+            0.0,
+            4
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0004",
+          "piece": "Brick_2x6",
+          "position": [
+            -5,
+            0.0,
+            -7
+          ],
+          "color": "trim",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0005",
+          "piece": "Brick_2x6",
+          "position": [
+            5,
+            0.0,
+            -7
+          ],
+          "color": "trim",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0006",
+          "piece": "Brick_2x8",
+          "position": [
+            -4,
+            0.0,
+            7
+          ],
+          "color": "trim",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0007",
+          "piece": "Brick_2x8",
+          "position": [
+            4,
+            0.0,
+            7
+          ],
+          "color": "trim",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0008",
+          "piece": "Brick_2x8",
+          "position": [
+            -9,
+            1.2,
+            -4
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0009",
+          "piece": "Brick_2x8",
+          "position": [
+            -9,
+            1.2,
+            4
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0010",
+          "piece": "Brick_2x8",
+          "position": [
+            9,
+            1.2,
+            -4
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0011",
+          "piece": "Brick_2x8",
+          "position": [
+            9,
+            1.2,
+            4
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0012",
+          "piece": "Brick_2x6",
+          "position": [
+            -5,
+            1.2,
+            -7
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0013",
+          "piece": "Brick_2x6",
+          "position": [
+            5,
+            1.2,
+            -7
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0014",
+          "piece": "Brick_2x8",
+          "position": [
+            -4,
+            1.2,
+            7
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0015",
+          "piece": "Brick_2x8",
+          "position": [
+            4,
+            1.2,
+            7
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0016",
+          "piece": "Brick_2x8",
+          "position": [
+            -9,
+            2.4,
+            -4
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0017",
+          "piece": "Brick_2x8",
+          "position": [
+            -9,
+            2.4,
+            4
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0018",
+          "piece": "Brick_2x8",
+          "position": [
+            9,
+            2.4,
+            -4
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0019",
+          "piece": "Brick_2x8",
+          "position": [
+            9,
+            2.4,
+            4
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0020",
+          "piece": "Brick_2x6",
+          "position": [
+            -5,
+            2.4,
+            -7
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0021",
+          "piece": "Brick_2x6",
+          "position": [
+            5,
+            2.4,
+            -7
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0022",
+          "piece": "Brick_2x8",
+          "position": [
+            -4,
+            2.4,
+            7
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0023",
+          "piece": "Brick_2x8",
+          "position": [
+            4,
+            2.4,
+            7
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0024",
+          "piece": "Brick_2x8",
+          "position": [
+            -9,
+            3.6,
+            -4
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0025",
+          "piece": "Brick_2x8",
+          "position": [
+            -9,
+            3.6,
+            4
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0026",
+          "piece": "Brick_2x8",
+          "position": [
+            9,
+            3.6,
+            -4
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0027",
+          "piece": "Brick_2x8",
+          "position": [
+            9,
+            3.6,
+            4
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0028",
+          "piece": "Brick_2x6",
+          "position": [
+            -5,
+            3.6,
+            -7
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0029",
+          "piece": "Brick_2x6",
+          "position": [
+            5,
+            3.6,
+            -7
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0030",
+          "piece": "Brick_2x8",
+          "position": [
+            -4,
+            3.6,
+            7
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0031",
+          "piece": "Brick_2x8",
+          "position": [
+            4,
+            3.6,
+            7
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0032",
+          "piece": "Brick_2x8",
+          "position": [
+            -9,
+            4.8,
+            -4
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0033",
+          "piece": "Brick_2x8",
+          "position": [
+            -9,
+            4.8,
+            4
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0034",
+          "piece": "Brick_2x8",
+          "position": [
+            9,
+            4.8,
+            -4
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0035",
+          "piece": "Brick_2x8",
+          "position": [
+            9,
+            4.8,
+            4
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0036",
+          "piece": "Brick_2x8",
+          "position": [
+            -4,
+            4.8,
+            -7
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0037",
+          "piece": "Brick_2x8",
+          "position": [
+            4,
+            4.8,
+            -7
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0038",
+          "piece": "Brick_2x8",
+          "position": [
+            -4,
+            4.8,
+            7
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0039",
+          "piece": "Brick_2x8",
+          "position": [
+            4,
+            4.8,
+            7
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0040",
+          "piece": "Brick_2x3",
+          "position": [
+            -9,
+            6.0,
+            -6.5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0041",
+          "piece": "Brick_2x6",
+          "position": [
+            -9,
+            6.0,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0042",
+          "piece": "Brick_2x3",
+          "position": [
+            -9,
+            6.0,
+            6.5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0043",
+          "piece": "Brick_2x3",
+          "position": [
+            9,
+            6.0,
+            -6.5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0044",
+          "piece": "Brick_2x6",
+          "position": [
+            9,
+            6.0,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0045",
+          "piece": "Brick_2x3",
+          "position": [
+            9,
+            6.0,
+            6.5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0046",
+          "piece": "Brick_1x2",
+          "position": [
+            -7.5,
+            6.0,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0047",
+          "piece": "Brick_1x2",
+          "position": [
+            -4.5,
+            6.0,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0048",
+          "piece": "Brick_1x2",
+          "position": [
+            -3.5,
+            6.0,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0049",
+          "piece": "Brick_1x2",
+          "position": [
+            -0.5,
+            6.0,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0050",
+          "piece": "Brick_1x2",
+          "position": [
+            0.5,
+            6.0,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0051",
+          "piece": "Brick_1x2",
+          "position": [
+            3.5,
+            6.0,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0052",
+          "piece": "Brick_1x2",
+          "position": [
+            4.5,
+            6.0,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0053",
+          "piece": "Brick_1x2",
+          "position": [
+            7.5,
+            6.0,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0054",
+          "piece": "Brick_1x2",
+          "position": [
+            -7.5,
+            6.0,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0055",
+          "piece": "Brick_1x2",
+          "position": [
+            -4.5,
+            6.0,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0056",
+          "piece": "Brick_1x2",
+          "position": [
+            -3.5,
+            6.0,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0057",
+          "piece": "Brick_1x2",
+          "position": [
+            -0.5,
+            6.0,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0058",
+          "piece": "Brick_1x2",
+          "position": [
+            0.5,
+            6.0,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0059",
+          "piece": "Brick_1x2",
+          "position": [
+            3.5,
+            6.0,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0060",
+          "piece": "Brick_1x2",
+          "position": [
+            4.5,
+            6.0,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0061",
+          "piece": "Brick_1x2",
+          "position": [
+            7.5,
+            6.0,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0062",
+          "piece": "Brick_2x3",
+          "position": [
+            -9,
+            7.2,
+            -6.5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0063",
+          "piece": "Brick_2x6",
+          "position": [
+            -9,
+            7.2,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0064",
+          "piece": "Brick_2x3",
+          "position": [
+            -9,
+            7.2,
+            6.5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0065",
+          "piece": "Brick_2x3",
+          "position": [
+            9,
+            7.2,
+            -6.5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0066",
+          "piece": "Brick_2x6",
+          "position": [
+            9,
+            7.2,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0067",
+          "piece": "Brick_2x3",
+          "position": [
+            9,
+            7.2,
+            6.5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0068",
+          "piece": "Brick_1x2",
+          "position": [
+            -7.5,
+            7.2,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0069",
+          "piece": "Brick_1x2",
+          "position": [
+            -4.5,
+            7.2,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0070",
+          "piece": "Brick_1x2",
+          "position": [
+            -3.5,
+            7.2,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0071",
+          "piece": "Brick_1x2",
+          "position": [
+            -0.5,
+            7.2,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0072",
+          "piece": "Brick_1x2",
+          "position": [
+            0.5,
+            7.2,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0073",
+          "piece": "Brick_1x2",
+          "position": [
+            3.5,
+            7.2,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0074",
+          "piece": "Brick_1x2",
+          "position": [
+            4.5,
+            7.2,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0075",
+          "piece": "Brick_1x2",
+          "position": [
+            7.5,
+            7.2,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0076",
+          "piece": "Brick_1x2",
+          "position": [
+            -7.5,
+            7.2,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0077",
+          "piece": "Brick_1x2",
+          "position": [
+            -4.5,
+            7.2,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0078",
+          "piece": "Brick_1x2",
+          "position": [
+            -3.5,
+            7.2,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0079",
+          "piece": "Brick_1x2",
+          "position": [
+            -0.5,
+            7.2,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0080",
+          "piece": "Brick_1x2",
+          "position": [
+            0.5,
+            7.2,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0081",
+          "piece": "Brick_1x2",
+          "position": [
+            3.5,
+            7.2,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0082",
+          "piece": "Brick_1x2",
+          "position": [
+            4.5,
+            7.2,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0083",
+          "piece": "Brick_1x2",
+          "position": [
+            7.5,
+            7.2,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0084",
+          "piece": "Brick_2x3",
+          "position": [
+            -9,
+            8.4,
+            -6.5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0085",
+          "piece": "Brick_2x6",
+          "position": [
+            -9,
+            8.4,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0086",
+          "piece": "Brick_2x3",
+          "position": [
+            -9,
+            8.4,
+            6.5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0087",
+          "piece": "Brick_2x3",
+          "position": [
+            9,
+            8.4,
+            -6.5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0088",
+          "piece": "Brick_2x6",
+          "position": [
+            9,
+            8.4,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0089",
+          "piece": "Brick_2x3",
+          "position": [
+            9,
+            8.4,
+            6.5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0090",
+          "piece": "Brick_1x2",
+          "position": [
+            -7.5,
+            8.4,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0091",
+          "piece": "Brick_1x2",
+          "position": [
+            -4.5,
+            8.4,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0092",
+          "piece": "Brick_1x2",
+          "position": [
+            -3.5,
+            8.4,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0093",
+          "piece": "Brick_1x2",
+          "position": [
+            -0.5,
+            8.4,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0094",
+          "piece": "Brick_1x2",
+          "position": [
+            0.5,
+            8.4,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0095",
+          "piece": "Brick_1x2",
+          "position": [
+            3.5,
+            8.4,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0096",
+          "piece": "Brick_1x2",
+          "position": [
+            4.5,
+            8.4,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0097",
+          "piece": "Brick_1x2",
+          "position": [
+            7.5,
+            8.4,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0098",
+          "piece": "Brick_1x2",
+          "position": [
+            -7.5,
+            8.4,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0099",
+          "piece": "Brick_1x2",
+          "position": [
+            -4.5,
+            8.4,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0100",
+          "piece": "Brick_1x2",
+          "position": [
+            -3.5,
+            8.4,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0101",
+          "piece": "Brick_1x2",
+          "position": [
+            -0.5,
+            8.4,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0102",
+          "piece": "Brick_1x2",
+          "position": [
+            0.5,
+            8.4,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0103",
+          "piece": "Brick_1x2",
+          "position": [
+            3.5,
+            8.4,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0104",
+          "piece": "Brick_1x2",
+          "position": [
+            4.5,
+            8.4,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0105",
+          "piece": "Brick_1x2",
+          "position": [
+            7.5,
+            8.4,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0106",
+          "piece": "Brick_2x8",
+          "position": [
+            -9,
+            9.6,
+            -4
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0107",
+          "piece": "Brick_2x8",
+          "position": [
+            -9,
+            9.6,
+            4
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0108",
+          "piece": "Brick_2x8",
+          "position": [
+            9,
+            9.6,
+            -4
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0109",
+          "piece": "Brick_2x8",
+          "position": [
+            9,
+            9.6,
+            4
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0110",
+          "piece": "Brick_2x8",
+          "position": [
+            -4,
+            9.6,
+            -7
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0111",
+          "piece": "Brick_2x8",
+          "position": [
+            4,
+            9.6,
+            -7
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0112",
+          "piece": "Brick_2x8",
+          "position": [
+            -4,
+            9.6,
+            7
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0113",
+          "piece": "Brick_2x8",
+          "position": [
+            4,
+            9.6,
+            7
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0114",
+          "piece": "Brick_2x8",
+          "position": [
+            -9,
+            10.8,
+            -4
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0115",
+          "piece": "Brick_2x8",
+          "position": [
+            -9,
+            10.8,
+            4
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0116",
+          "piece": "Brick_2x8",
+          "position": [
+            9,
+            10.8,
+            -4
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0117",
+          "piece": "Brick_2x8",
+          "position": [
+            9,
+            10.8,
+            4
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0118",
+          "piece": "Brick_2x8",
+          "position": [
+            -4,
+            10.8,
+            -7
+          ],
+          "color": "trim",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0119",
+          "piece": "Brick_2x8",
+          "position": [
+            4,
+            10.8,
+            -7
+          ],
+          "color": "trim",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0120",
+          "piece": "Brick_2x8",
+          "position": [
+            -4,
+            10.8,
+            7
+          ],
+          "color": "trim",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0121",
+          "piece": "Brick_2x8",
+          "position": [
+            4,
+            10.8,
+            7
+          ],
+          "color": "trim",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0122",
+          "piece": "Brick_2x8",
+          "position": [
+            -9,
+            12.0,
+            -4
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0123",
+          "piece": "Brick_2x8",
+          "position": [
+            -9,
+            12.0,
+            4
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0124",
+          "piece": "Brick_2x8",
+          "position": [
+            9,
+            12.0,
+            -4
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0125",
+          "piece": "Brick_2x8",
+          "position": [
+            9,
+            12.0,
+            4
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0126",
+          "piece": "Brick_2x8",
+          "position": [
+            -4,
+            12.0,
+            -7
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0127",
+          "piece": "Brick_2x8",
+          "position": [
+            4,
+            12.0,
+            -7
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0128",
+          "piece": "Brick_2x8",
+          "position": [
+            -4,
+            12.0,
+            7
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0129",
+          "piece": "Brick_2x8",
+          "position": [
+            4,
+            12.0,
+            7
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0130",
+          "piece": "Brick_2x8",
+          "position": [
+            -9,
+            13.2,
+            -4
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0131",
+          "piece": "Brick_2x8",
+          "position": [
+            -9,
+            13.2,
+            4
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0132",
+          "piece": "Brick_2x8",
+          "position": [
+            9,
+            13.2,
+            -4
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0133",
+          "piece": "Brick_2x8",
+          "position": [
+            9,
+            13.2,
+            4
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0134",
+          "piece": "Brick_2x8",
+          "position": [
+            -4,
+            13.2,
+            -7
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0135",
+          "piece": "Brick_2x8",
+          "position": [
+            4,
+            13.2,
+            -7
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0136",
+          "piece": "Brick_2x8",
+          "position": [
+            -4,
+            13.2,
+            7
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0137",
+          "piece": "Brick_2x8",
+          "position": [
+            4,
+            13.2,
+            7
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0138",
+          "piece": "Brick_2x3",
+          "position": [
+            -9,
+            14.4,
+            -6.5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0139",
+          "piece": "Brick_2x6",
+          "position": [
+            -9,
+            14.4,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0140",
+          "piece": "Brick_2x3",
+          "position": [
+            -9,
+            14.4,
+            6.5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0141",
+          "piece": "Brick_2x3",
+          "position": [
+            9,
+            14.4,
+            -6.5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0142",
+          "piece": "Brick_2x6",
+          "position": [
+            9,
+            14.4,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0143",
+          "piece": "Brick_2x3",
+          "position": [
+            9,
+            14.4,
+            6.5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0144",
+          "piece": "Brick_1x2",
+          "position": [
+            -7.5,
+            14.4,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0145",
+          "piece": "Brick_1x2",
+          "position": [
+            -4.5,
+            14.4,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0146",
+          "piece": "Brick_1x2",
+          "position": [
+            -3.5,
+            14.4,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0147",
+          "piece": "Brick_1x2",
+          "position": [
+            -0.5,
+            14.4,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0148",
+          "piece": "Brick_1x2",
+          "position": [
+            0.5,
+            14.4,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0149",
+          "piece": "Brick_1x2",
+          "position": [
+            3.5,
+            14.4,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0150",
+          "piece": "Brick_1x2",
+          "position": [
+            4.5,
+            14.4,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0151",
+          "piece": "Brick_1x2",
+          "position": [
+            7.5,
+            14.4,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0152",
+          "piece": "Brick_1x2",
+          "position": [
+            -7.5,
+            14.4,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0153",
+          "piece": "Brick_1x2",
+          "position": [
+            -4.5,
+            14.4,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0154",
+          "piece": "Brick_1x2",
+          "position": [
+            -3.5,
+            14.4,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0155",
+          "piece": "Brick_1x2",
+          "position": [
+            -0.5,
+            14.4,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0156",
+          "piece": "Brick_1x2",
+          "position": [
+            0.5,
+            14.4,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0157",
+          "piece": "Brick_1x2",
+          "position": [
+            3.5,
+            14.4,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0158",
+          "piece": "Brick_1x2",
+          "position": [
+            4.5,
+            14.4,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0159",
+          "piece": "Brick_1x2",
+          "position": [
+            7.5,
+            14.4,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0160",
+          "piece": "Brick_2x3",
+          "position": [
+            -9,
+            15.6,
+            -6.5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0161",
+          "piece": "Brick_2x6",
+          "position": [
+            -9,
+            15.6,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0162",
+          "piece": "Brick_2x3",
+          "position": [
+            -9,
+            15.6,
+            6.5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0163",
+          "piece": "Brick_2x3",
+          "position": [
+            9,
+            15.6,
+            -6.5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0164",
+          "piece": "Brick_2x6",
+          "position": [
+            9,
+            15.6,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0165",
+          "piece": "Brick_2x3",
+          "position": [
+            9,
+            15.6,
+            6.5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0166",
+          "piece": "Brick_1x2",
+          "position": [
+            -7.5,
+            15.6,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0167",
+          "piece": "Brick_1x2",
+          "position": [
+            -4.5,
+            15.6,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0168",
+          "piece": "Brick_1x2",
+          "position": [
+            -3.5,
+            15.6,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0169",
+          "piece": "Brick_1x2",
+          "position": [
+            -0.5,
+            15.6,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0170",
+          "piece": "Brick_1x2",
+          "position": [
+            0.5,
+            15.6,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0171",
+          "piece": "Brick_1x2",
+          "position": [
+            3.5,
+            15.6,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0172",
+          "piece": "Brick_1x2",
+          "position": [
+            4.5,
+            15.6,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0173",
+          "piece": "Brick_1x2",
+          "position": [
+            7.5,
+            15.6,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0174",
+          "piece": "Brick_1x2",
+          "position": [
+            -7.5,
+            15.6,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0175",
+          "piece": "Brick_1x2",
+          "position": [
+            -4.5,
+            15.6,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0176",
+          "piece": "Brick_1x2",
+          "position": [
+            -3.5,
+            15.6,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0177",
+          "piece": "Brick_1x2",
+          "position": [
+            -0.5,
+            15.6,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0178",
+          "piece": "Brick_1x2",
+          "position": [
+            0.5,
+            15.6,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0179",
+          "piece": "Brick_1x2",
+          "position": [
+            3.5,
+            15.6,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0180",
+          "piece": "Brick_1x2",
+          "position": [
+            4.5,
+            15.6,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0181",
+          "piece": "Brick_1x2",
+          "position": [
+            7.5,
+            15.6,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0182",
+          "piece": "Brick_2x3",
+          "position": [
+            -9,
+            16.8,
+            -6.5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0183",
+          "piece": "Brick_2x6",
+          "position": [
+            -9,
+            16.8,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0184",
+          "piece": "Brick_2x3",
+          "position": [
+            -9,
+            16.8,
+            6.5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0185",
+          "piece": "Brick_2x3",
+          "position": [
+            9,
+            16.8,
+            -6.5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0186",
+          "piece": "Brick_2x6",
+          "position": [
+            9,
+            16.8,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0187",
+          "piece": "Brick_2x3",
+          "position": [
+            9,
+            16.8,
+            6.5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0188",
+          "piece": "Brick_1x2",
+          "position": [
+            -7.5,
+            16.8,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0189",
+          "piece": "Brick_1x2",
+          "position": [
+            -4.5,
+            16.8,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0190",
+          "piece": "Brick_1x2",
+          "position": [
+            -3.5,
+            16.8,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0191",
+          "piece": "Brick_1x2",
+          "position": [
+            -0.5,
+            16.8,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0192",
+          "piece": "Brick_1x2",
+          "position": [
+            0.5,
+            16.8,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0193",
+          "piece": "Brick_1x2",
+          "position": [
+            3.5,
+            16.8,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0194",
+          "piece": "Brick_1x2",
+          "position": [
+            4.5,
+            16.8,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0195",
+          "piece": "Brick_1x2",
+          "position": [
+            7.5,
+            16.8,
+            -7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0196",
+          "piece": "Brick_1x2",
+          "position": [
+            -7.5,
+            16.8,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0197",
+          "piece": "Brick_1x2",
+          "position": [
+            -4.5,
+            16.8,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0198",
+          "piece": "Brick_1x2",
+          "position": [
+            -3.5,
+            16.8,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0199",
+          "piece": "Brick_1x2",
+          "position": [
+            -0.5,
+            16.8,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0200",
+          "piece": "Brick_1x2",
+          "position": [
+            0.5,
+            16.8,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0201",
+          "piece": "Brick_1x2",
+          "position": [
+            3.5,
+            16.8,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0202",
+          "piece": "Brick_1x2",
+          "position": [
+            4.5,
+            16.8,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0203",
+          "piece": "Brick_1x2",
+          "position": [
+            7.5,
+            16.8,
+            7
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0204",
+          "piece": "Brick_2x8",
+          "position": [
+            -9,
+            18.0,
+            -4
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0205",
+          "piece": "Brick_2x8",
+          "position": [
+            -9,
+            18.0,
+            4
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0206",
+          "piece": "Brick_2x8",
+          "position": [
+            9,
+            18.0,
+            -4
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0207",
+          "piece": "Brick_2x8",
+          "position": [
+            9,
+            18.0,
+            4
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0208",
+          "piece": "Brick_2x8",
+          "position": [
+            -4,
+            18.0,
+            -7
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0209",
+          "piece": "Brick_2x8",
+          "position": [
+            4,
+            18.0,
+            -7
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0210",
+          "piece": "Brick_2x8",
+          "position": [
+            -4,
+            18.0,
+            7
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0211",
+          "piece": "Brick_2x8",
+          "position": [
+            4,
+            18.0,
+            7
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0212",
+          "piece": "Brick_2x8",
+          "position": [
+            -9,
+            19.2,
+            -4
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0213",
+          "piece": "Brick_2x8",
+          "position": [
+            -9,
+            19.2,
+            4
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0214",
+          "piece": "Brick_2x8",
+          "position": [
+            9,
+            19.2,
+            -4
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0215",
+          "piece": "Brick_2x8",
+          "position": [
+            9,
+            19.2,
+            4
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0216",
+          "piece": "Brick_2x8",
+          "position": [
+            -4,
+            19.2,
+            -7
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0217",
+          "piece": "Brick_2x8",
+          "position": [
+            4,
+            19.2,
+            -7
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0218",
+          "piece": "Brick_2x8",
+          "position": [
+            -4,
+            19.2,
+            7
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0219",
+          "piece": "Brick_2x8",
+          "position": [
+            4,
+            19.2,
+            7
+          ],
+          "color": "stone",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0220",
+          "piece": "Brick_2x8",
+          "position": [
+            -9,
+            20.4,
+            -4
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0221",
+          "piece": "Brick_2x8",
+          "position": [
+            -9,
+            20.4,
+            4
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0222",
+          "piece": "Brick_2x8",
+          "position": [
+            9,
+            20.4,
+            -4
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0223",
+          "piece": "Brick_2x8",
+          "position": [
+            9,
+            20.4,
+            4
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0224",
+          "piece": "Brick_2x8",
+          "position": [
+            -4,
+            20.4,
+            -7
+          ],
+          "color": "trim",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0225",
+          "piece": "Brick_2x8",
+          "position": [
+            4,
+            20.4,
+            -7
+          ],
+          "color": "trim",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0226",
+          "piece": "Brick_2x8",
+          "position": [
+            -4,
+            20.4,
+            7
+          ],
+          "color": "trim",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0227",
+          "piece": "Brick_2x8",
+          "position": [
+            4,
+            20.4,
+            7
+          ],
+          "color": "trim",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0228",
+          "piece": "Plate_2x4",
+          "position": [
+            -9.0,
+            21.6,
+            -6.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0229",
+          "piece": "Plate_2x4",
+          "position": [
+            -9.0,
+            21.6,
+            -2.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0230",
+          "piece": "Plate_2x4",
+          "position": [
+            -9.0,
+            21.6,
+            2.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0231",
+          "piece": "Plate_2x4",
+          "position": [
+            -9.0,
+            21.6,
+            6.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0232",
+          "piece": "Plate_2x4",
+          "position": [
+            -7.0,
+            21.6,
+            -6.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0233",
+          "piece": "Plate_2x4",
+          "position": [
+            -7.0,
+            21.6,
+            -2.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0234",
+          "piece": "Plate_2x4",
+          "position": [
+            -7.0,
+            21.6,
+            2.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0235",
+          "piece": "Plate_2x4",
+          "position": [
+            -7.0,
+            21.6,
+            6.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0236",
+          "piece": "Plate_2x4",
+          "position": [
+            -5.0,
+            21.6,
+            -6.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0237",
+          "piece": "Plate_2x4",
+          "position": [
+            -5.0,
+            21.6,
+            -2.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0238",
+          "piece": "Plate_2x4",
+          "position": [
+            -5.0,
+            21.6,
+            2.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0239",
+          "piece": "Plate_2x4",
+          "position": [
+            -5.0,
+            21.6,
+            6.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0240",
+          "piece": "Plate_2x4",
+          "position": [
+            -3.0,
+            21.6,
+            -6.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0241",
+          "piece": "Plate_2x4",
+          "position": [
+            -3.0,
+            21.6,
+            -2.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0242",
+          "piece": "Plate_2x4",
+          "position": [
+            -3.0,
+            21.6,
+            2.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0243",
+          "piece": "Plate_2x4",
+          "position": [
+            -3.0,
+            21.6,
+            6.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0244",
+          "piece": "Plate_2x4",
+          "position": [
+            -1.0,
+            21.6,
+            -6.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0245",
+          "piece": "Plate_2x4",
+          "position": [
+            -1.0,
+            21.6,
+            -2.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0246",
+          "piece": "Plate_2x4",
+          "position": [
+            -1.0,
+            21.6,
+            2.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0247",
+          "piece": "Plate_2x4",
+          "position": [
+            -1.0,
+            21.6,
+            6.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0248",
+          "piece": "Plate_2x4",
+          "position": [
+            1.0,
+            21.6,
+            -6.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0249",
+          "piece": "Plate_2x4",
+          "position": [
+            1.0,
+            21.6,
+            -2.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0250",
+          "piece": "Plate_2x4",
+          "position": [
+            1.0,
+            21.6,
+            2.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0251",
+          "piece": "Plate_2x4",
+          "position": [
+            1.0,
+            21.6,
+            6.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0252",
+          "piece": "Plate_2x4",
+          "position": [
+            3.0,
+            21.6,
+            -6.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0253",
+          "piece": "Plate_2x4",
+          "position": [
+            3.0,
+            21.6,
+            -2.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0254",
+          "piece": "Plate_2x4",
+          "position": [
+            3.0,
+            21.6,
+            2.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0255",
+          "piece": "Plate_2x4",
+          "position": [
+            3.0,
+            21.6,
+            6.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0256",
+          "piece": "Plate_2x4",
+          "position": [
+            5.0,
+            21.6,
+            -6.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0257",
+          "piece": "Plate_2x4",
+          "position": [
+            5.0,
+            21.6,
+            -2.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0258",
+          "piece": "Plate_2x4",
+          "position": [
+            5.0,
+            21.6,
+            2.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0259",
+          "piece": "Plate_2x4",
+          "position": [
+            5.0,
+            21.6,
+            6.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0260",
+          "piece": "Plate_2x4",
+          "position": [
+            7.0,
+            21.6,
+            -6.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0261",
+          "piece": "Plate_2x4",
+          "position": [
+            7.0,
+            21.6,
+            -2.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0262",
+          "piece": "Plate_2x4",
+          "position": [
+            7.0,
+            21.6,
+            2.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0263",
+          "piece": "Plate_2x4",
+          "position": [
+            7.0,
+            21.6,
+            6.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0264",
+          "piece": "Plate_2x4",
+          "position": [
+            9.0,
+            21.6,
+            -6.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0265",
+          "piece": "Plate_2x4",
+          "position": [
+            9.0,
+            21.6,
+            -2.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0266",
+          "piece": "Plate_2x4",
+          "position": [
+            9.0,
+            21.6,
+            2.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0267",
+          "piece": "Plate_2x4",
+          "position": [
+            9.0,
+            21.6,
+            6.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0268",
+          "piece": "Brick_2x8",
+          "position": [
+            -9.0,
+            22.0,
+            -4.0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0269",
+          "piece": "Brick_2x8",
+          "position": [
+            -9.0,
+            22.0,
+            4.0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0270",
+          "piece": "Brick_2x8",
+          "position": [
+            -7.0,
+            22.0,
+            -4.0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0271",
+          "piece": "Brick_2x8",
+          "position": [
+            -7.0,
+            22.0,
+            4.0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0272",
+          "piece": "Brick_2x8",
+          "position": [
+            -5.0,
+            22.0,
+            -4.0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0273",
+          "piece": "Brick_2x8",
+          "position": [
+            -5.0,
+            22.0,
+            4.0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0274",
+          "piece": "Brick_2x8",
+          "position": [
+            -3.0,
+            22.0,
+            -4.0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0275",
+          "piece": "Brick_2x8",
+          "position": [
+            -3.0,
+            22.0,
+            4.0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0276",
+          "piece": "Brick_2x8",
+          "position": [
+            -1.0,
+            22.0,
+            -4.0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0277",
+          "piece": "Brick_2x8",
+          "position": [
+            -1.0,
+            22.0,
+            4.0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0278",
+          "piece": "Brick_2x8",
+          "position": [
+            1.0,
+            22.0,
+            -4.0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0279",
+          "piece": "Brick_2x8",
+          "position": [
+            1.0,
+            22.0,
+            4.0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0280",
+          "piece": "Brick_2x8",
+          "position": [
+            3.0,
+            22.0,
+            -4.0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0281",
+          "piece": "Brick_2x8",
+          "position": [
+            3.0,
+            22.0,
+            4.0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0282",
+          "piece": "Brick_2x8",
+          "position": [
+            5.0,
+            22.0,
+            -4.0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0283",
+          "piece": "Brick_2x8",
+          "position": [
+            5.0,
+            22.0,
+            4.0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0284",
+          "piece": "Brick_2x8",
+          "position": [
+            7.0,
+            22.0,
+            -4.0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0285",
+          "piece": "Brick_2x8",
+          "position": [
+            7.0,
+            22.0,
+            4.0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0286",
+          "piece": "Brick_2x8",
+          "position": [
+            9.0,
+            22.0,
+            -4.0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0287",
+          "piece": "Brick_2x8",
+          "position": [
+            9.0,
+            22.0,
+            4.0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0288",
+          "piece": "Brick_2x8",
+          "position": [
+            -7.0,
+            23.2,
+            -2.0
+          ],
+          "color": "roof_light"
+        },
+        {
+          "id": "p0289",
+          "piece": "Brick_2x4",
+          "position": [
+            -7.0,
+            23.2,
+            4.0
+          ],
+          "color": "roof_light"
+        },
+        {
+          "id": "p0290",
+          "piece": "Brick_2x8",
+          "position": [
+            -5.0,
+            23.2,
+            -2.0
+          ],
+          "color": "roof_light"
+        },
+        {
+          "id": "p0291",
+          "piece": "Brick_2x4",
+          "position": [
+            -5.0,
+            23.2,
+            4.0
+          ],
+          "color": "roof_light"
+        },
+        {
+          "id": "p0292",
+          "piece": "Brick_2x8",
+          "position": [
+            -3.0,
+            23.2,
+            -2.0
+          ],
+          "color": "roof_light"
+        },
+        {
+          "id": "p0293",
+          "piece": "Brick_2x4",
+          "position": [
+            -3.0,
+            23.2,
+            4.0
+          ],
+          "color": "roof_light"
+        },
+        {
+          "id": "p0294",
+          "piece": "Brick_2x8",
+          "position": [
+            -1.0,
+            23.2,
+            -2.0
+          ],
+          "color": "roof_light"
+        },
+        {
+          "id": "p0295",
+          "piece": "Brick_2x4",
+          "position": [
+            -1.0,
+            23.2,
+            4.0
+          ],
+          "color": "roof_light"
+        },
+        {
+          "id": "p0296",
+          "piece": "Brick_2x8",
+          "position": [
+            1.0,
+            23.2,
+            -2.0
+          ],
+          "color": "roof_light"
+        },
+        {
+          "id": "p0297",
+          "piece": "Brick_2x4",
+          "position": [
+            1.0,
+            23.2,
+            4.0
+          ],
+          "color": "roof_light"
+        },
+        {
+          "id": "p0298",
+          "piece": "Brick_2x8",
+          "position": [
+            3.0,
+            23.2,
+            -2.0
+          ],
+          "color": "roof_light"
+        },
+        {
+          "id": "p0299",
+          "piece": "Brick_2x4",
+          "position": [
+            3.0,
+            23.2,
+            4.0
+          ],
+          "color": "roof_light"
+        },
+        {
+          "id": "p0300",
+          "piece": "Brick_2x8",
+          "position": [
+            5.0,
+            23.2,
+            -2.0
+          ],
+          "color": "roof_light"
+        },
+        {
+          "id": "p0301",
+          "piece": "Brick_2x4",
+          "position": [
+            5.0,
+            23.2,
+            4.0
+          ],
+          "color": "roof_light"
+        },
+        {
+          "id": "p0302",
+          "piece": "Brick_2x8",
+          "position": [
+            7.0,
+            23.2,
+            -2.0
+          ],
+          "color": "roof_light"
+        },
+        {
+          "id": "p0303",
+          "piece": "Brick_2x4",
+          "position": [
+            7.0,
+            23.2,
+            4.0
+          ],
+          "color": "roof_light"
+        },
+        {
+          "id": "p0304",
+          "piece": "Brick_2x8",
+          "position": [
+            -5.0,
+            24.4,
+            0.0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0305",
+          "piece": "Brick_2x8",
+          "position": [
+            -3.0,
+            24.4,
+            0.0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0306",
+          "piece": "Brick_2x8",
+          "position": [
+            -1.0,
+            24.4,
+            0.0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0307",
+          "piece": "Brick_2x8",
+          "position": [
+            1.0,
+            24.4,
+            0.0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0308",
+          "piece": "Brick_2x8",
+          "position": [
+            3.0,
+            24.4,
+            0.0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0309",
+          "piece": "Brick_2x8",
+          "position": [
+            5.0,
+            24.4,
+            0.0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0310",
+          "piece": "Brick_2x4",
+          "position": [
+            -3.0,
+            25.6,
+            0.0
+          ],
+          "color": "roof_light"
+        },
+        {
+          "id": "p0311",
+          "piece": "Brick_2x4",
+          "position": [
+            -1.0,
+            25.6,
+            0.0
+          ],
+          "color": "roof_light"
+        },
+        {
+          "id": "p0312",
+          "piece": "Brick_2x4",
+          "position": [
+            1.0,
+            25.6,
+            0.0
+          ],
+          "color": "roof_light"
+        },
+        {
+          "id": "p0313",
+          "piece": "Brick_2x4",
+          "position": [
+            3.0,
+            25.6,
+            0.0
+          ],
+          "color": "roof_light"
+        },
+        {
+          "id": "p0314",
+          "piece": "Brick_2x2",
+          "position": [
+            -1.0,
+            26.8,
+            0.0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0315",
+          "piece": "Brick_2x2",
+          "position": [
+            1.0,
+            26.8,
+            0.0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0316",
+          "piece": "Plain_Cylinder",
+          "position": [
+            -1,
+            28.225,
+            0
+          ],
+          "color": "gold"
+        },
+        {
+          "id": "p0317",
+          "piece": "Plain_Cylinder",
+          "position": [
+            1,
+            28.225,
+            0
+          ],
+          "color": "gold"
+        },
+        {
+          "id": "p0318",
+          "piece": "Tile_2x4",
+          "position": [
+            -5,
+            3.6,
+            -8.4
+          ],
+          "color": "banner",
+          "rotation": [
+            90,
+            0,
+            0
+          ]
+        },
+        {
+          "id": "p0319",
+          "piece": "Tile_1x1",
+          "position": [
+            -5,
+            3.6,
+            -8.8
+          ],
+          "color": "gold",
+          "rotation": [
+            90,
+            0,
+            0
+          ]
+        },
+        {
+          "id": "p0320",
+          "piece": "Tile_2x4",
+          "position": [
+            5,
+            3.6,
+            -8.4
+          ],
+          "color": "banner",
+          "rotation": [
+            90,
+            0,
+            0
+          ]
+        },
+        {
+          "id": "p0321",
+          "piece": "Tile_1x1",
+          "position": [
+            5,
+            3.6,
+            -8.8
+          ],
+          "color": "gold",
+          "rotation": [
+            90,
+            0,
+            0
+          ]
+        }
+      ]
+    },
+    "side_hall": {
+      "parts": [
+        {
+          "id": "p0000",
+          "piece": "Brick_2x6",
+          "position": [
+            -2,
+            0.0,
+            -3
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0001",
+          "piece": "Brick_2x6",
+          "position": [
+            -2,
+            0.0,
+            3
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0002",
+          "piece": "Brick_2x6",
+          "position": [
+            2,
+            0.0,
+            -3
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0003",
+          "piece": "Brick_2x6",
+          "position": [
+            2,
+            0.0,
+            3
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0004",
+          "piece": "Brick_2x2",
+          "position": [
+            0,
+            0.0,
+            5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0005",
+          "piece": "Brick_2x6",
+          "position": [
+            -2,
+            1.2,
+            -3
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0006",
+          "piece": "Brick_2x6",
+          "position": [
+            -2,
+            1.2,
+            3
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0007",
+          "piece": "Brick_2x6",
+          "position": [
+            2,
+            1.2,
+            -3
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0008",
+          "piece": "Brick_2x6",
+          "position": [
+            2,
+            1.2,
+            3
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0009",
+          "piece": "Brick_2x2",
+          "position": [
+            0,
+            1.2,
+            5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0010",
+          "piece": "Brick_2x3",
+          "position": [
+            -2,
+            2.4,
+            -4.5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0011",
+          "piece": "Brick_2x3",
+          "position": [
+            -2,
+            2.4,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0012",
+          "piece": "Brick_2x3",
+          "position": [
+            -2,
+            2.4,
+            4.5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0013",
+          "piece": "Brick_2x3",
+          "position": [
+            2,
+            2.4,
+            -4.5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0014",
+          "piece": "Brick_2x3",
+          "position": [
+            2,
+            2.4,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0015",
+          "piece": "Brick_2x3",
+          "position": [
+            2,
+            2.4,
+            4.5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0016",
+          "piece": "Brick_2x2",
+          "position": [
+            0,
+            2.4,
+            5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0017",
+          "piece": "Brick_2x3",
+          "position": [
+            -2,
+            3.6,
+            -4.5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0018",
+          "piece": "Brick_2x3",
+          "position": [
+            -2,
+            3.6,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0019",
+          "piece": "Brick_2x3",
+          "position": [
+            -2,
+            3.6,
+            4.5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0020",
+          "piece": "Brick_2x3",
+          "position": [
+            2,
+            3.6,
+            -4.5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0021",
+          "piece": "Brick_2x3",
+          "position": [
+            2,
+            3.6,
+            0
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0022",
+          "piece": "Brick_2x3",
+          "position": [
+            2,
+            3.6,
+            4.5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0023",
+          "piece": "Brick_2x2",
+          "position": [
+            0,
+            3.6,
+            5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0024",
+          "piece": "Brick_2x6",
+          "position": [
+            -2,
+            4.8,
+            -3
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0025",
+          "piece": "Brick_2x6",
+          "position": [
+            -2,
+            4.8,
+            3
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0026",
+          "piece": "Brick_2x6",
+          "position": [
+            2,
+            4.8,
+            -3
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0027",
+          "piece": "Brick_2x6",
+          "position": [
+            2,
+            4.8,
+            3
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0028",
+          "piece": "Brick_2x2",
+          "position": [
+            0,
+            4.8,
+            5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0029",
+          "piece": "Brick_2x2",
+          "position": [
+            0,
+            4.8,
+            -5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0030",
+          "piece": "Brick_2x6",
+          "position": [
+            -2,
+            6.0,
+            -3
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0031",
+          "piece": "Brick_2x6",
+          "position": [
+            -2,
+            6.0,
+            3
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0032",
+          "piece": "Brick_2x6",
+          "position": [
+            2,
+            6.0,
+            -3
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0033",
+          "piece": "Brick_2x6",
+          "position": [
+            2,
+            6.0,
+            3
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0034",
+          "piece": "Brick_2x2",
+          "position": [
+            0,
+            6.0,
+            5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0035",
+          "piece": "Brick_2x2",
+          "position": [
+            0,
+            6.0,
+            -5
+          ],
+          "color": "stone"
+        },
+        {
+          "id": "p0036",
+          "piece": "Plate_2x4",
+          "position": [
+            -2.0,
+            7.2,
+            -4.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0037",
+          "piece": "Plate_2x4",
+          "position": [
+            -2.0,
+            7.2,
+            0.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0038",
+          "piece": "Plate_2x4",
+          "position": [
+            -2.0,
+            7.2,
+            4.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0039",
+          "piece": "Plate_2x4",
+          "position": [
+            0.0,
+            7.2,
+            -4.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0040",
+          "piece": "Plate_2x4",
+          "position": [
+            0.0,
+            7.2,
+            0.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0041",
+          "piece": "Plate_2x4",
+          "position": [
+            0.0,
+            7.2,
+            4.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0042",
+          "piece": "Plate_2x4",
+          "position": [
+            2.0,
+            7.2,
+            -4.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0043",
+          "piece": "Plate_2x4",
+          "position": [
+            2.0,
+            7.2,
+            0.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0044",
+          "piece": "Plate_2x4",
+          "position": [
+            2.0,
+            7.2,
+            4.0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0045",
+          "piece": "Brick_2x8",
+          "position": [
+            -2.0,
+            7.6,
+            -2.0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0046",
+          "piece": "Brick_2x4",
+          "position": [
+            -2.0,
+            7.6,
+            4.0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0047",
+          "piece": "Brick_2x8",
+          "position": [
+            0.0,
+            7.6,
+            -2.0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0048",
+          "piece": "Brick_2x4",
+          "position": [
+            0.0,
+            7.6,
+            4.0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0049",
+          "piece": "Brick_2x8",
+          "position": [
+            2.0,
+            7.6,
+            -2.0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0050",
+          "piece": "Brick_2x4",
+          "position": [
+            2.0,
+            7.6,
+            4.0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0051",
+          "piece": "Brick_2x8",
+          "position": [
+            -1.0,
+            8.8,
+            -1.0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0052",
+          "piece": "Brick_2x2",
+          "position": [
+            -1.0,
+            8.8,
+            4.0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0053",
+          "piece": "Brick_2x8",
+          "position": [
+            1.0,
+            8.8,
+            -1.0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0054",
+          "piece": "Brick_2x2",
+          "position": [
+            1.0,
+            8.8,
+            4.0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0055",
+          "piece": "Brick_2x8",
+          "position": [
+            0.0,
+            10.0,
+            0.0
+          ],
+          "color": "roof"
+        },
+        {
+          "id": "p0056",
+          "piece": "Roof_Prism",
+          "position": [
+            0,
+            11.425,
+            -3
+          ],
+          "color": "roof_light"
+        },
+        {
+          "id": "p0057",
+          "piece": "Roof_Prism",
+          "position": [
+            0,
+            11.425,
+            -1
+          ],
+          "color": "roof_light"
+        },
+        {
+          "id": "p0058",
+          "piece": "Roof_Prism",
+          "position": [
+            0,
+            11.425,
+            1
+          ],
+          "color": "roof_light"
+        },
+        {
+          "id": "p0059",
+          "piece": "Roof_Prism",
+          "position": [
+            0,
+            11.425,
+            3
+          ],
+          "color": "roof_light"
+        }
+      ]
+    },
+    "topiary": {
+      "parts": [
+        {
+          "id": "p0000",
+          "piece": "Brick_2x2",
+          "position": [
+            0,
+            0.0,
+            0
+          ],
+          "color": "wood"
+        },
+        {
+          "id": "p0001",
+          "piece": "Brick_2x2",
+          "position": [
+            0,
+            1.2,
+            0
+          ],
+          "color": "wood"
+        },
+        {
+          "id": "p0002",
+          "piece": "Brick_2x6",
+          "position": [
+            -2.0,
+            2.4,
+            0.0
+          ],
+          "color": "foliage"
+        },
+        {
+          "id": "p0003",
+          "piece": "Brick_2x6",
+          "position": [
+            0.0,
+            2.4,
+            0.0
+          ],
+          "color": "foliage"
+        },
+        {
+          "id": "p0004",
+          "piece": "Brick_2x6",
+          "position": [
+            2.0,
+            2.4,
+            0.0
+          ],
+          "color": "foliage"
+        },
+        {
+          "id": "p0005",
+          "piece": "Brick_2x4",
+          "position": [
+            -1.0,
+            3.6,
+            0.0
+          ],
+          "color": "foliage"
+        },
+        {
+          "id": "p0006",
+          "piece": "Brick_2x4",
+          "position": [
+            1.0,
+            3.6,
+            0.0
+          ],
+          "color": "foliage"
+        },
+        {
+          "id": "p0007",
+          "piece": "Brick_2x2",
+          "position": [
+            0.0,
+            4.8,
+            0.0
+          ],
+          "color": "foliage"
+        }
+      ]
+    },
+    "reflecting_pool": {
+      "parts": [
+        {
+          "id": "p0000",
+          "piece": "Brick_1x6",
+          "position": [
+            0,
+            0,
+            -2.5
+          ],
+          "color": "trim",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0001",
+          "piece": "Brick_1x6",
+          "position": [
+            0,
+            0,
+            2.5
+          ],
+          "color": "trim",
+          "rotation": [
+            0,
+            90,
+            0
+          ]
+        },
+        {
+          "id": "p0002",
+          "piece": "Brick_1x4",
+          "position": [
+            -2.5,
+            0,
+            0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0003",
+          "piece": "Brick_1x4",
+          "position": [
+            2.5,
+            0,
+            0
+          ],
+          "color": "trim"
+        },
+        {
+          "id": "p0004",
+          "piece": "Tile_2x4",
+          "position": [
+            -1,
+            0.225,
+            0
+          ],
+          "color": "water"
+        },
+        {
+          "id": "p0005",
+          "piece": "Tile_2x4",
+          "position": [
+            1,
+            0.225,
+            0
+          ],
+          "color": "water"
+        }
+      ]
+    }
+  },
+  "instances": [
+    {
+      "id": "landscape_x-32_z-36",
+      "module": "water_cell_8x8",
+      "position": [
+        -32,
+        0,
+        -36
+      ]
+    },
+    {
+      "id": "landscape_x-32_z-28",
+      "module": "water_cell_8x8",
+      "position": [
+        -32,
+        0,
+        -28
+      ]
+    },
+    {
+      "id": "landscape_x-32_z-20",
+      "module": "water_cell_8x8",
+      "position": [
+        -32,
+        0,
+        -20
+      ]
+    },
+    {
+      "id": "landscape_x-32_z-12",
+      "module": "water_cell_8x8",
+      "position": [
+        -32,
+        0,
+        -12
+      ]
+    },
+    {
+      "id": "landscape_x-32_z-4",
+      "module": "water_cell_8x8",
+      "position": [
+        -32,
+        0,
+        -4
+      ]
+    },
+    {
+      "id": "landscape_x-32_z4",
+      "module": "water_cell_8x8",
+      "position": [
+        -32,
+        0,
+        4
+      ]
+    },
+    {
+      "id": "landscape_x-32_z12",
+      "module": "water_cell_8x8",
+      "position": [
+        -32,
+        0,
+        12
+      ]
+    },
+    {
+      "id": "landscape_x-32_z20",
+      "module": "water_cell_8x8",
+      "position": [
+        -32,
+        0,
+        20
+      ]
+    },
+    {
+      "id": "landscape_x-32_z28",
+      "module": "water_cell_8x8",
+      "position": [
+        -32,
+        0,
+        28
+      ]
+    },
+    {
+      "id": "landscape_x-32_z36",
+      "module": "water_cell_8x8",
+      "position": [
+        -32,
+        0,
+        36
+      ]
+    },
+    {
+      "id": "landscape_x-24_z-36",
+      "module": "water_cell_8x8",
+      "position": [
+        -24,
+        0,
+        -36
+      ]
+    },
+    {
+      "id": "landscape_x-24_z-28",
+      "module": "water_cell_8x8",
+      "position": [
+        -24,
+        0,
+        -28
+      ]
+    },
+    {
+      "id": "landscape_x-24_z-20",
+      "module": "island_cell_8x8",
+      "position": [
+        -24,
+        0,
+        -20
+      ]
+    },
+    {
+      "id": "landscape_x-24_z-12",
+      "module": "island_cell_8x8",
+      "position": [
+        -24,
+        0,
+        -12
+      ]
+    },
+    {
+      "id": "landscape_x-24_z-4",
+      "module": "island_cell_8x8",
+      "position": [
+        -24,
+        0,
+        -4
+      ]
+    },
+    {
+      "id": "landscape_x-24_z4",
+      "module": "island_cell_8x8",
+      "position": [
+        -24,
+        0,
+        4
+      ]
+    },
+    {
+      "id": "landscape_x-24_z12",
+      "module": "island_cell_8x8",
+      "position": [
+        -24,
+        0,
+        12
+      ]
+    },
+    {
+      "id": "landscape_x-24_z20",
+      "module": "island_cell_8x8",
+      "position": [
+        -24,
+        0,
+        20
+      ]
+    },
+    {
+      "id": "landscape_x-24_z28",
+      "module": "water_cell_8x8",
+      "position": [
+        -24,
+        0,
+        28
+      ]
+    },
+    {
+      "id": "landscape_x-24_z36",
+      "module": "water_cell_8x8",
+      "position": [
+        -24,
+        0,
+        36
+      ]
+    },
+    {
+      "id": "landscape_x-16_z-36",
+      "module": "water_cell_8x8",
+      "position": [
+        -16,
+        0,
+        -36
+      ]
+    },
+    {
+      "id": "landscape_x-16_z-28",
+      "module": "water_cell_8x8",
+      "position": [
+        -16,
+        0,
+        -28
+      ]
+    },
+    {
+      "id": "landscape_x-16_z-20",
+      "module": "island_cell_8x8",
+      "position": [
+        -16,
+        0,
+        -20
+      ]
+    },
+    {
+      "id": "landscape_x-16_z-12",
+      "module": "island_cell_8x8",
+      "position": [
+        -16,
+        0,
+        -12
+      ]
+    },
+    {
+      "id": "landscape_x-16_z-4",
+      "module": "island_cell_8x8",
+      "position": [
+        -16,
+        0,
+        -4
+      ]
+    },
+    {
+      "id": "landscape_x-16_z4",
+      "module": "island_cell_8x8",
+      "position": [
+        -16,
+        0,
+        4
+      ]
+    },
+    {
+      "id": "landscape_x-16_z12",
+      "module": "island_cell_8x8",
+      "position": [
+        -16,
+        0,
+        12
+      ]
+    },
+    {
+      "id": "landscape_x-16_z20",
+      "module": "island_cell_8x8",
+      "position": [
+        -16,
+        0,
+        20
+      ]
+    },
+    {
+      "id": "landscape_x-16_z28",
+      "module": "water_cell_8x8",
+      "position": [
+        -16,
+        0,
+        28
+      ]
+    },
+    {
+      "id": "landscape_x-16_z36",
+      "module": "water_cell_8x8",
+      "position": [
+        -16,
+        0,
+        36
+      ]
+    },
+    {
+      "id": "landscape_x-8_z-36",
+      "module": "water_cell_8x8",
+      "position": [
+        -8,
+        0,
+        -36
+      ]
+    },
+    {
+      "id": "landscape_x-8_z-28",
+      "module": "water_cell_8x8",
+      "position": [
+        -8,
+        0,
+        -28
+      ]
+    },
+    {
+      "id": "landscape_x-8_z-20",
+      "module": "island_cell_8x8",
+      "position": [
+        -8,
+        0,
+        -20
+      ]
+    },
+    {
+      "id": "landscape_x-8_z-12",
+      "module": "island_cell_8x8",
+      "position": [
+        -8,
+        0,
+        -12
+      ]
+    },
+    {
+      "id": "landscape_x-8_z-4",
+      "module": "island_cell_8x8",
+      "position": [
+        -8,
+        0,
+        -4
+      ]
+    },
+    {
+      "id": "landscape_x-8_z4",
+      "module": "island_cell_8x8",
+      "position": [
+        -8,
+        0,
+        4
+      ]
+    },
+    {
+      "id": "landscape_x-8_z12",
+      "module": "island_cell_8x8",
+      "position": [
+        -8,
+        0,
+        12
+      ]
+    },
+    {
+      "id": "landscape_x-8_z20",
+      "module": "island_cell_8x8",
+      "position": [
+        -8,
+        0,
+        20
+      ]
+    },
+    {
+      "id": "landscape_x-8_z28",
+      "module": "water_cell_8x8",
+      "position": [
+        -8,
+        0,
+        28
+      ]
+    },
+    {
+      "id": "landscape_x-8_z36",
+      "module": "water_cell_8x8",
+      "position": [
+        -8,
+        0,
+        36
+      ]
+    },
+    {
+      "id": "landscape_x0_z-36",
+      "module": "island_cell_8x8",
+      "position": [
+        0,
+        0,
+        -36
+      ]
+    },
+    {
+      "id": "landscape_x0_z-20",
+      "module": "island_cell_8x8",
+      "position": [
+        0,
+        0,
+        -20
+      ]
+    },
+    {
+      "id": "landscape_x0_z-12",
+      "module": "island_cell_8x8",
+      "position": [
+        0,
+        0,
+        -12
+      ]
+    },
+    {
+      "id": "landscape_x0_z-4",
+      "module": "island_cell_8x8",
+      "position": [
+        0,
+        0,
+        -4
+      ]
+    },
+    {
+      "id": "landscape_x0_z4",
+      "module": "island_cell_8x8",
+      "position": [
+        0,
+        0,
+        4
+      ]
+    },
+    {
+      "id": "landscape_x0_z12",
+      "module": "island_cell_8x8",
+      "position": [
+        0,
+        0,
+        12
+      ]
+    },
+    {
+      "id": "landscape_x0_z20",
+      "module": "island_cell_8x8",
+      "position": [
+        0,
+        0,
+        20
+      ]
+    },
+    {
+      "id": "landscape_x0_z28",
+      "module": "water_cell_8x8",
+      "position": [
+        0,
+        0,
+        28
+      ]
+    },
+    {
+      "id": "landscape_x0_z36",
+      "module": "water_cell_8x8",
+      "position": [
+        0,
+        0,
+        36
+      ]
+    },
+    {
+      "id": "landscape_x8_z-36",
+      "module": "water_cell_8x8",
+      "position": [
+        8,
+        0,
+        -36
+      ]
+    },
+    {
+      "id": "landscape_x8_z-28",
+      "module": "water_cell_8x8",
+      "position": [
+        8,
+        0,
+        -28
+      ]
+    },
+    {
+      "id": "landscape_x8_z-20",
+      "module": "island_cell_8x8",
+      "position": [
+        8,
+        0,
+        -20
+      ]
+    },
+    {
+      "id": "landscape_x8_z-12",
+      "module": "island_cell_8x8",
+      "position": [
+        8,
+        0,
+        -12
+      ]
+    },
+    {
+      "id": "landscape_x8_z-4",
+      "module": "island_cell_8x8",
+      "position": [
+        8,
+        0,
+        -4
+      ]
+    },
+    {
+      "id": "landscape_x8_z4",
+      "module": "island_cell_8x8",
+      "position": [
+        8,
+        0,
+        4
+      ]
+    },
+    {
+      "id": "landscape_x8_z12",
+      "module": "island_cell_8x8",
+      "position": [
+        8,
+        0,
+        12
+      ]
+    },
+    {
+      "id": "landscape_x8_z20",
+      "module": "island_cell_8x8",
+      "position": [
+        8,
+        0,
+        20
+      ]
+    },
+    {
+      "id": "landscape_x8_z28",
+      "module": "water_cell_8x8",
+      "position": [
+        8,
+        0,
+        28
+      ]
+    },
+    {
+      "id": "landscape_x8_z36",
+      "module": "water_cell_8x8",
+      "position": [
+        8,
+        0,
+        36
+      ]
+    },
+    {
+      "id": "landscape_x16_z-36",
+      "module": "water_cell_8x8",
+      "position": [
+        16,
+        0,
+        -36
+      ]
+    },
+    {
+      "id": "landscape_x16_z-28",
+      "module": "water_cell_8x8",
+      "position": [
+        16,
+        0,
+        -28
+      ]
+    },
+    {
+      "id": "landscape_x16_z-20",
+      "module": "island_cell_8x8",
+      "position": [
+        16,
+        0,
+        -20
+      ]
+    },
+    {
+      "id": "landscape_x16_z-12",
+      "module": "island_cell_8x8",
+      "position": [
+        16,
+        0,
+        -12
+      ]
+    },
+    {
+      "id": "landscape_x16_z-4",
+      "module": "island_cell_8x8",
+      "position": [
+        16,
+        0,
+        -4
+      ]
+    },
+    {
+      "id": "landscape_x16_z4",
+      "module": "island_cell_8x8",
+      "position": [
+        16,
+        0,
+        4
+      ]
+    },
+    {
+      "id": "landscape_x16_z12",
+      "module": "island_cell_8x8",
+      "position": [
+        16,
+        0,
+        12
+      ]
+    },
+    {
+      "id": "landscape_x16_z20",
+      "module": "island_cell_8x8",
+      "position": [
+        16,
+        0,
+        20
+      ]
+    },
+    {
+      "id": "landscape_x16_z28",
+      "module": "water_cell_8x8",
+      "position": [
+        16,
+        0,
+        28
+      ]
+    },
+    {
+      "id": "landscape_x16_z36",
+      "module": "water_cell_8x8",
+      "position": [
+        16,
+        0,
+        36
+      ]
+    },
+    {
+      "id": "landscape_x24_z-36",
+      "module": "water_cell_8x8",
+      "position": [
+        24,
+        0,
+        -36
+      ]
+    },
+    {
+      "id": "landscape_x24_z-28",
+      "module": "water_cell_8x8",
+      "position": [
+        24,
+        0,
+        -28
+      ]
+    },
+    {
+      "id": "landscape_x24_z-20",
+      "module": "island_cell_8x8",
+      "position": [
+        24,
+        0,
+        -20
+      ]
+    },
+    {
+      "id": "landscape_x24_z-12",
+      "module": "island_cell_8x8",
+      "position": [
+        24,
+        0,
+        -12
+      ]
+    },
+    {
+      "id": "landscape_x24_z-4",
+      "module": "island_cell_8x8",
+      "position": [
+        24,
+        0,
+        -4
+      ]
+    },
+    {
+      "id": "landscape_x24_z4",
+      "module": "island_cell_8x8",
+      "position": [
+        24,
+        0,
+        4
+      ]
+    },
+    {
+      "id": "landscape_x24_z12",
+      "module": "island_cell_8x8",
+      "position": [
+        24,
+        0,
+        12
+      ]
+    },
+    {
+      "id": "landscape_x24_z20",
+      "module": "island_cell_8x8",
+      "position": [
+        24,
+        0,
+        20
+      ]
+    },
+    {
+      "id": "landscape_x24_z28",
+      "module": "water_cell_8x8",
+      "position": [
+        24,
+        0,
+        28
+      ]
+    },
+    {
+      "id": "landscape_x24_z36",
+      "module": "water_cell_8x8",
+      "position": [
+        24,
+        0,
+        36
+      ]
+    },
+    {
+      "id": "landscape_x32_z-36",
+      "module": "water_cell_8x8",
+      "position": [
+        32,
+        0,
+        -36
+      ]
+    },
+    {
+      "id": "landscape_x32_z-28",
+      "module": "water_cell_8x8",
+      "position": [
+        32,
+        0,
+        -28
+      ]
+    },
+    {
+      "id": "landscape_x32_z-20",
+      "module": "water_cell_8x8",
+      "position": [
+        32,
+        0,
+        -20
+      ]
+    },
+    {
+      "id": "landscape_x32_z-12",
+      "module": "water_cell_8x8",
+      "position": [
+        32,
+        0,
+        -12
+      ]
+    },
+    {
+      "id": "landscape_x32_z-4",
+      "module": "water_cell_8x8",
+      "position": [
+        32,
+        0,
+        -4
+      ]
+    },
+    {
+      "id": "landscape_x32_z4",
+      "module": "water_cell_8x8",
+      "position": [
+        32,
+        0,
+        4
+      ]
+    },
+    {
+      "id": "landscape_x32_z12",
+      "module": "water_cell_8x8",
+      "position": [
+        32,
+        0,
+        12
+      ]
+    },
+    {
+      "id": "landscape_x32_z20",
+      "module": "water_cell_8x8",
+      "position": [
+        32,
+        0,
+        20
+      ]
+    },
+    {
+      "id": "landscape_x32_z28",
+      "module": "water_cell_8x8",
+      "position": [
+        32,
+        0,
+        28
+      ]
+    },
+    {
+      "id": "landscape_x32_z36",
+      "module": "water_cell_8x8",
+      "position": [
+        32,
+        0,
+        36
+      ]
+    },
+    {
+      "id": "wall_side_-24_-12",
+      "module": "curtain_wall_8",
+      "position": [
+        -24,
+        1.6,
+        -12
+      ],
+      "rotation": [
+        0,
+        180,
+        0
+      ]
+    },
+    {
+      "id": "wall_side_-24_-4",
+      "module": "curtain_wall_8",
+      "position": [
+        -24,
+        1.6,
+        -4
+      ],
+      "rotation": [
+        0,
+        180,
+        0
+      ]
+    },
+    {
+      "id": "wall_side_-24_4",
+      "module": "curtain_wall_8",
+      "position": [
+        -24,
+        1.6,
+        4
+      ],
+      "rotation": [
+        0,
+        180,
+        0
+      ]
+    },
+    {
+      "id": "wall_side_-24_12",
+      "module": "curtain_wall_8",
+      "position": [
+        -24,
+        1.6,
+        12
+      ],
+      "rotation": [
+        0,
+        180,
+        0
+      ]
+    },
+    {
+      "id": "wall_side_24_-12",
+      "module": "curtain_wall_8",
+      "position": [
+        24,
+        1.6,
+        -12
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "wall_side_24_-4",
+      "module": "curtain_wall_8",
+      "position": [
+        24,
+        1.6,
+        -4
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "wall_side_24_4",
+      "module": "curtain_wall_8",
+      "position": [
+        24,
+        1.6,
+        4
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "wall_side_24_12",
+      "module": "curtain_wall_8",
+      "position": [
+        24,
+        1.6,
+        12
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "id": "wall_rear_-16",
+      "module": "curtain_wall_8",
+      "position": [
+        -16,
+        1.6,
+        20
+      ],
+      "rotation": [
+        0,
+        -90,
+        0
+      ]
+    },
+    {
+      "id": "wall_rear_-8",
+      "module": "curtain_wall_8",
+      "position": [
+        -8,
+        1.6,
+        20
+      ],
+      "rotation": [
+        0,
+        -90,
+        0
+      ]
+    },
+    {
+      "id": "wall_rear_0",
+      "module": "curtain_wall_8",
+      "position": [
+        0,
+        1.6,
+        20
+      ],
+      "rotation": [
+        0,
+        -90,
+        0
+      ]
+    },
+    {
+      "id": "wall_rear_8",
+      "module": "curtain_wall_8",
+      "position": [
+        8,
+        1.6,
+        20
+      ],
+      "rotation": [
+        0,
+        -90,
+        0
+      ]
+    },
+    {
+      "id": "wall_rear_16",
+      "module": "curtain_wall_8",
+      "position": [
+        16,
+        1.6,
+        20
+      ],
+      "rotation": [
+        0,
+        -90,
+        0
+      ]
+    },
+    {
+      "id": "wall_front_-16",
+      "module": "curtain_wall_8",
+      "position": [
+        -16,
+        1.6,
+        -20
+      ],
+      "rotation": [
+        0,
+        90,
+        0
+      ]
+    },
+    {
+      "id": "wall_front_-8",
+      "module": "curtain_wall_8",
+      "position": [
+        -8,
+        1.6,
+        -20
+      ],
+      "rotation": [
+        0,
+        90,
+        0
+      ]
+    },
+    {
+      "id": "wall_front_8",
+      "module": "curtain_wall_8",
+      "position": [
+        8,
+        1.6,
+        -20
+      ],
+      "rotation": [
+        0,
+        90,
+        0
+      ]
+    },
+    {
+      "id": "wall_front_16",
+      "module": "curtain_wall_8",
+      "position": [
+        16,
+        1.6,
+        -20
+      ],
+      "rotation": [
+        0,
+        90,
+        0
+      ]
+    },
+    {
+      "id": "front_tower_-24",
+      "module": "battlement_tower",
+      "position": [
+        -24,
+        1.6,
+        -20
+      ]
+    },
+    {
+      "id": "rear_spire_-24",
+      "module": "spire_tower",
+      "position": [
+        -24,
+        1.6,
+        20
+      ],
+      "rotation": [
+        0,
+        180,
+        0
+      ]
+    },
+    {
+      "id": "front_tower_24",
+      "module": "battlement_tower",
+      "position": [
+        24,
+        1.6,
+        -20
+      ]
+    },
+    {
+      "id": "rear_spire_24",
+      "module": "spire_tower",
+      "position": [
+        24,
+        1.6,
+        20
+      ],
+      "rotation": [
+        0,
+        180,
+        0
+      ]
+    },
+    {
+      "id": "main_gatehouse",
+      "module": "gatehouse",
+      "position": [
+        0,
+        1.6,
+        -20
+      ]
+    },
+    {
+      "id": "approach_bridge",
+      "module": "bridge_8x8",
+      "position": [
+        0,
+        0,
+        -28
+      ]
+    },
+    {
+      "id": "central_keep",
+      "module": "great_keep",
+      "position": [
+        0,
+        1.6,
+        5
+      ]
+    },
+    {
+      "id": "side_hall_-15",
+      "module": "side_hall",
+      "position": [
+        -15,
+        1.6,
+        5
+      ]
+    },
+    {
+      "id": "side_hall_15",
+      "module": "side_hall",
+      "position": [
+        15,
+        1.6,
+        5
+      ]
+    },
+    {
+      "id": "courtyard_tree_-13",
+      "module": "topiary",
+      "position": [
+        -13,
+        1.6,
+        -10
+      ]
+    },
+    {
+      "id": "courtyard_tree_13",
+      "module": "topiary",
+      "position": [
+        13,
+        1.6,
+        -10
+      ]
+    },
+    {
+      "id": "rear_court_pool",
+      "module": "reflecting_pool",
+      "position": [
+        0,
+        1.6,
+        16
+      ]
+    }
+  ]
+}

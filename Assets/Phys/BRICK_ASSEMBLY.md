@@ -3,9 +3,9 @@
 A `brick-assembly` document describes a shape built from the 27 pieces of `Assets/Models/construction_pieces` (catalog
 `generic-construction-27-v1`) as explicit, deterministic placements, so that a castle can be exchanged between agents
 and rebuilt in Unity exactly. This is version 1 of the format (after *Brick Assembly Text Specification, version 1*).
-Nothing in the project reads it yet — the castle demo plans its castles procedurally (`BrickCastle`, see
-[README.md](README.md#castle-demo)) — so this document is the contract for the loader that will; the last section maps
-the format onto the solver's conventions.
+`BrickAssembly` (`Phys.AvbdGpu.Scenes`) reads it and the preview demo (`Preview.unity`, see
+[README.md](README.md#preview-demo)) shows every document of `Assets/Resources/Castles` on the solver; the last section
+says how the format maps onto the solver's conventions.
 
 ## Units and axes
 
@@ -156,18 +156,31 @@ cavity of the piece above make the bounding boxes intersect; that is not an unin
 
 ## In this project
 
-* **Bodies.** The castle demo's rules for the 2 x 3 brick (`BrickCastle.BrickSpec`) generalise to every piece: a part is
-  one box body of the solver, `footprint · 0.1 · s` wide and long and `h · s + margin` tall (`h` the body height in
-  metres, `margin` the 1 cm collision margin), so that resting contacts — which settle exactly one margin deep — leave
-  the models neither gapped nor overlapping; the box centre is `pivot + R · (0, (h · s − margin) / 2, 0)`, and the model
-  is drawn through `AvbdGpuRenderer.MeshRanges` with a mesh offset of `(0, −(h · s − margin) / 2, 0)`. Studs never enter
-  a box; sloped and round pieces get their bounding box (the solver is boxes only). `s` is the solver scale
-  (`BrickScale`, 5 in the demo: the toy is simulated at five times its model size so that the penalty ramp holds it, see
-  the README), so a grid coordinate becomes `x · 0.1 · s` solver metres.
-* **Snaps.** The castle's four-joints-per-overlap snap (`BrickCastle.AddSnapJoints`) is meaningful only where the lower
-  piece has studs — on bricks and plates, at the body-height pitch. Whatever rests on a tile, a ramp, a prism, the
-  cylinder or a plain piece is held by friction alone, as the format warns.
-* **Colours.** `color` (a palette key resolved to `#RRGGBB`, or the default grey) becomes the body's RGBA8 tint
-  (`AvbdGpuRenderer.SetTints`).
-* **IDs.** The loader keeps the expanded ID paths next to the body indices it returns, so that tests and diagnostics can
-  name a piece.
+`Assets/Phys/AvbdGpu/Scenes/BrickAssembly.cs` holds the catalog (`PieceCatalog`: the 27 pieces with their footprint, body
+height, studs on top and whether the underside grips studs), the reader (`BrickAssembly.Parse`: a small JSON reader, the
+validation above, module expansion into `Parts` with their ID paths, composed rotations and resolved colours, the bounds),
+a writer for the castle planner's layouts (`BrickAssembly.WriteLayout`, behind `Phys / Export Outpost as Brick
+Assembly`) and `AssemblyBuilder`, which turns an assembly into solver bodies; `PreviewDemo` drives it, `BrickAssemblyTests`
+and `PreviewSmokeTests` check it.
+
+* **Bodies.** `AssemblyBuilder.Build` adds one box per part (grouped so that parts sharing a piece and a mesh offset are one
+  draw range of `AvbdGpuRenderer.MeshRanges`; `AssemblyBodies` maps parts to bodies and back). The castle demo's rules for
+  the 2 x 3 brick (`BrickCastle.BrickSpec`) generalise to every piece: the box is the body without the studs,
+  `footprint · 0.1 · s` across and `h · s` tall, grown by the 1 cm collision `margin` along the body axis that faces down
+  (`AssemblyBuilder.DownAxis`: −y for an upright piece, +z for a cylinder lying along +z), so that resting contacts — which
+  settle exactly one margin deep — leave the models neither gapped nor overlapping, and shrunk by `Clearance` (1.25 mm per
+  side of the model, real bricks' 1.25 % of the pitch) on the two other axes, so that side-by-side boxes do not touch and
+  pass loads the snaps are not built to take. The box centre is `pivot + R · c` with `c = (0, h · s / 2, 0) + d · margin / 2`
+  (`d` the down axis), the mesh offset `−c`. Sloped and round pieces get their bounding box (the solver is boxes only).
+  `s` is the solver scale (`BrickScale`, 5 in the demo: the toy is simulated at five times its model size so that the
+  penalty ramp holds it, see the README), so a grid coordinate becomes `x · 0.1 · s` solver metres.
+* **Snaps.** `AssemblyBuilder.AddSnapJoints` is the castle's four-joints-per-overlap snap: joints at the inset corners of
+  every overlap of at least half a stud in which an upright, stud-aligned piece rests exactly one body height (within 0.02
+  studs) on a studded top — bricks and plates — and world joints for the gripping pieces on the ground; a piece a stud
+  height above a top is not nested and gets no joint. Tiles, slopes and prisms grip studs, the plain pieces do not, and
+  nothing holds on a smooth top: whatever rests there is held by friction alone, as the format warns.
+* **Diagnostics.** `AssemblyBuilder.Diagnose` reports, without touching a placement, the pieces resting on nothing, the
+  pieces resting on less than half their footprint (a piece a stud height above a top counts as resting on the studs) and
+  the intersecting pairs; the demo's HUD shows the counts and the first offending IDs.
+* **Colours and IDs.** `color` (a palette key resolved to `#RRGGBB`, or the default grey) becomes the body's RGBA8 tint
+  (`AvbdGpuRenderer.SetTints`); the expanded ID paths stay next to the bodies, so tests and diagnostics name pieces.

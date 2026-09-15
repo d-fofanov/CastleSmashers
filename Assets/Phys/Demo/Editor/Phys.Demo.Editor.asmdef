@@ -3,7 +3,8 @@
     "rootNamespace": "Phys.Demo.Editor",
     "references": [
         "Phys.Demo",
-        "Phys.AvbdGpu.Siege"
+        "Phys.AvbdGpu.Siege",
+        "Phys.AvbdGpu.Scenes"
     ],
     "includePlatforms": [
         "Editor"
