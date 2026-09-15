@@ -754,7 +754,7 @@ namespace Phys.AvbdGpu.Scenes
                         }
                 if (onGround) continue;
                 if (support < 1e-6f) { d.Floating++; if (sample.Count < 2) sample.Add(a.Parts[i].Id); }
-                else if (support < 0.5f * footprint) d.PoorlySupported++;
+                else if (support < 0.5f * footprint - 1e-3f) d.PoorlySupported++;   // exactly half (a lintel on two piers) is not less than half
             }
             d.Sample = string.Join(", ", sample);
             return d;

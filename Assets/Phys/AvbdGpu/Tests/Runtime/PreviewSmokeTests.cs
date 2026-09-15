@@ -11,7 +11,7 @@ namespace Phys.AvbdGpu.Tests
 {
     /// <summary>PlayMode: the preview demo loads the castles of Resources/Castles and draws every piece with its model; the Outpost
     /// exported from the castle planner stands dry-stacked and snapped and loses bricks to a cannonball; the Emerald Crown Citadel
-    /// (an agent's design of unbonded columns and floating pieces) loads, is diagnosed and runs without blowing up.</summary>
+    /// (an agent's design re-bonded by Tools/rebond_castle.py) stands dry-stacked and holds snapped.</summary>
     public class PreviewSmokeTests
     {
         GameObject m_Root;
@@ -49,7 +49,7 @@ namespace Phys.AvbdGpu.Tests
         {
             int index = m_Demo.IndexOf(name);
             Assert.GreaterOrEqual(index, 0, $"{name}.json in Resources/Castles");
-            if (m_Demo.Scene != index || m_Demo.Assembly == null) m_Demo.Load(index);
+            m_Demo.Load(index);   // always: the snap setting may have changed since the demo built the scene
             Assert.IsNull(m_Demo.Error, m_Demo.Error);
             Assert.AreEqual(m_Demo.Bodies.Groups.Count, m_Demo.Renderer.MeshRanges.Count, "every group of pieces is drawn with its model");
             int drawn = 0;
@@ -123,19 +123,31 @@ namespace Phys.AvbdGpu.Tests
         }
 
         [UnityTest]
-        public IEnumerator CitadelLoadsIsDiagnosedAndRuns()
+        public IEnumerator CitadelStandsDryStacked()
         {
             LoadCastle("emerald_crown_citadel");
-            Assert.AreEqual(1983, m_Demo.PartCount);
+            Assert.Greater(m_Demo.PartCount, 2000);
             var d = m_Demo.Diagnostics;
-            Assert.Greater(d.Floating, 0, "the design has floating pieces, and the demo says so");
             Assert.AreEqual(0, d.Intersections);
+            Assert.AreEqual(7, d.Floating, "the portcullis teeth and the trees' outer foliage: " + d.Sample);
             yield return Run(180);
             var stats = m_Demo.World.GetStatsSync();
             Assert.AreEqual(0, stats.OverflowFlags);
-            // the unbonded columns and towers topple, the landscape of plates and tiles on the ground stays
-            Assert.Greater(m_Moves.still, m_Demo.PartCount / 2, "more than half of the pieces stay within a quarter of a brick height");
-            Assert.Greater(m_Moves.groundStill, 0.9f, "the pieces on the ground stay put");
+            Debug.Log($"dry citadel: max {m_Moves.max * 1000f:F0} mm, mean {m_Moves.mean * 1000f:F1} mm, still {m_Moves.still}/{m_Demo.PartCount}");
+            Assert.Greater(m_Moves.still, m_Demo.PartCount * 9 / 10, "nine of ten pieces stay within a quarter of a brick height");
+            Assert.Greater(m_Moves.groundStill, 0.95f, "the pieces on the ground stay put");
+        }
+
+        [UnityTest]
+        public IEnumerator CitadelHoldsSnapped()
+        {
+            m_Demo.Snap = true;
+            LoadCastle("emerald_crown_citadel");
+            Assert.Greater(m_Demo.SnapJoints, 8000);
+            yield return Run(120);
+            Debug.Log($"snapped citadel: max {m_Moves.max * 1000f:F0} mm, mean {m_Moves.mean * 1000f:F1} mm, still {m_Moves.still}/{m_Demo.PartCount}, broken {BrokenJoints()}: {BrokenSummary()}");
+            Assert.Greater(m_Moves.still, m_Demo.PartCount - 8, "everything but the hanging teeth stays within a quarter of a brick height");
+            Assert.AreEqual(0, BrokenJoints(), "no snap broke under the castle's own weight: " + BrokenSummary());
         }
 
         struct Moves { public float max, mean; public int still; public float groundStill; }

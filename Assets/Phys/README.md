@@ -43,6 +43,8 @@ Assets/Phys/AvbdGpu/Tests/Runtime      DemoSmokeTests, CastleSmokeTests, SiegeSm
 Assets/Phys/Demo                       Demo.unity, Castle.unity, Preview.unity, DemoBase, DemoBootstrap, CastleDemo, PreviewDemo, DemoCamera,
                                        Editor/BuildDemo (player builds, mesh assignment, the Outpost export)
 Assets/Resources/Castles               the brick-assembly documents the preview demo offers (emerald_crown_citadel.json, outpost.json)
+Tools/rebond_castle.py                 re-tiles the courses of a brick-assembly document for bond and adds hidden supports (castles/: the
+                                       citadel as the agent designed it, the tool's input)
 Assets/Models/ConstructorBlock2x3      the 2 x 3 construction brick (FBX, Tools/generate_constructor_block.py)
 Assets/Models/ConstructorFigure, ConstructorArrow   the toy figure and the arrow (Tools/generate_constructor_accessories.py)
 Assets/Models/construction_pieces      the 27-piece pack (bricks, plates, tiles, ramps, prisms; generate_models.py, Blender 5.2),
@@ -257,10 +259,23 @@ in catalog order, assigned by `Phys / Assign Preview Meshes`).
 * No siege: the armies need the procedural plan's wall geometry and the layout's occupancy map.
 
 `Phys / Export Outpost as Brick Assembly` writes the castle planner's Outpost as `outpost.json` (`BrickAssembly.WriteLayout`),
-a castle that stands dry-stacked and snapped; `emerald_crown_citadel.json` is an agent's design whose curtain walls and
-towers repeat one brick pattern on every course (unbonded columns two studs thick and up to seventeen tall), so it loads,
-is diagnosed (45 floating pieces) and then loses its rear walls and keep. Flags: `-avbd-castle name` (a file name),
-`-avbd-scene n`, `-avbd-snap`, and the screenshot / bench / camera flags above.
+a castle that stands dry-stacked and snapped. `emerald_crown_citadel.json` is an agent's design (2 000 pieces, modules and
+nested instances; the file as delivered is `Tools/castles/emerald_crown_citadel.design.json`) re-bonded by
+`Tools/rebond_castle.py`: the design repeated one brick pattern on every course, so its curtain walls and towers were
+unbonded columns two studs thick and up to seventeen tall, its keep's roof rested on a deck of plates spanning a hollow,
+its gatehouse's upper courses sat on lintels that overlapped nothing, and 45 pieces hung in the air — it lost its rear
+walls and keep within seconds, dry or snapped. The tool expands every course of upright bricks into its stud cells and
+tiles them again, cell for cell and colour for colour (the look of the castle is what cells each course fills; the seams
+between bricks are not), choosing bricks whose seams avoid the seams of the course below, letting corners and
+wall-to-tower junctions change owner every course, and giving every brick as much of the course below as it can — the
+share of seams sitting straight above a seam drops from 36 % to 3 %, and lintels over the gate and doors appear by
+themselves. The citadel also gets what its design implies but never built: two cross walls inside the hollow keep under
+the roof deck, a post inside each side hall, two more beams under the bridge deck, and a plate bracket under every banner
+(the banner stands on it and leans on the wall, its gold crest stands on the bracket in front of it — the only visible
+changes, with the gatehouse banner a fifth of a stud lower). Re-bonded, the citadel stands dry-stacked (33 mm of
+settling at most) and holds snapped with no joint breaking; the seven pieces still reported as resting on nothing — the
+portcullis teeth and the trees' outer foliage — hang from the bricks above them when snapped. Flags: `-avbd-castle name`
+(a file name), `-avbd-scene n`, `-avbd-snap`, and the screenshot / bench / camera flags above.
 
 ## Measured behaviour
 
@@ -321,7 +336,7 @@ submission).
 .\RunTests.ps1 -Platform PlayMode -Filter Phys.AvbdGpu.Tests.CastleSmokeTests   # the smallest and largest castles stand, cannonball, snaps break
 .\RunTests.ps1 -Platform PlayMode -Filter Phys.AvbdGpu.Tests.SiegeSmokeTests    # the Outpost under siege: volleys, kills, retirements
 .\RunTests.ps1 -Platform EditMode -Filter Phys.AvbdGpu.Tests.BrickAssemblyTests  # the brick-assembly format: catalog, parsing, rejection, boxes, snaps
-.\RunTests.ps1 -Platform PlayMode -Filter Phys.AvbdGpu.Tests.PreviewSmokeTests  # the JSON castles: the Outpost stands and snaps, the citadel is diagnosed
+.\RunTests.ps1 -Platform PlayMode -Filter Phys.AvbdGpu.Tests.PreviewSmokeTests  # the JSON castles: the Outpost and the re-bonded citadel stand dry and snapped
 ```
 
 `DriveTests` check the drives against the implicit Euler parabola and the reference mirror (constant force 1e-5, motor
@@ -331,8 +346,9 @@ move, that a respawn starts from a clean state and that the events report what u
 retirement cooldown, the drives switched off at the first contact and a 600-step siege of the Outpost with synchronous
 readbacks (bitwise reproducible over two runs). `BrickAssemblyTests` check the piece catalog against the pack's manifest,
 the rotation convention against `Quaternion.Euler`, the format's examples and error cases, the boxes of upright and lying
-pieces, the snapped bridge on the reference solver, the citadel's expansion and diagnostics, and the Outpost round trip
-(planner to document to bodies: the same pivots and the same snap joints as `BrickCastle`).
+pieces, the snapped bridge on the reference solver, the expansion and diagnostics of the citadel as designed and as
+re-bonded, and the Outpost round trip (planner to document to bodies: the same pivots and the same snap joints as
+`BrickCastle`).
 
 The runner forces D3D12 (`-GraphicsApi ""` for the editor default). `DiagnosticTests` only log traces and are
 excluded from the default runs, like `PerformanceTests`.

@@ -198,9 +198,10 @@ namespace Phys.AvbdGpu.Tests
         }
 
         [Test]
-        public void EmeraldCrownCitadelLoads()
+        public void EmeraldCrownCitadelDesignExpands()
         {
-            var a = BrickAssembly.Parse(File.ReadAllText("Assets/Resources/Castles/emerald_crown_citadel.json"));
+            // the agent's design as delivered (Tools/castles): modules, nested instances, instances turned by 180 and -90 degrees
+            var a = BrickAssembly.Parse(File.ReadAllText("Tools/castles/emerald_crown_citadel.design.json"));
             Assert.AreEqual("Emerald Crown Citadel", a.Name);
             Assert.AreEqual(1983, a.Parts.Count, "118 module instances, some nested, expand to 1 983 pieces");
             Assert.AreEqual(0f, a.Min.y, 1e-4f, "stands on the ground");
@@ -218,18 +219,30 @@ namespace Phys.AvbdGpu.Tests
             AssertVector(new float3(-24, 6.4f, 24.4f), tile.Position, "nested instance");
             AssertVector(new float3(0, -1, 0), math.mul(tile.Rotation, new float3(0, 0, 1)), "the tile stands on its edge");
             AssertVector(new float3(0, 0, -1), math.mul(tile.Rotation, new float3(0, 1, 0)), "its top faces -Z");
-
-            var spec = new AssemblySpec { Scale = 5f, Density = 1.1f, Friction = 0.6f, Margin = 0.01f, Origin = float3.zero };
-            var world = new RefSceneBuilder(new Solver());
-            var bodies = AssemblyBuilder.Build(world, a, spec);
-            Assert.AreEqual(1983, world.Bodies.Count);
-            int joints = AssemblyBuilder.AddSnapJoints(world, a, bodies, spec, 300f, 50f);
-            Assert.Greater(joints, 4000, "most pieces rest on studs");
-            Assert.AreEqual(0, joints % 4);
             var d = AssemblyBuilder.Diagnose(a);
             Assert.AreEqual(0, d.Intersections, "no two pieces intersect");
-            Assert.Greater(d.Floating, 0, "the document has pieces resting on nothing (reported, not corrected): " + d.Sample);
-            Debug.Log($"Emerald Crown Citadel: {a.Parts.Count} pieces in {bodies.Groups.Count} mesh groups, {joints} snap joints, extent {a.Extent}; " +
+            Assert.Greater(d.Floating, 40, "the design has pieces resting on nothing: " + d.Sample);
+        }
+
+        [Test]
+        public void EmeraldCrownCitadelIsBonded()
+        {
+            // the design re-bonded by Tools/rebond_castle.py: the same cells in the same colours, tiled for bond, with hidden supports
+            var a = BrickAssembly.Parse(File.ReadAllText("Assets/Resources/Castles/emerald_crown_citadel.json"));
+            var design = BrickAssembly.Parse(File.ReadAllText("Tools/castles/emerald_crown_citadel.design.json"));
+            Assert.AreEqual(design.Name, a.Name);
+            AssertVector(design.Min, a.Min, "the same bounds"); AssertVector(design.Max, a.Max, "the same bounds");
+            Assert.Greater(a.Parts.Count, 2000); Assert.Less(a.Parts.Count, 2300);
+            var d = AssemblyBuilder.Diagnose(a);
+            Assert.AreEqual(0, d.Intersections);
+            Assert.AreEqual(7, d.Floating, "only the three portcullis teeth and the trees' outer foliage bricks rest on nothing: " + d.Sample);
+            Assert.LessOrEqual(d.PoorlySupported, 8, d.Sample);
+            var spec = new AssemblySpec { Scale = 5f, Density = 1.1f, Friction = 0.6f, Margin = 0.01f, Clearance = AssemblySpec.DefaultClearance, Origin = float3.zero };
+            var world = new RefSceneBuilder(new Solver());
+            var bodies = AssemblyBuilder.Build(world, a, spec);
+            int joints = AssemblyBuilder.AddSnapJoints(world, a, bodies, spec, 300f, 50f);
+            Assert.Greater(joints, 8000);
+            Debug.Log($"Emerald Crown Citadel (bonded): {a.Parts.Count} pieces in {bodies.Groups.Count} mesh groups, {joints} snap joints; " +
                 $"{d.Floating} floating, {d.PoorlySupported} poorly supported ({d.Sample})");
         }
 

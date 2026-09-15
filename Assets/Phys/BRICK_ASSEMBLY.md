@@ -184,3 +184,10 @@ and `PreviewSmokeTests` check it.
   the intersecting pairs; the demo's HUD shows the counts and the first offending IDs.
 * **Colours and IDs.** `color` (a palette key resolved to `#RRGGBB`, or the default grey) becomes the body's RGBA8 tint
   (`AvbdGpuRenderer.SetTints`); the expanded ID paths stay next to the bodies, so tests and diagnostics name pieces.
+* **Physical feasibility.** The format places pieces; whether they stand is the physics' verdict, and a design that stacks
+  the same brick straight up course after course does not (columns two studs thick lean and topple, rings of four columns
+  never interlock, decks span hollows on nothing). `Tools/rebond_castle.py` turns such a document into one that holds
+  without changing its look: it expands every course of upright bricks into stud cells and tiles them again, cell for
+  cell and colour for colour, with a running bond, alternating corner and junction ownership and the best support the
+  course below offers; the hidden supports a particular design needs (cross walls under a deck, a post, a bracket under
+  a banner) are added as data at the top of the script. See the README's preview demo section for the citadel.
