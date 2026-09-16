@@ -11,7 +11,10 @@ namespace Phys.AvbdGpu.Presentation
     /// contact crosses and joint / spring lines written by small compute kernels.</summary>
     public sealed class AvbdGpuRenderer : IDisposable
     {
-        public enum ColorModes { Palette = 0, GraphColor = 1, Uniform = 2 }
+        /// <summary>Palette: tints and hash colours; GraphColor: the solver's colouring; Uniform: one colour; Sleep: sleeping bodies
+        /// in a dim colour hashed from their island, awake ones in the palette.</summary>
+        public enum ColorModes { Palette = 0, GraphColor = 1, Uniform = 2, Sleep = 3 }
+        public const int ColorModeCount = 4;
 
         /// <summary>Bodies [Start, Start + Count) are drawn with Mesh (scaled by Scale, shifted by Offset in body space) instead of their box.</summary>
         public struct MeshRange
@@ -53,6 +56,8 @@ namespace Phys.AvbdGpu.Presentation
         static readonly int s_BodyDef = Shader.PropertyToID("_BodyDef");
         static readonly int s_BodyColor = Shader.PropertyToID("_BodyColor");
         static readonly int s_BodyTint = Shader.PropertyToID("_BodyTint");
+        static readonly int s_BodySleep = Shader.PropertyToID("_BodySleep");
+        static readonly int s_BodyLabel = Shader.PropertyToID("_BodyLabel");
         static readonly int s_ColorMode = Shader.PropertyToID("_ColorMode");
         static readonly int s_InstanceOffset = Shader.PropertyToID("_InstanceOffset");
         static readonly int s_MeshScale = Shader.PropertyToID("_MeshScale");
@@ -118,6 +123,8 @@ namespace Phys.AvbdGpu.Presentation
                 m_BoxMaterial.SetBuffer(s_BodyDef, b.BodyDef);
                 m_BoxMaterial.SetBuffer(s_BodyColor, b.BodyColor);
                 m_BoxMaterial.SetBuffer(s_BodyTint, m_Tints);
+                m_BoxMaterial.SetBuffer(s_BodySleep, b.BodySleep);
+                m_BoxMaterial.SetBuffer(s_BodyLabel, b.BodyLabel);
                 m_BoxMaterial.SetFloat(s_ColorMode, (int)ColorMode);
                 var rp = new RenderParams(m_BoxMaterial)
                 {

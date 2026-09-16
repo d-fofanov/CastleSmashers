@@ -31,7 +31,7 @@ namespace Phys.Demo
                 $"<b>[{m_Scene + 1}] {info.Name}</b>{PausedText}\n" +
                 $"{info.Description}\n\n" +
                 StatsText() + "\n\n" +
-                "1-0 scene  , . prev/next scene  R reset  Space pause  N step  F1 contacts  F2 colour mode  F3 post-stabilise  F4 rotated inertia  F5 joints\n" +
+                "1-0 scene  , . prev/next scene  R reset  Space pause  N step  F1 contacts  F2 colour mode  F3 post-stabilise  F4 rotated inertia  F5 joints  F8 sleep on/off\n" +
                 "+/- iterations  [ ] substeps  B/Enter shoot box  G gravity  H hide HUD  LMB drag body  RMB orbit  MMB pan  wheel / Q E zoom  W A S D orbit";
         }
     }

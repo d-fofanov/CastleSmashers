@@ -153,9 +153,15 @@ namespace Phys.Demo
                 if (args[i] == "-avbd-terrain-style" && System.Enum.TryParse(args[i + 1], true, out TerrainStyle style)) TerrainParams.Style = style;
             }
             TerrainParams = TerrainParams.WithDefaults();
-            for (int i = 0; i < args.Length; i++) if (args[i] == "-avbd-bench") m_Bench = true;
+            bool sleep = true;
+            for (int i = 0; i < args.Length; i++)
+            {
+                if (args[i] == "-avbd-bench") m_Bench = true;
+                if (args[i] == "-avbd-nosleep") sleep = false;
+            }
             if (!AvbdGpuKernels.Supported) { Debug.LogError("Compute shaders are not supported on this device"); enabled = false; return; }
             m_World = new AvbdGpuWorld(CreateConfig()) { ReadbackPoses = true };
+            m_World.Params.Sleep = sleep;
             m_Renderer = new AvbdGpuRenderer(m_World);
             m_TerrainView = new TerrainView();
             Configure();
@@ -231,7 +237,8 @@ namespace Phys.Demo
                     var st = m_World.Stats;
                     Debug.Log($"AVBD bench: scene {m_Scene} '{SceneName(m_Scene)}' bodies {m_World.BodyCount} iterations {m_World.Params.Iterations} substeps {m_World.Params.Substeps}: " +
                         $"frame {m_BenchMs / math.max(m_BenchFrames, 1):F2} ms ({m_BenchFrames / (m_BenchMs / 1000.0):F0} fps), submit {st.AvgStepMs:F2} ms, " +
-                        $"pairs {st.Pairs} manifolds {st.Manifolds} contacts {st.Contacts} colours {st.ColorsUsed}/{st.ActiveColors} overflow bodies {st.OverflowBodies} flags {st.OverflowFlags}");
+                        $"pairs {st.Pairs} manifolds {st.Manifolds} ({st.CarriedManifolds} carried) contacts {st.Contacts} colours {st.ColorsUsed}/{st.ActiveColors} overflow bodies {st.OverflowBodies} flags {st.OverflowFlags} " +
+                        $"sleep {(m_World.Params.Sleep ? "on" : "off")} asleep {st.Sleeping}");
                 }
                 Application.Quit();
             }
@@ -253,10 +260,11 @@ namespace Phys.Demo
             if (kb.spaceKey.wasPressedThisFrame) m_Paused = !m_Paused;
             if (kb.nKey.wasPressedThisFrame) m_StepOnce = true;
             if (kb.f1Key.wasPressedThisFrame) m_Renderer.DrawContacts = !m_Renderer.DrawContacts;
-            if (kb.f2Key.wasPressedThisFrame) m_Renderer.ColorMode = (AvbdGpuRenderer.ColorModes)(((int)m_Renderer.ColorMode + 1) % 3);
+            if (kb.f2Key.wasPressedThisFrame) m_Renderer.ColorMode = (AvbdGpuRenderer.ColorModes)(((int)m_Renderer.ColorMode + 1) % AvbdGpuRenderer.ColorModeCount);
             if (kb.f3Key.wasPressedThisFrame) m_World.Params.PostStabilize = !m_World.Params.PostStabilize;
             if (kb.f4Key.wasPressedThisFrame) m_World.Params.RotatedInertia = !m_World.Params.RotatedInertia;
             if (kb.f5Key.wasPressedThisFrame) m_Renderer.DrawJoints = !m_Renderer.DrawJoints;
+            if (kb.f8Key.wasPressedThisFrame) m_World.Params.Sleep = !m_World.Params.Sleep;
             if (kb.equalsKey.wasPressedThisFrame || kb.numpadPlusKey.wasPressedThisFrame) m_World.Params.Iterations = math.min(64, m_World.Params.Iterations + 1);
             if (kb.minusKey.wasPressedThisFrame || kb.numpadMinusKey.wasPressedThisFrame) m_World.Params.Iterations = math.max(1, m_World.Params.Iterations - 1);
             if (kb.rightBracketKey.wasPressedThisFrame) m_World.Params.Substeps = math.min(8, m_World.Params.Substeps + 1);
@@ -412,11 +420,12 @@ namespace Phys.Demo
             string overflow = stats.OverflowFlags != 0 ? $"  <color=#ff5555>capacity overflow {stats.OverflowFlags}</color>" : "";
             return
                 $"frame {Time.smoothDeltaTime * 1000f:F1} ms ({1f / math.max(Time.smoothDeltaTime, 1e-4f):F0} fps)  step submit {stats.LastStepMs:F2} ms (avg {stats.AvgStepMs:F2})  gpu render {(FrameTimingManager.IsFeatureEnabled() ? $"{m_GpuMs:F2} ms" : "n/a")}\n" +
-                $"bodies {m_World.BodyCount}  joints {m_World.JointCount}  springs {m_World.SpringCount}  pairs {stats.Pairs}  manifolds {stats.Manifolds}" +
-                (m_World.Terrain != null ? $" ({stats.TerrainManifolds} terrain)" : "") + $"  contacts {stats.Contacts}\n" +
+                $"bodies {m_World.BodyCount} ({stats.Sleeping} asleep, {stats.Woken} woken)  joints {m_World.JointCount}  springs {m_World.SpringCount}  pairs {stats.Pairs}  manifolds {stats.Manifolds}" +
+                (m_World.Terrain != null ? $" ({stats.TerrainManifolds} terrain, {stats.CarriedManifolds} carried)" : $" ({stats.CarriedManifolds} carried)") + $"  contacts {stats.Contacts}\n" +
                 $"colours {stats.ColorsUsed} / active {stats.ActiveColors}  overflow bodies {stats.OverflowBodies}  large bodies {stats.LargeBodies}{overflow}\n" +
                 $"dt 1/{math.round(1f / p.Dt)}  substeps {p.Substeps}  iterations {p.Iterations}  alpha {p.Alpha}  beta {p.BetaLin}/{p.BetaAng}  gamma {p.Gamma}  " +
-                $"post-stabilise {(p.PostStabilize ? "on" : "off")}  rotated inertia {(p.RotatedInertia ? "on" : "off")}  colour mode {m_Renderer.ColorMode}";
+                $"post-stabilise {(p.PostStabilize ? "on" : "off")}  rotated inertia {(p.RotatedInertia ? "on" : "off")}  " +
+                $"sleep {(p.Sleep ? $"on ({p.SleepTime:G2} s, {p.SleepDistance * 1000f:G2} mm)" : "off")}  colour mode {m_Renderer.ColorMode}";
         }
 
         protected string PausedText => m_Paused ? "  <color=#ffcc55>PAUSED</color>" : "";

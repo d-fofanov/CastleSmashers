@@ -249,7 +249,7 @@ namespace Phys.Demo
                 TerrainText(m_Plateau) + "\n\n" +
                 StatsText() + "\n\n" +
                 "1-0 castle size  , . prev/next  R rebuild  J snap bricks on/off  T terrain  U siege on/off  V volley  K auto volleys  X retire the dead and spent now  Space pause  N step\n" +
-                "F1 contacts  F2 colour mode  F5 joints  F6 collision boxes  F7 shadows  +/- iterations  [ ] substeps  B/Enter cannonball  G gravity  H hide HUD\n" +
+                "F1 contacts  F2 colour mode  F5 joints  F6 collision boxes  F7 shadows  F8 sleep on/off  +/- iterations  [ ] substeps  B/Enter cannonball  G gravity  H hide HUD\n" +
                 "LMB drag  RMB orbit  MMB pan  wheel / Q E zoom  W A S D orbit";
         }
     }

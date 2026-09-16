@@ -21,6 +21,8 @@ StructuredBuffer<float4> _BodyRot;
 StructuredBuffer<BodyDef> _BodyDef;
 StructuredBuffer<uint> _BodyColor;    // graph colour (solver output)
 StructuredBuffer<uint> _BodyTint;     // RGBA8 per body set by the application; alpha 0 = untinted (hash palette)
+StructuredBuffer<uint> _BodySleep;    // sleep words (bit 31 = asleep)
+StructuredBuffer<uint> _BodyLabel;    // island labels (the representative body)
 
 CBUFFER_START(UnityPerMaterial)
 float4 _BaseColor;
@@ -56,6 +58,8 @@ float3 hsv(float h, float s, float v)
     return v * lerp(1.0, saturate(p - 1.0), s);
 }
 
+// Modes: 0 palette (tints, else a hash colour), 1 graph colour, 2 uniform, 3 sleep (a sleeping body takes a dim colour
+// hashed from its island label, so islands show as patches of one colour; awake bodies keep the palette).
 float3 bodyColor(uint id, BodyDef d)
 {
     int mode = (int)_ColorMode;
@@ -66,6 +70,8 @@ float3 bodyColor(uint id, BodyDef d)
         if (c == 32u) return float3(1, 0, 1);              // overflow (Jacobi) group
         return hsv(frac(c * 0.618034), 0.65, 0.95);
     }
+    if (mode == 3 && d.mass > 0.0 && (_BodySleep[id] & 0x80000000u) != 0u)
+        return hsv(frac(wangHash(_BodyLabel[id]) / 4294967296.0), 0.45, 0.4);
     uint tint = _BodyTint[id];
     if ((tint >> 24) != 0u)
         return float3(tint & 255u, (tint >> 8) & 255u, (tint >> 16) & 255u) / 255.0;
