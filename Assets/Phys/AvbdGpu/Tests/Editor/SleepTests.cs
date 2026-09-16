@@ -82,6 +82,61 @@ namespace Phys.AvbdGpu.Tests
             Assert.AreEqual(0, world.GetStatsSync().OverflowFlags);
         }
 
+        /// <summary>The GPU island labels of the sleeping Outpost (snapped: joints connect the bricks, side gaps keep them out of contact)
+        /// cover the connected components of the carried manifolds and joints computed on the CPU: every component lies within one
+        /// label. Labels only merge until a relabel, and sleeping bodies keep theirs, so an island may still be the union of
+        /// components that touched while settling; the count is logged.</summary>
+        [Test]
+        public void IslandLabelsCoverTheConnectedComponents()
+        {
+            if (!AvbdGpuKernels.Supported) Assert.Ignore("no compute");
+            var config = AvbdGpuConfig.ForBodies(8192);
+            config.MaxJoints = 16384; config.MaxLinks = 40960;   // four snap joints per brick overlap
+            using var world = new AvbdGpuWorld(config);
+            world.AddBody(new float3(400, 1, 400), 0f, 0.6f, new float3(0, -0.5f, 0), quaternion.identity, float3.zero);
+            var plan = CastlePlan.Presets[0];
+            var layout = BrickCastle.Generate(plan);
+            const float scale = 5f;
+            float2 c = BrickCastle.Center(plan) * Brick.Pitch * scale;
+            float volume = Brick.Width * Brick.BodyHeight * Brick.Length * scale * scale * scale;
+            var spec = new BrickSpec { Scale = scale, Density = 0.25f / volume, Friction = 0.6f, Margin = AvbdGpuConstants.CollisionMargin, Origin = new float3(-c.x, 0, -c.y) };
+            int first = BrickCastle.Build(world, layout, spec);
+            BrickCastle.AddSnapJoints(world, layout, first, spec, 300f, 50f);
+            world.Params.Substeps = 3;
+            StepUntilAsleep(world, 900);
+
+            // union-find over the constraints the GPU sees
+            int n = world.BodyCount;
+            var parent = new int[n];
+            for (int i = 0; i < n; i++) parent[i] = i;
+            int Find(int i) { while (parent[i] != i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; }
+            void Union(int a, int b) { a = Find(a); b = Find(b); if (a != b) parent[math.max(a, b)] = math.min(a, b); }
+            bool Dynamic(int i) => i >= 0 && !world.GetBodyDef(i).IsStatic;
+            var manifolds = world.GetManifoldsSync(out _);
+            var stats = world.GetStatsSync();
+            for (int m = 0; m < stats.Manifolds; m++)
+                if (Dynamic((int)manifolds[m].BodyA) && Dynamic((int)manifolds[m].BodyB)) Union((int)manifolds[m].BodyA, (int)manifolds[m].BodyB);
+            var states = world.GetJointStatesSync();
+            for (int j = 0; j < world.JointCount; j++)
+            {
+                var d = world.GetJointDef(j);
+                if (states[j].Broken == 0 && Dynamic(d.BodyA) && Dynamic(d.BodyB)) Union(d.BodyA, d.BodyB);
+            }
+            var labels = world.GetLabelsSync();
+            var islands = new HashSet<uint>();
+            var components = new HashSet<int>();
+            for (int i = 0; i < n; i++)
+            {
+                if (!Dynamic(i)) continue;
+                islands.Add(labels[i]);
+                components.Add(Find(i));
+                Assert.AreEqual(labels[Find(i)], labels[i], $"brick {i} and the root of its component carry different labels");
+            }
+            Debug.Log($"outpost: {islands.Count} islands on the GPU, {components.Count} connected components on the CPU");
+            Assert.Greater(islands.Count, 1, "the castle is several islands");
+            Assert.LessOrEqual(islands.Count, components.Count, "islands are unions of components");
+        }
+
         [Test]
         public void TwoStacksAreTwoIslands()
         {

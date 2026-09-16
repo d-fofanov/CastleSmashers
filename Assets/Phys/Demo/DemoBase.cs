@@ -93,7 +93,8 @@ namespace Phys.Demo
 
         // Player-build verification: -avbd-scene <n> -avbd-screenshot <file> [-avbd-frames <n>] captures a screenshot after n frames and quits;
         // -avbd-bench [-avbd-frames <n>] logs the average frame time of the second half of the run and quits;
-        // -avbd-yaw <deg> -avbd-pitch <deg> -avbd-distance <m> override the camera; -avbd-shoot <n> fires a box at frame n.
+        // -avbd-yaw <deg> -avbd-pitch <deg> -avbd-distance <m> override the camera; -avbd-shoot <n> fires a box at frame n;
+        // -avbd-nosleep runs without sleeping; -avbd-colormode <n> starts in that colour mode (3 = sleep).
         string m_ScreenshotPath;
         int m_ScreenshotFrame = 150;
         int m_ShootFrame = -1;
@@ -154,15 +155,18 @@ namespace Phys.Demo
             }
             TerrainParams = TerrainParams.WithDefaults();
             bool sleep = true;
+            int colorMode = -1;
             for (int i = 0; i < args.Length; i++)
             {
                 if (args[i] == "-avbd-bench") m_Bench = true;
                 if (args[i] == "-avbd-nosleep") sleep = false;
+                if (args[i] == "-avbd-colormode" && i + 1 < args.Length && int.TryParse(args[i + 1], out int cm)) colorMode = cm;
             }
             if (!AvbdGpuKernels.Supported) { Debug.LogError("Compute shaders are not supported on this device"); enabled = false; return; }
             m_World = new AvbdGpuWorld(CreateConfig()) { ReadbackPoses = true };
             m_World.Params.Sleep = sleep;
             m_Renderer = new AvbdGpuRenderer(m_World);
+            if (colorMode >= 0) m_Renderer.ColorMode = (AvbdGpuRenderer.ColorModes)(colorMode % AvbdGpuRenderer.ColorModeCount);
             m_TerrainView = new TerrainView();
             Configure();
             Load(StartScene);
