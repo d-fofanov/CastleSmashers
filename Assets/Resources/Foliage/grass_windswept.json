@@ -1,0 +1,28 @@
+{
+  "format": "brick-assembly",
+  "version": 1,
+  "catalog": "generic-construction-27-v1",
+  "name": "Windswept Grass",
+  "units": {
+    "gridToUnity": 0.1,
+    "axes": "unity"
+  },
+  "palette": {
+    "dark": "#25452B",
+    "mid": "#42743A",
+    "light": "#92B94E",
+    "accent": "#A3BD67"
+  },
+  "parts": [
+    {"id": "p0001", "piece": "Brick_2x4", "position": [-2.0, 0.0, -1.0], "color": "light", "rotation": [0, 90, 0]},
+    {"id": "p0002", "piece": "Brick_2x4", "position": [1.0, 0.0, 1.0], "color": "mid"},
+    {"id": "p0003", "piece": "Brick_2x2", "position": [3.0, 0.0, 1.0], "color": "mid"},
+    {"id": "p0004", "piece": "Brick_2x2", "position": [-1.0, 1.2, -1.0], "color": "light", "rotation": [0, 90, 0]},
+    {"id": "p0005", "piece": "Brick_2x2", "position": [1.0, 1.2, 0.0], "color": "dark", "rotation": [0, 90, 0]},
+    {"id": "p0006", "piece": "Plate_2x2", "position": [1.0, 1.2, 2.0], "color": "mid", "rotation": [0, 90, 0]},
+    {"id": "p0007", "piece": "Brick_2x2", "position": [3.0, 1.2, 1.0], "color": "dark", "rotation": [0, 90, 0]},
+    {"id": "p0008", "piece": "Plate_2x2", "position": [1.0, 1.6, 2.0], "color": "light"},
+    {"id": "p0009", "piece": "Plate_2x2", "position": [1.0, 2.4, 0.0], "color": "light"},
+    {"id": "p0010", "piece": "Brick_2x2", "position": [3.0, 2.4, 1.0], "color": "light"}
+  ]
+}

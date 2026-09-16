@@ -1,0 +1,28 @@
+{
+  "format": "brick-assembly",
+  "version": 1,
+  "catalog": "generic-construction-27-v1",
+  "name": "Blue Sedge",
+  "units": {
+    "gridToUnity": 0.1,
+    "axes": "unity"
+  },
+  "palette": {
+    "dark": "#2A5653",
+    "mid": "#4E8176",
+    "light": "#81ADA0",
+    "accent": "#AEC9B2"
+  },
+  "parts": [
+    {"id": "p0001", "piece": "Brick_2x3", "position": [-2.5, 0.0, 0.0], "color": "mid", "rotation": [0, 90, 0]},
+    {"id": "p0002", "piece": "Brick_2x4", "position": [0.0, 0.0, 1.0], "color": "dark"},
+    {"id": "p0003", "piece": "Brick_2x3", "position": [2.5, 0.0, 0.0], "color": "mid", "rotation": [0, 90, 0]},
+    {"id": "p0004", "piece": "Plate_2x2", "position": [-3.0, 1.2, 0.0], "color": "mid", "rotation": [0, 90, 0]},
+    {"id": "p0005", "piece": "Brick_2x4", "position": [0.0, 1.2, 0.0], "color": "mid", "rotation": [0, 90, 0]},
+    {"id": "p0006", "piece": "Plate_2x2", "position": [0.0, 1.2, 2.0], "color": "mid", "rotation": [0, 90, 0]},
+    {"id": "p0007", "piece": "Plate_2x2", "position": [3.0, 1.2, 0.0], "color": "light", "rotation": [0, 90, 0]},
+    {"id": "p0008", "piece": "Plate_2x2", "position": [0.0, 1.6, 2.0], "color": "mid"},
+    {"id": "p0009", "piece": "Plate_2x4", "position": [0.0, 2.4, 0.0], "color": "mid", "rotation": [0, 90, 0]},
+    {"id": "p0010", "piece": "Plate_2x4", "position": [0.0, 2.8, 0.0], "color": "light", "rotation": [0, 90, 0]}
+  ]
+}

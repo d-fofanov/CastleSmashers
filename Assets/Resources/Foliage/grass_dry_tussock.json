@@ -1,0 +1,31 @@
+{
+  "format": "brick-assembly",
+  "version": 1,
+  "catalog": "generic-construction-27-v1",
+  "name": "Dry Tussock Grass",
+  "units": {
+    "gridToUnity": 0.1,
+    "axes": "unity"
+  },
+  "palette": {
+    "dark": "#766035",
+    "mid": "#AB8A49",
+    "light": "#D1B568",
+    "accent": "#E9D598"
+  },
+  "parts": [
+    {"id": "p0001", "piece": "Brick_2x2", "position": [-2.0, 0.0, -2.0], "color": "mid"},
+    {"id": "p0002", "piece": "Brick_2x2", "position": [-2.0, 0.0, 2.0], "color": "mid"},
+    {"id": "p0003", "piece": "Brick_2x2", "position": [0.0, 0.0, 0.0], "color": "dark"},
+    {"id": "p0004", "piece": "Brick_2x2", "position": [2.0, 0.0, -2.0], "color": "mid"},
+    {"id": "p0005", "piece": "Brick_2x2", "position": [2.0, 0.0, 2.0], "color": "dark"},
+    {"id": "p0006", "piece": "Brick_2x2", "position": [-2.0, 1.2, -2.0], "color": "mid", "rotation": [0, 90, 0]},
+    {"id": "p0007", "piece": "Plate_2x2", "position": [-2.0, 1.2, 2.0], "color": "mid", "rotation": [0, 90, 0]},
+    {"id": "p0008", "piece": "Brick_2x2", "position": [0.0, 1.2, 0.0], "color": "dark", "rotation": [0, 90, 0]},
+    {"id": "p0009", "piece": "Plate_2x2", "position": [2.0, 1.2, -2.0], "color": "mid", "rotation": [0, 90, 0]},
+    {"id": "p0010", "piece": "Brick_2x2", "position": [2.0, 1.2, 2.0], "color": "light", "rotation": [0, 90, 0]},
+    {"id": "p0011", "piece": "Plate_2x2", "position": [-2.0, 1.6, 2.0], "color": "light"},
+    {"id": "p0012", "piece": "Plate_2x2", "position": [2.0, 1.6, -2.0], "color": "mid"},
+    {"id": "p0013", "piece": "Brick_2x2", "position": [0.0, 2.4, 0.0], "color": "light"}
+  ]
+}

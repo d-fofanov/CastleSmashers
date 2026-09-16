@@ -11,7 +11,7 @@ using UnityEngine.TestTools;
 namespace Phys.AvbdGpu.Tests
 {
     /// <summary>PlayMode: the castle demo (brick bodies drawn with the brick model) runs, the dry-stacked castle stands still, and the
-    /// trees planted around it sleep until a cannonball wakes one.</summary>
+    /// trees planted around it and the foliage scattered between them sleep until a cannonball wakes one.</summary>
     public class CastleSmokeTests
     {
         GameObject m_Root;
@@ -41,7 +41,8 @@ namespace Phys.AvbdGpu.Tests
             m_Demo = m_Root.AddComponent<CastleDemo>();
             m_Demo.StartScene = 0;
             m_Demo.MaxBodies = 40960;
-            m_Demo.Trees = 0;   // the castle alone unless a test plants them
+            m_Demo.Trees = 0;   // the castle alone unless a test plants them (and no foliage, whose debris-woken clumps would count as awake in the trees' test)
+            m_Demo.FoliagePerTree = 0;
 #if UNITY_EDITOR
             m_Demo.BrickMesh = UnityEditor.AssetDatabase.LoadAssetAtPath<Mesh>("Assets/Models/ConstructorBlock2x3/ConstructorBlock2x3.fbx");
 #endif
@@ -456,6 +457,152 @@ namespace Phys.AvbdGpu.Tests
             Assert.Greater(fell, 0, "the cannonball took pieces off the tree");
             Assert.Greater(brokenTree, 0, "snaps of the tree broke");
             Assert.LessOrEqual(stats.Active, hit.Count + 1, "nothing but the hit tree, its debris and the ball is awake");
+        }
+
+        /// <summary>Six clumps of foliage per tree - a hundred and twenty of the twenty documents - scattered around the Castle on the
+        /// hills with the twenty trees: every clump off the castle's plateau core and the armies' bands, clear of the trees' crowns and
+        /// of the other clumps by its bounding square (two cells and a blend apart where either stands on a terrace), on level ground
+        /// over its whole footprint; the clumps of a grid cell built as one cluster drawn in a range per kind of plate, all of them
+        /// asleep and in the sleeping grid from the first step; a cannonball into a clump wakes that clump alone although its bodies
+        /// lie between its cluster-mates', and the rest of the foliage is at most nudged by the debris.</summary>
+        [UnityTest]
+        public IEnumerator FoliageSleepsAroundTheCastleUntilHit()
+        {
+            Object.Destroy(m_Root);
+            yield return null;
+            CreateDemo(d => { d.StartScene = 3; d.Trees = 20; d.Snap = true; d.BrickMass = 1f; d.SnapFractureLateral = 800f; d.SnapFractureTension = 300f; d.ShotMass = 20f; d.FoliagePerTree = 6; d.FoliageMass = 1f; d.TerrainParams = TerrainSettings.CastleScene; });   // the scene's configuration, terrain included (the level ground around the castle, 3 m cells)
+            yield return null;
+            Assert.AreEqual(20, m_Demo.FoliageDocuments.Length, "the twenty foliage documents of Resources/Foliage");
+            foreach (var kind in m_Demo.FoliageKinds) { Assert.IsNotNull(kind); Assert.That(kind.Parts.Count, Is.InRange(100, 600), $"{kind.Name}: a hundred to six hundred pieces"); }
+            Assert.AreEqual(20, m_Demo.TreeCount, "twenty trees were placed");
+            Assert.AreEqual(120, m_Demo.FoliageCount, "six clumps per tree were placed");
+            Assert.AreEqual(m_Demo.FirstTreePiece + m_Demo.TreePieces, m_Demo.FirstFoliagePiece, "the foliage comes right after the trees");
+            var plan = CastlePlan.Presets[3];
+            float side = plan.Side * Brick.Pitch * m_Demo.BrickScale, half = side * 0.5f + 4f * Brick.Pitch * m_Demo.BrickScale;
+            var sp = m_Demo.SiegeParams;
+            float reach = side * 0.5f - BrickCastle.TowerOut * Brick.Pitch * m_Demo.BrickScale + sp.AttackDistance + (sp.Ranks - 1) * sp.RankSpacing + sp.MarchDistance;
+            float bandHalf = (sp.ArchersPerRank - 1) * 0.5f * sp.ColumnSpacing;
+            float cell = math.cmax(m_Demo.World.Terrain.Cell);
+            var trees = m_Demo.TreePlacements;
+            var clumps = m_Demo.FoliagePlacements;
+            int pieces = 0, terraced = 0;
+            var kinds = new System.Collections.Generic.HashSet<int>();
+            var clusters = new System.Collections.Generic.HashSet<int>();
+            for (int i = 0; i < clumps.Count; i++)
+            {
+                var f = clumps[i];
+                pieces += f.Count;
+                kinds.Add(f.Kind);
+                clusters.Add(f.Cluster);
+                if (f.Terraced) terraced++;
+                Assert.AreEqual(m_Demo.FoliageKinds[f.Kind].Parts.Count, f.Count, "every piece of the document became a body");
+                Assert.Greater(math.cmax(math.abs(f.Centre)), half + f.Radius, $"clump {i} clears the castle's plateau core");
+                Assert.IsFalse((math.abs(f.Centre.x) < bandHalf + f.Radius && math.abs(f.Centre.y) < reach + f.Radius) || (math.abs(f.Centre.y) < bandHalf + f.Radius && math.abs(f.Centre.x) < reach + f.Radius), $"clump {i} is off the armies' bands");
+                foreach (var t in trees) Assert.Greater(math.cmax(math.abs(f.Centre - t.Centre)), t.Radius + f.Radius, $"clump {i} is clear of the trees");
+                for (int j = 0; j < i; j++)
+                {
+                    float apart = f.Terraced || clumps[j].Terraced ? 2f * cell + 1f : 0.5f;
+                    Assert.Greater(math.cmax(math.abs(f.Centre - clumps[j].Centre)), f.Radius + clumps[j].Radius + apart, $"clumps {i} and {j} stand apart");
+                }
+                // level ground under the whole footprint (a terrace where the hills were), so that every plate of the ground course rests on it
+                foreach (var corner in new[] { new float2(-1f, -1f), new float2(1f, -1f), new float2(-1f, 1f), new float2(1f, 1f), float2.zero })
+                    Assert.AreEqual(f.Ground, m_Demo.World.Terrain.Height(f.Centre + corner * f.Radius), 0.01f, $"clump {i} ({m_Demo.FoliageKinds[f.Kind].Name}) stands on level ground");
+                for (int k = 1; k < f.Count; k++) Assert.AreNotEqual(m_Demo.FoliageBody(f, 0), m_Demo.FoliageBody(f, k));
+            }
+            Assert.AreEqual(pieces, m_Demo.FoliagePieces);
+            Assert.GreaterOrEqual(kinds.Count, 12, "many kinds of foliage");
+            Assert.Greater(terraced, 0, "some clumps stand on the hills, on terraces of their own");
+            Assert.Less(terraced, clumps.Count, "some clumps stand on the level ground around the castle");
+            Assert.AreEqual(clusters.Count, m_Demo.FoliageClusterCount, "every cluster holds clumps");
+            Assert.That(m_Demo.FoliageClusterCount, Is.InRange(4, CastleDemo.FoliageGrid * CastleDemo.FoliageGrid), "the clumps are clustered by grid cell");
+            int drawn = 0, foliageRanges = 0;
+            foreach (var r in m_Demo.Renderer.MeshRanges)
+            {
+                Assert.IsNotNull(r.Mesh);
+                if (r.Start < m_Demo.FirstFoliagePiece || r.Start >= m_Demo.FirstFoliagePiece + pieces) continue;
+                drawn += r.Count;
+                foliageRanges++;
+            }
+            Assert.AreEqual(pieces, drawn, "every piece of every clump is drawn with its model");
+            Assert.LessOrEqual(foliageRanges, 5 * m_Demo.FoliageClusterCount, "a cluster is drawn in a range per kind of plate, not one per clump");
+            Debug.Log($"foliage: {clumps.Count} clumps of {kinds.Count} kinds, {pieces} pieces, {terraced} on terraces, {m_Demo.FoliageClusterCount} clusters drawn in {foliageRanges} ranges ({m_Demo.Renderer.MeshRanges.Count} ranges in all)");
+
+            var stats = m_Demo.World.GetStatsSync();
+            Assert.AreEqual(0, stats.OverflowFlags, $"no overflow after the settle steps (flags {stats.OverflowFlags})");
+            var words = m_Demo.World.GetSleepSync();
+            int first = m_Demo.FirstFoliagePiece;
+            for (int b = first; b < first + pieces; b++) { Assert.IsTrue(GpuBodySleep.IsAsleep(words[b]), $"foliage piece {b} sleeps"); Assert.IsTrue(GpuBodySleep.IsInGrid(words[b]), $"foliage piece {b} is in the sleeping grid"); }
+            Assert.LessOrEqual(stats.Active, m_Demo.BrickCount, "at most the castle is awake");
+            m_Demo.World.GetPosesSync(out var start, out _);
+            for (int f = 0; f < 60; f++) yield return null;
+            stats = m_Demo.World.GetStatsSync();
+            Debug.Log($"foliage: {m_Demo.World.BodyCount} bodies, {stats.Sleeping} asleep, {stats.Hot} hot, {stats.Active} active, grid {stats.SleepGrid}, cold {stats.ColdManifolds}, step {stats.AvgStepMs:F2} ms");
+            Assert.AreEqual(0, stats.OverflowFlags);
+            int culled = 0;
+            foreach (var r in m_Demo.Renderer.MeshRanges) if (!r.NoCulling) culled++;
+            Assert.AreEqual(culled, m_Demo.Renderer.BoundedDraws, "every range but the siege pools is drawn with its own bounds");
+
+            // a cannonball into the clump farthest from everything else wakes it, and it alone, although its bodies lie between its
+            // cluster-mates' (one island per clump)
+            int target = 0;
+            float bestGap = -1f;
+            for (int i = 0; i < clumps.Count; i++)
+            {
+                float gap = float.PositiveInfinity;
+                foreach (var t in trees) gap = math.min(gap, math.cmax(math.abs(clumps[i].Centre - t.Centre)) - t.Radius - clumps[i].Radius);
+                for (int j = 0; j < clumps.Count; j++) if (j != i) gap = math.min(gap, math.cmax(math.abs(clumps[i].Centre - clumps[j].Centre)) - clumps[j].Radius - clumps[i].Radius);
+                if (gap > bestGap) { bestGap = gap; target = i; }
+            }
+            var hit = clumps[target];
+            float s = m_Demo.Spec.Scale;
+            float3 extent = m_Demo.FoliageKinds[hit.Kind].Extent * PieceCatalog.GridToUnity * s;
+            float3 aim = new float3(hit.Centre.x, hit.Ground + 0.5f * extent.y, hit.Centre.y);
+            float3 from = aim + new float3(0.3f * s, 10f * s, 0f);   // from high above: nothing else in the way
+            float cube = m_Demo.ShotCube * s;
+            m_Demo.World.AddBody(new float3(cube), m_Demo.ShotMass / (cube * cube * cube), 0.5f, from, quaternion.identity, math.normalize(aim - from) * m_Demo.ShotVelocity * math.sqrt(s));
+            bool woke = false;
+            for (int f = 0; f < 180 && !woke; f++)
+            {
+                yield return null;
+                words = m_Demo.World.GetSleepSync();
+                int awake = 0;
+                for (int k = 0; k < hit.Count; k++) if (!GpuBodySleep.IsAsleep(words[m_Demo.FoliageBody(hit, k)])) awake++;
+                if (awake == 0) continue;
+                woke = true;
+                Assert.Greater(awake, hit.Count / 2, "the hit clump woke as an island");
+                for (int i = 0; i < clumps.Count; i++)
+                {
+                    if (i == target) continue;
+                    for (int k = 0; k < clumps[i].Count; k++) Assert.IsTrue(GpuBodySleep.IsAsleep(words[m_Demo.FoliageBody(clumps[i], k)]), $"piece {k} of clump {i} sleeps on");
+                }
+                foreach (var t in trees) for (int b = t.First; b < t.First + t.Count; b++) Assert.IsTrue(GpuBodySleep.IsAsleep(words[b]), $"tree piece {b} sleeps on");
+                stats = m_Demo.World.GetStatsSync();
+                Assert.AreEqual(0, stats.OverflowFlags, "the woken clump fits the pools");
+            }
+            Assert.IsTrue(woke, "the cannonball hit the clump");
+            for (int f = 0; f < 300; f++) yield return null;
+            m_Demo.World.GetPosesSync(out var pos, out _);
+            float maxMove = 0f;
+            for (int i = 0; i < clumps.Count; i++)
+            {
+                if (i == target) continue;
+                for (int k = 0; k < clumps[i].Count; k++) { int b = m_Demo.FoliageBody(clumps[i], k); maxMove = math.max(maxMove, math.distance(pos[b].xyz, start[b].xyz)); }
+            }
+            Assert.Less(maxMove, 0.5f * 1.2f * PieceCatalog.GridToUnity * s, $"the other clumps were nudged by debris at most ({maxMove * 1000f:F0} mm), none knocked over");
+            int fell = 0;
+            float meanMove = 0f;
+            for (int k = 0; k < hit.Count; k++)
+            {
+                int b = m_Demo.FoliageBody(hit, k);
+                Assert.IsTrue(math.all(math.isfinite(pos[b])), $"piece {b} position");
+                float dist = math.distance(pos[b].xyz, start[b].xyz);
+                meanMove += dist / hit.Count;
+                if (dist > 1.2f * PieceCatalog.GridToUnity * s) fell++;
+            }
+            stats = m_Demo.World.GetStatsSync();
+            Assert.AreEqual(0, stats.OverflowFlags);
+            Debug.Log($"after the shot: clump {target} ({m_Demo.FoliageKinds[hit.Kind].Name}, {hit.Count} pieces, {bestGap:F1} m clear) lost {fell} pieces (a brick height away), moved {meanMove * 1000f:F0} mm on average; {stats.Sleeping} asleep, {stats.Active} active, hot {stats.Hot}, cold {stats.ColdManifolds}, step {stats.AvgStepMs:F2} ms");
+            Assert.Greater(fell, 0, "the cannonball took pieces off the clump");
         }
 
         int BrokenJoints()

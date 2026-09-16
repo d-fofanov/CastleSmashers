@@ -193,12 +193,27 @@ namespace Phys.AvbdGpu.Scenes
             return (float)(sum / n);
         }
 
+        /// <summary>Lowest and highest sample over the xz rectangle (the samples inside it, or the nearest one): exact where
+        /// <see cref="MaxOver"/> answers for whole mip blocks. Ground is level over the rectangle when the two are equal.</summary>
+        public void SampleRange(float2 min, float2 max, out float lo, out float hi)
+        {
+            int x0 = math.clamp((int)math.ceil((min.x - Origin.x) / Cell.x), 0, ResX - 1), x1 = math.clamp((int)math.floor((max.x - Origin.x) / Cell.x), 0, ResX - 1);
+            int z0 = math.clamp((int)math.ceil((min.y - Origin.y) / Cell.y), 0, ResZ - 1), z1 = math.clamp((int)math.floor((max.y - Origin.y) / Cell.y), 0, ResZ - 1);
+            if (x1 < x0 || z1 < z0) { lo = hi = Height((min + max) * 0.5f); return; }
+            lo = float.PositiveInfinity; hi = float.NegativeInfinity;
+            for (int z = z0; z <= z1; z++)
+                for (int x = x0; x <= x1; x++) { float h = Heights[z * ResX + x]; lo = math.min(lo, h); hi = math.max(hi, h); }
+        }
+
         /// <summary>Levels the xz rectangle at <paramref name="height"/> (a plateau for a castle) and blends back into the terrain
-        /// over <paramref name="skirt"/> metres outside it.</summary>
+        /// over <paramref name="skirt"/> metres outside it. Only the samples within the skirt are visited (a scene may cut a
+        /// hundred small terraces).</summary>
         public void Flatten(float2 min, float2 max, float height, float skirt)
         {
-            for (int z = 0; z < ResZ; z++)
-                for (int x = 0; x < ResX; x++)
+            int x0 = math.clamp((int)math.floor((min.x - skirt - Origin.x) / Cell.x), 0, ResX - 1), x1 = math.clamp((int)math.ceil((max.x + skirt - Origin.x) / Cell.x), 0, ResX - 1);
+            int z0 = math.clamp((int)math.floor((min.y - skirt - Origin.y) / Cell.y), 0, ResZ - 1), z1 = math.clamp((int)math.ceil((max.y + skirt - Origin.y) / Cell.y), 0, ResZ - 1);
+            for (int z = z0; z <= z1; z++)
+                for (int x = x0; x <= x1; x++)
                 {
                     float2 p = Origin + new float2(x * Cell.x, z * Cell.y);
                     float2 d = math.max(math.max(min - p, p - max), 0f);   // distance to the rectangle, 0 inside

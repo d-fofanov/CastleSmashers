@@ -52,9 +52,12 @@ Assets/Phys/Demo                       Demo.unity, Castle.unity, Preview.unity, 
 Assets/Resources/Castles               the brick-assembly documents the preview demo offers (emerald_crown_citadel.json, outpost.json)
 Assets/Resources/Trees                 the six trees the castle demo plants and the preview demo lists after the castles (oak, pine,
                                        cypress, elm, birch, maple .json; 1 100 - 1 250 pieces each)
+Assets/Resources/Foliage               the twenty clumps of foliage the castle demo scatters between the trees (five grasses, five bushes,
+                                       five rocks, a moss cushion, a fallen log, a stump, a succulent, a fern; 100 - 580 plates each)
 Tools/rebond_castle.py                 re-tiles the courses of a brick-assembly document for bond and adds hidden supports (castles/: the
                                        citadel as the agent designed it, the tool's input)
 Tools/generate_trees.py                designs the trees course by course under a corbel rule and tiles them with the re-bonding tool's tiler
+Tools/generate_foliage.py              tiles the foliage's stepped height fields with plates, course by course in alternating directions
 Assets/Models/ConstructorBlock2x3      the 2 x 3 construction brick (FBX, Tools/generate_constructor_block.py)
 Assets/Models/ConstructorFigure, ConstructorArrow   the toy figure and the arrow (Tools/generate_constructor_accessories.py)
 Assets/Models/construction_pieces      the 27-piece pack (bricks, plates, tiles, ramps, prisms; generate_models.py, Blender 5.2),
@@ -280,8 +283,8 @@ Player flags: `-avbd-scene n`, `-avbd-screenshot file [-avbd-frames n]` (screens
 
 `Assets/Phys/Demo/Castle.unity` (`Phys / Build Castle Player`, or `-executeMethod Phys.Demo.Editor.BuildDemo.Build
 -buildScene Castle`) builds a castle out of the construction brick `Assets/Models/ConstructorBlock2x3`: every brick is a box
-body of the solver, drawn with the brick model through `AvbdGpuRenderer.MeshRanges`, with twenty trees of the
-construction-piece pack asleep on the ground around it. Ten castles on keys `1` .. `0`, all planned by `BrickCastle` on the
+body of the solver, drawn with the brick model through `AvbdGpuRenderer.MeshRanges`, with twenty trees and a hundred and
+twenty clumps of foliage of the construction-piece pack asleep on the ground around it. Ten castles on keys `1` .. `0`, all planned by `BrickCastle` on the
 stud grid (`CastlePlan.Presets`):
 
 | Key | Name | Bricks | Side (studs) | Towers | Walls | Gatehouse |
@@ -323,11 +326,11 @@ stud grid (`CastlePlan.Presets`):
   and the angular lock assumes equal orientations, hence four points per overlap rather than one lock.
 
 Keys as the main demo plus `J` snap on/off, `T` terrain (hills, valley, ridge, flat), `Y` terrain style (tiled / smooth), `O`
-outlying copies (0 / 4 / 8), `F` trees (0 / 10 / 20 / 30), `F6` collision boxes, `F7` shadows; `B` / `Enter` fires a 30 kg
-cannonball at 24 model m/s (× √5 in the solver). Flags: `-avbd-scene 0..9`, `-avbd-snap`, `-avbd-siege`, `-avbd-outlying n`,
-`-avbd-trees n`, `-avbd-noshadows`, `-avbd-meshshadows`, `-avbd-norangeculling`, `-avbd-terrain hills|valley|ridge|none`,
+outlying copies (0 / 4 / 8), `F` trees (0 / 10 / 20 / 30, with six clumps of foliage each), `F6` collision boxes, `F7` shadows;
+`B` / `Enter` fires a 30 kg cannonball at 24 model m/s (× √5 in the solver). Flags: `-avbd-scene 0..9`, `-avbd-snap`,
+`-avbd-siege`, `-avbd-outlying n`, `-avbd-trees n`, `-avbd-foliage n` (clumps per tree), `-avbd-noshadows`, `-avbd-meshshadows`, `-avbd-norangeculling`, `-avbd-terrain hills|valley|ridge|none`,
 `-avbd-terrain-seed n`, `-avbd-terrain-style tiled|smooth`, and the screenshot / bench / camera flags above (a demo's own flags are read by
-`ParseArgs` before the world is created, so that the outlying and tree reserves follow them). The bench log reports the GPU
+`ParseArgs` before the world is created, so that the outlying, tree and foliage reserves follow them). The bench log reports the GPU
 render time and the draw count next to the frame and step times. What twenty trees cost is their shadows: they are 13 M
 triangles per pass (23 000 pieces with all their studs, three times the castle) and the PC pipeline draws every piece once
 more per shadow cascade, so with the meshes casting (`-avbd-meshshadows`) the Castle preset renders in 12.7 ms instead of
@@ -367,6 +370,37 @@ away, 1 600 snaps broken), where a castle wall of 1 kg bricks loses a section. T
 that cost nothing until a cannonball hits one, which wakes that tree alone; its neighbours are at most nudged by the debris
 and nothing else wakes (`CastleSmokeTests`: 0.9 ms per step with the castle and the trees asleep). `F8` (sleeping off)
 wakes everything, so the trees then count against `MaxActive` like the outlying copies.
+
+**Foliage** (`FoliagePerTree`, `-avbd-foliage n`, `FoliageBodies`, `FoliageMass`): six clumps of foliage per tree planted — a
+hundred and twenty with the twenty trees — scattered between the trees from the twenty documents of `Assets/Resources/Foliage`
+(`Tools/generate_foliage.py`: five grasses of a hundred plates, five bushes, five rocks, a moss cushion, a fallen log, a stump,
+a succulent and a fern of 390 to 580; stepped height fields tiled with studded plates course by course in alternating
+directions, every plate fully supported; 3 to 10 m across and 1.4 to 4.2 m tall at the brick scale). A clump is placed by
+rejection like a tree (a seed of its own drawn from `TreeSeed`; out to the foot of the hills, twenty metres beyond the trees),
+off the castle's core, the armies' bands and the outlying copies, clear of the trees' crowns and of the other clumps by its
+bounding square rather than a disc (a fallen log fills its corners). Where a tree touches the ground only with its trunk, a
+clump rests on it with its whole footprint, so the ground under the footprint must be level exactly: where the terrain is
+level within one cell of the footprint (the samples that shape the surface under it — the plateau around the castle, mostly)
+the clump stands on it as it is, elsewhere it gets a terrace of its own (its footprint and a cell around it levelled at the
+footprint's mean height, blending out over 2 m). No terrace may reach into another clump's level cell or a tree's trunk
+square, so a clump with a terrace stands two cells and a blend — 8 m at the scene's 3 m cells — from every other clump: the
+foliage is dense on the level ground and sparse on the hills (61 of the smoke test's 120 clumps stand on terraces). A clump's
+2 x 3 brick weighs `FoliageMass`, the castle's brick mass (1 kg in the scene): nothing in a clump needs the trees' lightness,
+and at the trees' quarter kilogram a cannonball turns a stump into a cloud (518 of its 520 plates a brick height away, 8 m of
+travel on average) where at a kilogram it blows half of it out (271 plates, 1.3 m) and the rest stands.
+
+The clumps are built in clusters — the cells of a 4 x 4 grid over the square they are scattered on — the clumps of a cell
+going into one assembly whose bodies `AssemblyBuilder.Build` lays out by piece, so that a cluster is drawn in as many ranges
+as it has kinds of plate and culled on its own bounds: the 120 clumps make 16 clusters drawn in 60 ranges, where a range per
+clump and piece would have been 600 draws and as many shadow proxies. Every clump is still an island of its own (`SleepRange`
+is told the island body by body, a clump's bodies lying between its cluster-mates'), so a cannonball wakes the clump it hits
+and nothing else; the debris wakes what it lands on, which settles and sleeps again. The 120 clumps are 45 770 more sleeping
+bodies: the Castle preset with the twenty trees renders in 6.5 ms instead of 4.6 (GPU render 5.5 instead of 3.8 ms, 412
+draws instead of 292; 1.05 ms per step with everything asleep in the smoke test, 0.9 without the foliage), thirty trees
+with their hundred and eighty clumps (83 of them on terraces, 93 000 pieces in all) in 7.5 ms. `FoliageBodies` (81 920 on
+top of `MaxBodies`, reserved while trees and foliage are asked for) is what a hundred and eighty clumps take at the outside:
+the twenty kinds average 383 pieces, 69 000 for a hundred and eighty on average. `F` cycles the trees and their foliage
+together.
 
 Terrain (`TerrainParams` on the demo, shared with the preview demo through `DemoBase`): a procedural heightfield generated
 from the seed, or, when a scene `Terrain` is assigned to `SceneTerrain`, that terrain's heights (drawn on it; its data is
@@ -574,7 +608,7 @@ take a third off the castle's own frame as well).
 .\RunTests.ps1 -Platform EditMode -Filter Phys.AvbdGpu.Tests.PerformanceTests   # step times (excluded by default)
 .\RunTests.ps1 -Platform EditMode -Filter Phys.AvbdGpu.Tests.SnapFractureTests  # snap limits, GPU and reference
 .\RunTests.ps1 -Platform EditMode -Filter "Phys.AvbdGpu.Tests.DriveTests;Phys.AvbdGpu.Tests.BodyPoolTests;Phys.AvbdGpu.Tests.SiegeTests"
-.\RunTests.ps1 -Platform PlayMode -Filter Phys.AvbdGpu.Tests.CastleSmokeTests   # the smallest and largest castles stand, cannonball, snaps break, outlying copies and trees sleep
+.\RunTests.ps1 -Platform PlayMode -Filter Phys.AvbdGpu.Tests.CastleSmokeTests   # the smallest and largest castles stand, cannonball, snaps break, outlying copies, trees and foliage sleep
 .\RunTests.ps1 -Platform PlayMode -Filter Phys.AvbdGpu.Tests.SiegeSmokeTests    # the Outpost under siege: volleys, kills, retirements
 .\RunTests.ps1 -Platform EditMode -Filter Phys.AvbdGpu.Tests.BrickAssemblyTests  # the brick-assembly format: catalog, parsing, rejection, boxes, snaps
 .\RunTests.ps1 -Platform PlayMode -Filter Phys.AvbdGpu.Tests.PreviewSmokeTests  # the JSON castles and trees: the Outpost, the re-bonded citadel and the six trees stand dry and snapped

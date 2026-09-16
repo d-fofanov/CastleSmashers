@@ -1,0 +1,36 @@
+{
+  "format": "brick-assembly",
+  "version": 1,
+  "catalog": "generic-construction-27-v1",
+  "name": "Tall Reed Grass",
+  "units": {
+    "gridToUnity": 0.1,
+    "axes": "unity"
+  },
+  "palette": {
+    "dark": "#25452B",
+    "mid": "#42743A",
+    "light": "#79A653",
+    "accent": "#B99A59"
+  },
+  "parts": [
+    {"id": "p0001", "piece": "Brick_2x2", "position": [-2.0, 0.0, 0.0], "color": "dark", "rotation": [0, 90, 0]},
+    {"id": "p0002", "piece": "Brick_2x2", "position": [0.0, 0.0, -2.0], "color": "dark"},
+    {"id": "p0003", "piece": "Brick_2x2", "position": [0.0, 0.0, 1.0], "color": "mid", "rotation": [0, 90, 0]},
+    {"id": "p0004", "piece": "Brick_2x2", "position": [2.0, 0.0, 0.0], "color": "mid", "rotation": [0, 90, 0]},
+    {"id": "p0005", "piece": "Brick_2x2", "position": [-2.0, 1.2, 0.0], "color": "mid", "rotation": [0, 90, 0]},
+    {"id": "p0006", "piece": "Brick_2x2", "position": [0.0, 1.2, -2.0], "color": "mid", "rotation": [0, 90, 0]},
+    {"id": "p0007", "piece": "Brick_2x2", "position": [0.0, 1.2, 1.0], "color": "mid", "rotation": [0, 90, 0]},
+    {"id": "p0008", "piece": "Brick_2x2", "position": [2.0, 1.2, 0.0], "color": "mid", "rotation": [0, 90, 0]},
+    {"id": "p0009", "piece": "Brick_2x2", "position": [-2.0, 2.4, 0.0], "color": "mid", "rotation": [0, 90, 0]},
+    {"id": "p0010", "piece": "Brick_2x2", "position": [0.0, 2.4, -2.0], "color": "mid"},
+    {"id": "p0011", "piece": "Brick_2x2", "position": [0.0, 2.4, 1.0], "color": "mid", "rotation": [0, 90, 0]},
+    {"id": "p0012", "piece": "Brick_2x2", "position": [2.0, 2.4, 0.0], "color": "mid", "rotation": [0, 90, 0]},
+    {"id": "p0013", "piece": "Brick_2x2", "position": [-2.0, 3.6, 0.0], "color": "light", "rotation": [0, 90, 0]},
+    {"id": "p0014", "piece": "Brick_2x2", "position": [0.0, 3.6, -2.0], "color": "light", "rotation": [0, 90, 0]},
+    {"id": "p0015", "piece": "Brick_2x2", "position": [0.0, 3.6, 1.0], "color": "mid", "rotation": [0, 90, 0]},
+    {"id": "p0016", "piece": "Plate_2x2", "position": [2.0, 3.6, 0.0], "color": "mid", "rotation": [0, 90, 0]},
+    {"id": "p0017", "piece": "Plate_2x2", "position": [0.0, 4.8, 1.0], "color": "mid"},
+    {"id": "p0018", "piece": "Plate_2x2", "position": [0.0, 5.2, 1.0], "color": "accent", "rotation": [0, 90, 0]}
+  ]
+}

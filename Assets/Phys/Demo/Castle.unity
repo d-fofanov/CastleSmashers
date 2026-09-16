@@ -517,6 +517,10 @@ MonoBehaviour:
   TreeBodies: 49152
   TreeSeed: 1
   TreeMass: 0.25
+  FoliageFolder: Foliage
+  FoliagePerTree: 6
+  FoliageBodies: 81920
+  FoliageMass: 1
   UnitCapacity: 512
   ArrowCapacity: 2048
   ShotCapacity: 512
