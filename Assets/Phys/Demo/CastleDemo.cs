@@ -166,6 +166,7 @@ namespace Phys.Demo
                 if (args[i] == "-avbd-siege") SiegeOnLoad = true;
                 if (args[i] == "-avbd-outlying" && i + 1 < args.Length && int.TryParse(args[i + 1], out int outlying)) Outlying = outlying;
                 if (args[i] == "-avbd-trees" && i + 1 < args.Length && int.TryParse(args[i + 1], out int trees)) Trees = trees;
+                if (args[i] == "-avbd-noshadows") Shadows = false;
             }
         }
 

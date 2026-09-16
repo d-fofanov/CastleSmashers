@@ -258,7 +258,7 @@ namespace Phys.Demo
                 {
                     var st = m_World.Stats;
                     Debug.Log($"AVBD bench: scene {m_Scene} '{SceneName(m_Scene)}' bodies {m_World.BodyCount} iterations {m_World.Params.Iterations} substeps {m_World.Params.Substeps}: " +
-                        $"frame {m_BenchMs / math.max(m_BenchFrames, 1):F2} ms ({m_BenchFrames / (m_BenchMs / 1000.0):F0} fps), submit {st.AvgStepMs:F2} ms, " +
+                        $"frame {m_BenchMs / math.max(m_BenchFrames, 1):F2} ms ({m_BenchFrames / (m_BenchMs / 1000.0):F0} fps), submit {st.AvgStepMs:F2} ms, gpu render {(FrameTimingManager.IsFeatureEnabled() ? $"{m_GpuMs:F2} ms" : "n/a")}, draws {m_Renderer.MeshRanges.Count + 1}, " +
                         $"pairs {st.Pairs} manifolds {st.Manifolds} ({st.ColdManifolds} cold) contacts {st.Contacts} colours {st.ColorsUsed}/{st.ActiveColors} overflow bodies {st.OverflowBodies} flags {st.OverflowFlags} " +
                         $"sleep {(m_World.Params.Sleep ? "on" : "off")} asleep {st.Sleeping} hot {st.Hot} active {st.Active} grid {st.SleepGrid} rebuilds {st.Rebuilds}");
                 }

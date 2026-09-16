@@ -316,9 +316,12 @@ stud grid (`CastlePlan.Presets`):
 Keys as the main demo plus `J` snap on/off, `T` terrain (hills, valley, ridge, flat), `Y` terrain style (tiled / smooth), `O`
 outlying copies (0 / 4 / 8), `F` trees (0 / 10 / 20 / 30), `F6` collision boxes, `F7` shadows; `B` / `Enter` fires a 30 kg
 cannonball at 24 model m/s (× √5 in the solver). Flags: `-avbd-scene 0..9`, `-avbd-snap`, `-avbd-siege`, `-avbd-outlying n`,
-`-avbd-trees n`, `-avbd-terrain hills|valley|ridge|none`, `-avbd-terrain-seed n`, `-avbd-terrain-style tiled|smooth`, and the
-screenshot / bench / camera flags above (a demo's own flags are read by `ParseArgs` before the world is created, so that the
-outlying and tree reserves follow them).
+`-avbd-trees n`, `-avbd-noshadows`, `-avbd-terrain hills|valley|ridge|none`, `-avbd-terrain-seed n`, `-avbd-terrain-style
+tiled|smooth`, and the screenshot / bench / camera flags above (a demo's own flags are read by `ParseArgs` before the world is
+created, so that the outlying and tree reserves follow them). The bench log reports the GPU render time and the draw count
+next to the frame and step times: with twenty trees the Castle preset renders in 12.4 ms instead of 5.9 (the physics step is
+0.14 ms either way, everything asleep), 4.7 instead of 4.0 with shadows off — the trees are 13 M triangles per pass (23 000
+pieces with all their studs), drawn once more per shadow cascade.
 
 **Outlying copies** (`Outlying`, key `O`, `-avbd-outlying n`): up to eight copies of the castle built asleep on the cells of a
 3 x 3 grid around it, each on its own plateau, spaced so that no plateau, skirt or army reaches the next — a world with
