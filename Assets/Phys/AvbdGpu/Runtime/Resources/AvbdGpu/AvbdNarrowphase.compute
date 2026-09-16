@@ -1,11 +1,12 @@
 // Narrowphase: OBB vs OBB contact generation (port of collide.cpp of avbd-demo3d), OBB vs heightfield contact generation
 // (CollideTerrain: the box's lattice points against the terrain, mirrored by RefCollide.CollideTerrain) and manifold
 // persistence (Manifold::initialize): the previous step's manifold of the same pair is found through a hash table and its
-// per-feature penalty / lambda / stick state is carried over before the warm-start decay. The manifolds of sleeping
-// bodies (CarrySleeping) are copied from the previous step unchanged: nothing they touch has moved.
+// per-feature penalty / lambda / stick state is carried over before the warm-start decay; a pair that was not in last
+// step's list is looked up in the cold store, where the manifolds of sleeping bodies wait (AvbdCold.compute), and a body
+// woken this step warm starts from the cold manifold and marks it dead. Two rounds: the pairs of the active bodies, then
+// the pairs of the bodies the touches woke (_PairRound 1: after the first round's pairs).
 #pragma kernel Collide
 #pragma kernel CollideTerrain
-#pragma kernel CarrySleeping
 
 #include "AvbdCommon.hlsl"
 #include "AvbdTerrain.hlsl"
@@ -36,8 +37,14 @@ RWStructuredBuffer<Manifold> _ManifoldCur;
 RWStructuredBuffer<Contact> _ContactsCur;
 RWStructuredBuffer<uint> _HashCur;
 RWStructuredBuffer<uint> _BodyEvents;      // FLAG_REPORT_EVENTS bodies: kinds touched, count of new projectile manifolds
-StructuredBuffer<uint> _BodySleep;         // sleep words: sleeping bodies get no new contacts, their old ones are carried
-StructuredBuffer<uint> _HotList;           // CollideTerrain: the bodies of the per-body passes
+StructuredBuffer<uint> _BodySleep;         // sleep words: sleeping bodies get no new contacts; a fresh body thaws its cold ones
+StructuredBuffer<uint> _HotList;           // CollideTerrain: the bodies of the list _ListSlot counts (the hot list, or the woken list)
+StructuredBuffer<uint> _BodyGen;           // sleep generations (the cold store's validity)
+RWStructuredBuffer<Manifold> _ColdManifoldsRW;   // the cold store (read to warm start, written to mark a thawed manifold dead)
+StructuredBuffer<Contact> _ColdContacts;
+StructuredBuffer<uint> _ColdHash;
+int _PairRound;       // Collide: 0 = the pairs of the active bodies, 1 = the pairs of the woken bodies (after CNT_PAIRS1)
+int _ListSlot;        // CollideTerrain: the counter slot of the list bound as _HotList (CNT_HOT or CNT_WOKEN_LIST)
 
 // Per-thread scratch in group shared memory: FXC cannot dynamically index register arrays with data-dependent
 // trip counts, group shared memory can be indexed freely. Two clip polygons and the contact set per thread.
@@ -444,6 +451,26 @@ int findPrevManifold(uint a, uint b)
     return -1;
 }
 
+// The cold store's manifold for the pair, or -1: a live entry (not thawed) whose generations still match both bodies,
+// each of which is static, asleep or fresh. A stale entry of the pair may be followed by a newer one, so the probe goes on.
+int findColdManifold(uint a, uint b, BodyDef dA, BodyDef dB)
+{
+    uint h = coldPairHash(a, b);
+    uint wa = _BodySleep[a], wb = _BodySleep[b];
+    uint ga = _BodyGen[a], gb = _BodyGen[b];
+    [loop]
+    for (int probe = 0; probe < MAX_PROBES; probe++)
+    {
+        uint v = _ColdHash[h];
+        if (v == 0) return -1;
+        Manifold m = _ColdManifoldsRW[v - 1];
+        if (m.bodyA == a && m.bodyB == b && m.numContacts != 0 && coldValidFor(dA, wa, ga, coldGenA(m)) && coldValidFor(dB, wb, gb, coldGenB(m)))
+            return (int)(v - 1);
+        h = (h + 1) & _ColdHashMask;
+    }
+    return -1;
+}
+
 // Reserves a manifold record and n contacts of the pools; false (and the overflow flag) when either is full.
 // (single exit: FXC warns about an uninitialised return value when a bool function returns early next to an atomic)
 bool reserveManifold(int n, out uint midx, out uint cstart)
@@ -477,16 +504,27 @@ void insertHash(uint a, uint b, uint midx)
 }
 
 // Writes manifold midx of pair (a, b) from the n contact points in thread t's scratch (gs_xA / gs_xB / gs_feature, world
-// points on A and B) into contacts cstart ..: warm start from the previous step's manifold by feature key, C0 at x-, the
-// events, the manifold record and its hash entry.
+// points on A and B) into contacts cstart ..: warm start from the previous step's manifold by feature key (or from the cold
+// store's, which is then dead: the body that woke owns the state now), C0 at x-, the events, the manifold record and its
+// hash entry.
 void emitManifold(uint t, int n, uint midx, uint cstart, uint a, uint b, BodyDef dA, BodyDef dB, float3 posA, float4 rotA, float3 posB, float4 rotB, float3x3 basis)
 {
     int prev = findPrevManifold(a, b);
+    int cold = prev < 0 ? findColdManifold(a, b, dA, dB) : -1;
     Manifold pm = (Manifold)0;
     if (prev >= 0) pm = _ManifoldPrev[prev];
+    else if (cold >= 0)
+    {
+        pm = _ColdManifoldsRW[cold];
+        _ColdManifoldsRW[cold].numContacts = 0;   // thawed
+        uint dummy;
+        InterlockedAdd(_Counters[CNT_COLD_DEAD], 1, dummy);
+        InterlockedAdd(_Counters[CNT_THAWED], 1, dummy);
+    }
+    bool warm = prev >= 0 || cold >= 0;
     float4 invA = qconj(rotA), invB = qconj(rotB);
-    reportContact(a, dA, b, dB, prev < 0);
-    reportContact(b, dB, a, dA, prev < 0);
+    reportContact(a, dA, b, dB, !warm);
+    reportContact(b, dB, a, dA, !warm);
 
     [loop]
     for (int i = 0; i < n; i++)
@@ -497,12 +535,14 @@ void emitManifold(uint t, int n, uint midx, uint cstart, uint a, uint b, BodyDef
         c.feature = gs_feature[t][i];
 
         // Merge old contact data by feature; sticking contacts keep their old anchor points
-        if (prev >= 0)
+        if (warm)
         {
             [loop]
             for (uint j = 0; j < pm.numContacts; j++)
             {
-                Contact old = _ContactsPrev[pm.contactStart + j];
+                Contact old;
+                if (prev >= 0) old = _ContactsPrev[pm.contactStart + j];
+                else old = _ColdContacts[pm.contactStart + j];
                 if ((old.feature & 0x7FFFFFFFu) == c.feature)
                 {
                     float3 newRA = c.rA, newRB = c.rB;
@@ -536,9 +576,10 @@ void emitManifold(uint t, int n, uint midx, uint cstart, uint a, uint b, BodyDef
 [numthreads(AVBD_THREADS, 1, 1)]
 void Collide(uint3 id : SV_DispatchThreadID, uint3 gtid : SV_GroupThreadID)
 {
-    if (id.x >= _Counters[CNT_PAIRS]) return;
+    uint p = id.x + (_PairRound != 0 ? _Counters[CNT_PAIRS1] : 0);
+    if (p >= _Counters[CNT_PAIRS]) return;
     uint t = gtid.x;
-    uint2 pair = _Pairs[id.x];
+    uint2 pair = _Pairs[p];
     uint a = pair.x, b = pair.y;
     BodyDef dA = _BodyDef[a], dB = _BodyDef[b];
     float3 posA = _BodyPos[a].xyz, posB = _BodyPos[b].xyz;
@@ -564,10 +605,11 @@ void Collide(uint3 id : SV_DispatchThreadID, uint3 gtid : SV_GroupThreadID)
 void CollideTerrain(uint3 id : SV_DispatchThreadID, uint3 gtid : SV_GroupThreadID)
 {
     if (_TerrainSlot == NO_TERRAIN) return;
-    HOT_BODY(id, i)
+    if (id.x >= _Counters[_ListSlot]) return;
+    uint i = _HotList[id.x];
     uint t = gtid.x;
     BodyDef d = _BodyDef[i];
-    if (!activeBody(d, _BodySleep[i])) return;   // a sleeping body keeps last step's terrain manifold (CarrySleeping)
+    if (!activeBody(d, _BodySleep[i])) return;   // a sleeping body keeps its terrain manifold in the cold store
     float3 mn = _BodyAabbMin[i].xyz, mx = _BodyAabbMax[i].xyz;
     if (mn.y > terrainMaxOver(mn.xz, mx.xz)) return;
 
@@ -626,31 +668,4 @@ void CollideTerrain(uint3 id : SV_DispatchThreadID, uint3 gtid : SV_GroupThreadI
     emitManifold(t, count, midx, cstart, i, b, d, _BodyDef[b], pos, rot, _BodyPos[b].xyz, _BodyRot[b], basis);
     uint dummy;
     InterlockedAdd(_Counters[CNT_TERRAIN], 1, dummy);
-}
-
-// ------------------------------------------------------------------------------------------------ sleeping
-
-// One thread per manifold of the previous step: a manifold none of whose bodies is active (both asleep, or asleep against
-// a static body or the terrain) is copied into this step unchanged - no warm-start decay, no new C0: nothing moved. Pairs
-// with an active body are recomputed by Collide / CollideTerrain instead, and a retired body takes its manifolds with it.
-[numthreads(AVBD_THREADS, 1, 1)]
-void CarrySleeping(uint3 id : SV_DispatchThreadID)
-{
-    if (id.x >= _Counters[CNT_PREV_MANIFOLDS]) return;
-    Manifold m = _ManifoldPrev[id.x];
-    uint a = m.bodyA, b = m.bodyB;
-    BodyDef dA = _BodyDef[a], dB = _BodyDef[b];
-    if (isDead(dA) || isDead(dB)) return;
-    if (activeBody(dA, _BodySleep[a]) || activeBody(dB, _BodySleep[b])) return;
-    uint midx, cstart;
-    if (!reserveManifold((int)m.numContacts, midx, cstart)) return;
-    [loop]
-    for (uint i = 0; i < m.numContacts; i++)
-        _ContactsCur[cstart + i] = _ContactsPrev[m.contactStart + i];
-    m.contactStart = cstart;
-    _ManifoldCur[midx] = m;
-    insertHash(a, b, midx);
-    uint dummy;
-    InterlockedAdd(_Counters[CNT_CARRIED], 1, dummy);
-    if (b == _TerrainSlot) InterlockedAdd(_Counters[CNT_TERRAIN], 1, dummy);
 }

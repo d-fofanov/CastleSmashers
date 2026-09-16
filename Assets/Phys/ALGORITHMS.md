@@ -68,11 +68,13 @@ buffer.
 4. **Narrowphase** (`Collide`): the reference's OBB test — SAT over 15 axes with an edge preference tolerance, face
    clipping (incident face against the reference face's side planes, up to 8 points, feature keys from the reference
    axis, incident axis and vertex index) or closest points of the two support edges. The previous step's manifold of
-   the same pair is found in an open-addressing hash table keyed by the pair; per feature key the penalty, multiplier,
-   stick flag and, for sticking contacts, the old anchor points are carried over, then the warm-start decay is applied.
-   Contacts are appended to a pool (one atomic per manifold), the header to the manifold list, the pair to the new
-   hash table. Bodies that report events get the kind of the other body or-ed into their event word, and an impact
-   counted when the manifold is new and the other body is a projectile moving faster than 2 m/s.
+   the same pair is found in an open-addressing hash table keyed by the pair, and failing that in the **cold store**
+   (below: the pair's manifold from when its bodies fell asleep, valid when a body of it woke this step); per feature key
+   the penalty, multiplier, stick flag and, for sticking contacts, the old anchor points are carried over, then the
+   warm-start decay is applied, and a cold manifold used this way is marked dead. Contacts are appended to a pool (one
+   atomic per manifold), the header to the manifold list, the pair to the new hash table. Bodies that report events get
+   the kind of the other body or-ed into their event word, and an impact counted when the manifold is new and the other
+   body is a projectile moving faster than 2 m/s.
    **Terrain** (`CollideTerrain`, one thread per body, appending to the same pools): the world's heightfield is a body
    slot — static, at the identity pose, in no grid cell — so a terrain manifold is an ordinary manifold with the dynamic
    body as A and the slot as B, and nothing downstream knows the difference. The body is skipped when its AABB's bottom
@@ -87,16 +89,17 @@ buffer.
    unrolled loops over a register array of distances and re-samples the chosen points, FXC having no data-dependent
    indexing of local arrays. `AvbdTerrain.hlsl` mirrors `Heightfield.cs` and `RefCollide.CollideTerrain` operation for
    operation; the GPU and the CPU reference agree to rounding.
-   **Carried manifolds** (`CarrySleeping`, one thread per manifold of the previous step): a manifold none of whose
-   bodies is active — both asleep, or asleep against a static body or the terrain — is copied into this step's pools
-   unchanged (contacts, penalties, multipliers, stick anchors; no decay, no new `C0`: nothing moved) and hashed like a new
-   one. A retired body takes its manifolds with it.
    **Touches** (`WakeTouch` → `WakeApply` → `WakeClear`): every constraint joining a sleeping body to an awake one that
    is not resting marks the sleeper (a bit at its index) or, when the awake body is faster than `WakeSpeed`, its whole
    island (a bit at the island's representative); every marked body and every body whose island is marked has its
    asleep bit cleared before anything is solved (see *Sleeping* below). The two passes over every body run only in steps
-   that set a mark; a woken sleeper of the sleeping grid is appended to the hot list, and its joints and springs to the
-   active lists (`JointListWoken`: the ones no body that was active at the start of the step brought already).
+   that set a mark; a woken sleeper of the sleeping grid is appended to the hot list.
+   **Second round** (`PairGenWoken` → `Collide` → `CollideTerrain` → `JointListWoken`): the bodies the touches woke were
+   inactive at pair generation, so they walk both grids now and take every pair with an inactive body and, with another
+   woken body, the one where they have the lower index (a body that was active in the first round emitted its pair with
+   them already; the woken bodies of the sleeping grid keep their grid bit for the step, so they still find each other
+   there). Their contacts warm start from the cold store, their terrain contacts likewise, and their joints and springs
+   join the active lists (the ones no body that was active at the start of the step brought already).
 5. **Joints** (`PrepareJoints`, over the active joint list): `C0` of the ball-socket and the angular lock at `x⁻`, decay,
    penalty capped at the material stiffness; a joint without an active body is not in the list and stays frozen with its
    bodies.
@@ -134,9 +137,14 @@ buffer.
     `SleepDistance` or `SleepAngle`) or counts the step; the counters are then propagated as a minimum over each body's
     awake dynamic neighbours (a sleeping neighbour counts as rested: it slept because its neighbourhood rested, and
     anything moving against it wakes it first), one round per hop, and a body whose neighbourhood minimum reached
-    `SleepTime` falls asleep (asleep bit, velocities zeroed, counted as pending for the sleeping grid) unless it was
-    woken by a touch this very step.
-11. The manifold, contact and hash buffers are copied to their "previous" twins (`CopyBuffer`) and the counters are
+    `SleepTime` falls asleep (asleep bit, velocities zeroed, its sleep generation advanced, counted as pending for the
+    sleeping grid).
+11. **Freeze** (`FreezeCount` → two scans → `FreezeCopy` → `FreezeFinish`, only in steps where a body fell asleep): every
+    manifold of the step whose bodies are both inactive now (alive: a retired body takes its manifolds with it) is
+    appended to the cold store with its contacts and the generations of its bodies, in the order of the step's list
+    (the scans give the manifolds and the contacts their places, so the contacts of the pool lie in manifold order),
+    and hashed by pair. It is not recreated next step — no pair without an active body is — so it leaves the step.
+12. The manifold, contact and hash buffers are copied to their "previous" twins (`CopyBuffer`) and the counters are
     copied to a stats buffer for the asynchronous readback.
 
 Rendering never touches the CPU: one `RenderMeshPrimitives` cube draw reads the pose and definition buffers by
@@ -178,19 +186,31 @@ The terrain (above) is a fourth: a world without one records no terrain pass and
 
 A D3D12 note from the sleeping work: `BuildArgs` writing the indirect argument slots 0..6 as one contiguous run of
 `Store3`s made the kernel do nothing at all (no error, no output — presumably the stores were coalesced into something
-the driver rejected); the slot of the carried-manifold dispatch is therefore written in phase 1, next to the pair
-count, where the stores are not contiguous.
+the driver rejected); the slot of the second pair round is therefore written in phase 1, next to the pair count,
+where the stores are not contiguous.
 
 ## Sleeping
 
-A sleeping body is frozen: it keeps its pose, its zero velocities and — through the carried manifolds and the skipped
-joint preparation — the exact penalties, multipliers and sticking anchors it fell asleep with, so no warm-start decay
-happens while it sleeps and a sleeping castle stops creeping. Everything downstream of the narrowphase treats it as
-static (`activeBody`: dynamic, alive and awake): it produces no pairs, is coloured `STATIC_COLOR`, is skipped by
-`Predict` (its initial and inertial pose are its pose), `Primal` (it is in no colour list), `Dual` and `Velocity`, and its
-manifolds, once carried, are only read by the awake bodies at the boundary of a sleeping region. Such a boundary body is
-solved against a frozen neighbour exactly as against a static body, with a manifold whose `C0` is still the true error at
-`x⁻` (neither body moved since it was computed) and whose multiplier carries the resting load.
+A sleeping body is frozen: it keeps its pose, its zero velocities and — through the cold store and the skipped joint
+preparation — the exact penalties, multipliers and sticking anchors it fell asleep with, so no warm-start decay happens
+while it sleeps and a sleeping castle stops creeping. It costs nothing while it sleeps: it is in no list the step runs
+over (the hot list, the active joint list, the constraint index space), produces no pairs and sits in the sleeping
+grid to be found. An awake body at the boundary of a sleeping region has its manifold with the sleeper recomputed
+every step like any other (the sleeper is inactive, so the awake side emits the pair), and is solved against the
+frozen neighbour exactly as against a static body: a manifold whose `C0` is the true error at `x⁻` and whose multiplier
+carries the resting load. Only a manifold *without* an active body leaves the step, into the cold store.
+
+**The cold store** keeps such manifolds — contacts, penalties, multipliers, stick anchors — with the *sleep generation*
+of each body (a counter that advances whenever the body falls asleep, and when its slot is retired). A cold manifold is
+valid for a body while the generation still matches and the body is static, asleep, or *fresh* (bit 28: it woke this
+step, by a touch or the application): the round that gives a fresh body its contacts finds the pair in the cold hash,
+warm starts from it and marks it dead, so nothing is ever warm started from a state of an earlier sleep, and a body
+that wakes, moves off and comes back starts its contacts cold like any new pair. The pool is append-only; the store is
+compacted — dead entries squeezed out in place, chunk by chunk through a scratch, the hash rebuilt — by its own command
+buffer every `ColdCompactSteps` steps once a quarter of it was thawed or it is three quarters full (a gate on the GPU;
+a compaction changes no result, the pool's order is not observable). With more frozen manifolds than
+`MaxColdManifolds` (or contacts than `MaxColdContacts`) the surplus is dropped with the overflow flags 2 / 4: those
+bodies wake with cold contacts and settle again.
 
 Bodies rest independently — a body rests when it has stayed within the thresholds of a *rest anchor* for `SleepTime`, a
 criterion that tolerates the sub-millimetre jitter of a resting pile but catches creep and a slow topple — but sleep
@@ -209,14 +229,14 @@ around each creeper awake and lets the rest sleep. The island is used for waking
   motion resets the counter and, next step, wakes its own sleeping neighbours, so a slow push travels through a sleeping
   pile one body per step. A resting toucher wakes nothing: a pile creeping below the thresholds leans on its frozen
   neighbours instead of keeping them awake.
-* A body woken by a touch was asleep at pair generation, so it was solved on its carried manifolds; it may not fall
-  asleep again before the next step has recomputed them (bit 30 of the sleep word), otherwise a body nudged every step
-  would drift away from manifolds that are never refreshed.
+* A body woken by a touch was asleep at pair generation; the second narrowphase round gives it its contacts, warm
+  started from the cold store, so it is solved on fresh manifolds like every other body (bit 30 of the sleep word marks
+  it for that round and for the joint lists).
 * The application wakes what it changes: spawns (sleep word and label reset), changed drives, flags, joints and
-  springs added, removed or re-anchored, ignore links, the neighbours of a retired body (found through its constraint
-  list of the previous step), and everything when the terrain or gravity changes (`WakeAll`, a zero upload). A body woken
-  this way is awake at pair generation, so its contacts are recomputed with the normal warm-start decay from the
-  carried manifolds, and `WakeTouch` then wakes what it touches.
+  springs added, removed or re-anchored, ignore links, whatever overlaps a retired body (found in both grids: its
+  manifolds may be in the cold store, which no list indexes), and everything when the terrain or gravity changes
+  (`WakeAll`, an upload of fresh words). A body woken this way is awake at pair generation, so its contacts are
+  recomputed with the normal warm-start decay from the cold store, and `WakeTouch` then wakes what it touches.
 
 Islands are maintained incrementally by the label rounds above and only ever merge between relabels, so debris that
 left an island shares its label for up to `SleepRelabelSteps` (a touch on it wakes the old island meanwhile). Labels

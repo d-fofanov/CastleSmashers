@@ -19,15 +19,19 @@
 #define ALIGN_MIN_SPEED 1.0     // below this speed an align-to-velocity body keeps its orientation (a stuck arrow)
 #define HIT_MIN_SPEED 2.0       // a projectile slower than this does not count as a hit in the event words
 
-// Sleep word (_BodySleep, GPU-owned): bit 31 = asleep, bit 30 = woken by a touch this step (its manifolds were carried, not
-// recomputed, so it may not fall asleep again before the next step), bit 29 = the body's cells are in the sleeping grid
-// (set by the grid rebuild, only ever set on an inactive body; every wake overwrites the word and so clears it),
-// bits 0..28 = steps at rest within the rest anchor.
+// Sleep word (_BodySleep, GPU-owned): bit 31 = asleep; bit 30 = woken by a touch this step (it was asleep at pair
+// generation: the second narrowphase round gives it its contacts); bit 29 = the body's cells are in the sleeping grid
+// (set by the grid rebuild on inactive bodies only; a CPU wake overwrites the word, a touch wake keeps the bit for the
+// rest of the step so that the woken bodies still find each other there); bit 28 = fresh: woke this step (the cold
+// manifolds of a fresh body are the ones its contacts warm start from); bits 0..27 = steps at rest within the rest
+// anchor. RestSleep clears bits 28..30 at the end of the step.
 #define SLEEP_ASLEEP 0x80000000u
 #define SLEEP_WOKEN 0x40000000u
 #define SLEEP_IN_GRID 0x20000000u
-#define SLEEP_COUNTER_MASK 0x1FFFFFFFu
-#define SLEEP_COUNTER_MAX 0x10000000u
+#define SLEEP_FRESH 0x10000000u
+#define SLEEP_STEP_BITS (SLEEP_WOKEN | SLEEP_IN_GRID | SLEEP_FRESH)
+#define SLEEP_COUNTER_MASK 0x0FFFFFFFu
+#define SLEEP_COUNTER_MAX 0x08000000u
 
 // Wake list entries (_WakeList.y, uploaded by the CPU): wake the body; wake the bodies of its previous constraint list
 // (a retired support); a spawn (sleep word and island label reset).
@@ -85,9 +89,9 @@
 #define CNT_ACTIVE_JOINTS 8     // joints with an active body (the active joint list)
 #define CNT_TERRAIN 9           // manifolds against the terrain (a subset of CNT_MANIFOLDS)
 #define CNT_SLEEPING 10         // bodies that fell asleep this step; the stats slot holds the bodies asleep at the end of the step
-#define CNT_CARRIED 11          // manifolds of sleeping bodies carried over unchanged (a subset of CNT_MANIFOLDS)
+#define CNT_FROZEN 11           // manifolds moved into the cold store this step
 #define CNT_WOKEN 12            // sleeping bodies woken by a touch this step
-#define CNT_PREV_MANIFOLDS 13   // last step's manifold count (CarrySleeping runs over last step's list)
+#define CNT_THAWED 13           // cold manifolds a fresh body warm started from this step
 #define CNT_HOT 14              // bodies of the hot list: active, or not yet in the sleeping grid
 #define CNT_WOKEN_LIST 15       // bodies woken by a touch this step that were in the sleeping grid (appended to the hot list)
 #define CNT_ACTIVE_SPRINGS 16   // springs with an active body (the active spring list)
@@ -95,12 +99,17 @@
 #define CNT_ACTIVE 18           // active bodies at the start of the step (dynamic, alive, awake)
 #define CNT_REBUILD_DUE 19      // the sleeping grid rebuild that ran before this step did rebuild (its gate)
 #define CNT_ASLEEP_START 20     // dynamic bodies asleep at the start of the step (after the CPU wakes)
+#define CNT_PAIRS1 21           // pairs of the first narrowphase round (the second round appends after them)
+#define CNT_COLD_COMPACT_DUE 22 // the cold store compaction that ran before this step did compact (its gate)
 #define CNT_PERSISTENT 24
 #define CNT_PENDING 24          // bodies that fell asleep since the sleeping grid was rebuilt (still inserted into the hot grid)
 #define CNT_STALE 25            // bodies that woke since the rebuild (their entries in the sleeping grid are skipped)
 #define CNT_SLEEP_GRID 26       // bodies in the sleeping grid
 #define CNT_REBUILDS 27         // sleeping grid rebuilds so far
 #define CNT_REBUILD_FORCE 28    // set by the CPU: rebuild at the next opportunity whatever the counts (new bodies were uploaded)
+#define CNT_COLD 29             // manifolds in the cold store (dead ones included until a compaction)
+#define CNT_COLD_CONTACTS 30    // their contacts
+#define CNT_COLD_DEAD 31        // cold manifolds thawed since the last compaction
 #define CNT_COUNT 32
 
 // Indirect dispatch argument slots (uint3 each, byte offset = slot * 12).
@@ -109,7 +118,7 @@
 #define ARG_MANIFOLDS 2
 #define ARG_CONSTRAINTS 3
 #define ARG_JOINTS 4            // every joint (debug draw)
-#define ARG_PREV_MANIFOLDS 5    // last step's manifold count (CarrySleeping)
+#define ARG_PAIRS2 5            // the pairs of the second narrowphase round (the woken bodies)
 #define ARG_WAKE_LIST 6         // the CPU wake list
 #define ARG_COLOR0 8            // 33 slots: colours 0..31 and the overflow group at _ActiveColors
 #define ARG_HOT (ARG_COLOR0 + MAX_COLORS + 1)   // the hot list (per-body passes)
@@ -124,7 +133,18 @@
 #define ARG_SLEEP_CELL_SCAN (ARG_HOT + 9)       // rebuild: scan groups over the cells
 #define ARG_SLEEP_SCAN_TOP (ARG_HOT + 10)       // rebuild: the single group of the scans' top level (or nothing)
 #define ARG_SLEEP_CELL_SCAN_TOP (ARG_HOT + 11)
-#define ARG_COUNT (ARG_HOT + 12)
+#define ARG_FREEZE (ARG_HOT + 12)               // the cold store: the hot manifold capacity when bodies fell asleep this step, else nothing
+#define ARG_FREEZE_SCAN (ARG_HOT + 13)          // freeze: scan groups over the hot manifold capacity
+#define ARG_FREEZE_SCAN_TOP (ARG_HOT + 14)
+#define ARG_COLD_FLAG (ARG_HOT + 15)            // compaction: the cold capacity, or nothing when no compaction is due
+#define ARG_COLD_SCAN (ARG_HOT + 16)
+#define ARG_COLD_SCAN_TOP (ARG_HOT + 17)
+#define ARG_COLD_CHUNK (ARG_HOT + 18)           // compaction: one chunk of the pool (COLD_CHUNK manifolds)
+#define ARG_COLD_HASH (ARG_HOT + 19)            // compaction: the cold hash table
+#define ARG_COLD_INSERT (ARG_HOT + 20)          // compaction: the compacted manifolds, to re-insert
+#define ARG_COUNT (ARG_HOT + 24)
+
+#define COLD_CHUNK 16384        // manifolds per in-place compaction chunk (its contacts fit 8 x this in the scratch)
 
 struct BodyDef
 {
@@ -260,6 +280,11 @@ cbuffer AvbdParams
     uint _MaxActive;
     uint _SleepCellMask;
     uint _RebuildMin;
+    // the cold store: the manifolds of sleeping bodies, their contacts and the hash table that finds them by pair
+    uint _MaxColdManifolds;
+    uint _MaxColdContacts;
+    uint _ColdHashMask;
+    uint _Pad5;
 };
 
 // ------------------------------------------------------------------------------------------------ quaternions
@@ -468,10 +493,9 @@ uint cellHashRaw(int3 c) { return (uint)c.x * 73856093u ^ (uint)c.y * 19349663u 
 uint cellHash(int3 c) { return cellHashRaw(c) & _CellMask; }             // the hot grid
 uint sleepCellHash(int3 c) { return cellHashRaw(c) & _SleepCellMask; }   // the sleeping grid
 
-uint pairHash(uint a, uint b)
-{
-    return wangHash(a * 0x9E3779B1u ^ wangHash(b)) & _HashMask;
-}
+uint pairHashRaw(uint a, uint b) { return wangHash(a * 0x9E3779B1u ^ wangHash(b)); }
+uint pairHash(uint a, uint b) { return pairHashRaw(a, b) & _HashMask; }           // the hot manifolds of the step
+uint coldPairHash(uint a, uint b) { return pairHashRaw(a, b) & _ColdHashMask; }   // the cold store
 
 int3 cellCoord(float3 p) { return (int3)floor(p * _InvCellSize); }
 
@@ -503,8 +527,23 @@ bool lockedRotation(BodyDef d) { return (d.flags & (FLAG_LOCK_ROTATION | FLAG_HE
 // an active body is dynamic, alive and awake. With sleeping off no word counts as asleep.
 bool asleepWord(uint w) { return _SleepSteps != 0 && (w & SLEEP_ASLEEP) != 0; }
 bool activeBody(BodyDef d, uint sleepWord) { return !isStatic(d) && !asleepWord(sleepWord); }
-// The body's cells are in the sleeping grid (a rebuild put them there and it has not woken since).
+// The body's cells are in the sleeping grid (a rebuild put them there and it has not woken since; a touch wake keeps
+// the bit until the end of the step).
 bool inSleepGrid(uint sleepWord) { return (sleepWord & SLEEP_IN_GRID) != 0; }
+bool wokenWord(uint sleepWord) { return (sleepWord & SLEEP_WOKEN) != 0; }
+bool freshWord(uint sleepWord) { return (sleepWord & SLEEP_FRESH) != 0; }
+
+// The cold store keeps the manifolds of sleeping bodies with the sleep generation of both bodies (a body's generation
+// advances every time it falls asleep, and when its slot is retired). A cold manifold is valid for a body while the
+// generation still matches and the body is static, asleep, or fresh (woke this step: the round that gives it new contacts
+// warm starts them from the cold manifolds and marks those dead).
+bool coldValidFor(BodyDef d, uint sleepWord, uint gen, uint storedGen)
+{
+    if (gen != storedGen) return false;
+    return isStatic(d) || asleepWord(sleepWord) || freshWord(sleepWord);
+}
+uint coldGenA(Manifold m) { return asuint(m.pad.x); }
+uint coldGenB(Manifold m) { return asuint(m.pad.y); }
 
 // Per-body kernels run over the hot list (_HotList, CNT_HOT entries): the bodies that are active or not yet in the
 // sleeping grid. Bodies in the sleeping grid are inactive and skipped by everything until something wakes them.

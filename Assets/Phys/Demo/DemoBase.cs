@@ -241,7 +241,7 @@ namespace Phys.Demo
                     var st = m_World.Stats;
                     Debug.Log($"AVBD bench: scene {m_Scene} '{SceneName(m_Scene)}' bodies {m_World.BodyCount} iterations {m_World.Params.Iterations} substeps {m_World.Params.Substeps}: " +
                         $"frame {m_BenchMs / math.max(m_BenchFrames, 1):F2} ms ({m_BenchFrames / (m_BenchMs / 1000.0):F0} fps), submit {st.AvgStepMs:F2} ms, " +
-                        $"pairs {st.Pairs} manifolds {st.Manifolds} ({st.CarriedManifolds} carried) contacts {st.Contacts} colours {st.ColorsUsed}/{st.ActiveColors} overflow bodies {st.OverflowBodies} flags {st.OverflowFlags} " +
+                        $"pairs {st.Pairs} manifolds {st.Manifolds} ({st.ColdManifolds} cold) contacts {st.Contacts} colours {st.ColorsUsed}/{st.ActiveColors} overflow bodies {st.OverflowBodies} flags {st.OverflowFlags} " +
                         $"sleep {(m_World.Params.Sleep ? "on" : "off")} asleep {st.Sleeping} hot {st.Hot} active {st.Active} grid {st.SleepGrid} rebuilds {st.Rebuilds}");
                 }
                 Application.Quit();
@@ -425,7 +425,7 @@ namespace Phys.Demo
             return
                 $"frame {Time.smoothDeltaTime * 1000f:F1} ms ({1f / math.max(Time.smoothDeltaTime, 1e-4f):F0} fps)  step submit {stats.LastStepMs:F2} ms (avg {stats.AvgStepMs:F2})  gpu render {(FrameTimingManager.IsFeatureEnabled() ? $"{m_GpuMs:F2} ms" : "n/a")}\n" +
                 $"bodies {m_World.BodyCount} ({stats.Sleeping} asleep, {stats.Woken} woken; hot {stats.Hot}, active {stats.Active} / {m_World.Config.MaxActive}, grid {stats.SleepGrid} +{stats.Pending} -{stats.Stale})  joints {m_World.JointCount}  springs {m_World.SpringCount}  pairs {stats.Pairs}  manifolds {stats.Manifolds}" +
-                (m_World.Terrain != null ? $" ({stats.TerrainManifolds} terrain, {stats.CarriedManifolds} carried)" : $" ({stats.CarriedManifolds} carried)") + $"  contacts {stats.Contacts}\n" +
+                (m_World.Terrain != null ? $" ({stats.TerrainManifolds} terrain)" : "") + $"  contacts {stats.Contacts}  cold {stats.ColdManifolds} (+{stats.Frozen} -{stats.Thawed}, {stats.ColdDead} dead)\n" +
                 $"colours {stats.ColorsUsed} / active {stats.ActiveColors}  overflow bodies {stats.OverflowBodies}  large bodies {stats.LargeBodies}{overflow}\n" +
                 $"dt 1/{math.round(1f / p.Dt)}  substeps {p.Substeps}  iterations {p.Iterations}  alpha {p.Alpha}  beta {p.BetaLin}/{p.BetaAng}  gamma {p.Gamma}  " +
                 $"post-stabilise {(p.PostStabilize ? "on" : "off")}  rotated inertia {(p.RotatedInertia ? "on" : "off")}  " +

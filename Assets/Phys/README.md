@@ -160,13 +160,14 @@ bool asleep = GpuBodySleep.IsAsleep(world.GetSleepSync()[box]);   // sync readba
 ```
 
 A body that has stayed within `SleepDistance` / `SleepAngle` of its rest pose for `SleepTime`, with every body within
-`SleepHops` contacts or joints of it resting as well, falls asleep: it is frozen with zero velocities, its manifolds and
-joint states are carried from step to step unchanged (no warm-start decay: a sleeping castle stops creeping), it produces no
-pairs, is not coloured and takes no part in the solve, so a resting scene costs the broadphase and the fixed dispatch
-overhead only. Sleeping bodies stay in the grid, so awake bodies find them: a contact with an awake body that is not
-resting wakes the sleeper **in the same step**, before anything is solved — the touched body alone when the toucher is
-slow, the sleeper's whole **island** (every body connected to it through contacts and joints, tracked on the GPU) when the
-toucher is faster than `WakeSpeed`, so a cannonball into a wall moves the wall and never bounces off a frozen one. A
+`SleepHops` contacts or joints of it resting as well, falls asleep: it is frozen with zero velocities, its manifolds move
+into a **cold store** and its joint states are left alone (no warm-start decay: a sleeping castle stops creeping, and a
+woken body carries its load from the first step), it produces no pairs, is not coloured and takes no part in the solve,
+so a resting scene costs the fixed dispatch overhead only. Sleeping bodies stay findable (in a grid of their own), so
+awake bodies meet them: a contact with an awake body that is not resting wakes the sleeper **in the same step**, before
+anything is solved — the touched body alone when the toucher is slow, the sleeper's whole **island** (every body connected
+to it through contacts and joints, tracked on the GPU) when the toucher is faster than `WakeSpeed`, so a cannonball into a
+wall moves the wall and never bounces off a frozen one. A
 resting toucher wakes nothing: a pile creeping below the thresholds leans on its frozen neighbours instead of keeping
 them awake. Islands woken by an impact stay awake for `WakeHold`, long enough for whatever lost its support to start
 falling; a body woken by a slow touch that does not move goes back to sleep as soon as its neighbourhood allows.
@@ -177,17 +178,20 @@ the terrain and gravity (everything). A body drawn in the `Sleep` colour mode (`
 colour while asleep.
 
 Sleeping bodies cost no threads either: every per-body pass of the step runs over the **hot list** — the awake bodies and
-the ones that fell asleep since the **sleeping grid** was last rebuilt — and the joint and spring passes over the joints of
-the awake bodies. Every `SleepGridRebuildSteps` steps, once `SleepGridRebuildMin` bodies (or a 64th of the grid) fell asleep
-or woke since the last time, the sleeping grid is rebuilt from the inactive bodies (asleep, or static and small) and they
-leave the hot list; awake bodies walk both grids, so a sleeper is still found by whatever moves against it, and a woken
-body rejoins the hot list in the step of its wake. A world can therefore hold more bodies than it has room to simulate:
-`ForBodies(total, active)` sizes the per-body arrays for `total` and the pairs, the hot grid and the colour list for
-`active`, and as long as fewer than `active` bodies are awake at a time nothing overflows (`Stats.Hot`, `Active`, `SleepGrid`,
-`Pending`, `Stale`, `Rebuilds` count the lists; the HUD shows them next to the body count). A rebuild is one counting
-sort of the sleepers (a few milliseconds for a million), a gate on the GPU skips it when nothing is due, and everything the
-CPU moves outside the solver (the terrain, gravity, `WakeAll`) wakes all bodies at once — an overflow when there are more
-than `active` of them.
+the ones that fell asleep since the **sleeping grid** was last rebuilt — the joint and spring passes over the joints of
+the awake bodies, and the manifold passes over the manifolds with an awake body; the manifolds of the sleepers wait in
+the **cold store** (`Stats.ColdManifolds`), from which a woken body warm starts its contacts in the step of its wake.
+Every `SleepGridRebuildSteps` steps, once `SleepGridRebuildMin` bodies (or a 64th of the grid) fell asleep or woke since
+the last time, the sleeping grid is rebuilt from the inactive bodies (asleep, or static and small) and they leave the
+hot list; awake bodies walk both grids, so a sleeper is still found by whatever moves against it, and a woken body
+rejoins the hot list in the step of its wake. A world can therefore hold more bodies than it has room to simulate:
+`ForBodies(total, active)` sizes the per-body arrays, the cold store and the sleeping grid for `total` and the manifold
+pools, the pairs, the hot grid and the colour list for `active`, and as long as fewer than `active` bodies are awake at a
+time nothing overflows (`Stats.Hot`, `Active`, `SleepGrid`, `Pending`, `Stale`, `Rebuilds`, `Frozen`, `Thawed`, `ColdDead`
+count the lists; the HUD shows them next to the body count). A rebuild is one counting sort of the sleepers (a few
+milliseconds for a million), the cold store is compacted in place every `ColdCompactSteps` steps once a quarter of it was
+thawed, a gate on the GPU skips either when nothing is due, and everything the CPU moves outside the solver (the terrain,
+gravity, `WakeAll`) wakes all bodies at once — an overflow when there are more than `active` of them.
 
 ## Parameters (`AvbdGpuParams`, defaults = reference, sleeping on)
 
@@ -208,6 +212,7 @@ than `active` of them.
 | `WakeSpeed`, `WakeHold` | 0.25 m/s, 0.15 s | a faster touch wakes the whole island, which then stays awake this long |
 | `SleepLabelRounds`, `SleepRelabelSteps` | 4, 60 | island label rounds per step; awake bodies restart their labels this often |
 | `SleepGridRebuildSteps`, `SleepGridRebuildMin` | 15, 64 | the sleeping grid is rebuilt at most this often, once this many bodies (or a 64th of the grid) slept or woke |
+| `ColdCompactSteps` | 300 | the cold store is compacted at most this often, once a quarter of it was thawed or it is three quarters full |
 
 Constants (`AvbdGpuConstants` / `AvbdCommon.hlsl`): penalty bounds 1 .. 1e10, collision margin 0.01, stick
 threshold 1e-5, hard stiffness ≥ 1e30 (`float.PositiveInfinity` accepted), 8 contacts per manifold, 32 colours,
@@ -220,12 +225,16 @@ axis, `snapAxis` ±1 x / ±2 y / ±3 z) exceeds `fractureTension`, when the part
 or when the anchors are `breakDistance` apart; compression along the axis never breaks it. Jointed bodies do not collide
 until the joint breaks.
 
-Capacities (`AvbdGpuConfig.ForBodies(n, active = n)`): bodies n, joints max(n, 4096), springs n/4, manifolds 4n, contacts
-16n, the sleeping grid's cells 2n and entries 8n, hash 8n (power of two); sized for the awake bodies: pairs 10 active, hot
-grid entries 8 active and cells 2 active, colour list; spawn records per upload 4096 (larger batches go up in chunks).
-Appends beyond a capacity are dropped and flagged in `Stats.OverflowFlags` (1 pairs, 2 manifolds, 4 contacts, 8 grid
-entries, 16 large bodies, 32 unsorted cells, 64 more awake bodies than `MaxActive`); the demo HUD shows the flags in red.
-65 536 bodies take ~275 MB of GPU memory.
+Capacities (`AvbdGpuConfig.ForBodies(n, active = n)`): bodies n, joints max(n, 4096), springs n/4, the cold store's
+manifolds 4n and contacts 16n (`MaxColdManifolds`, `MaxColdContacts`: the manifolds of the sleeping bodies; scenes whose
+bodies rarely touch, such as snapped bricks, can lower them) with a hash of 8n, the sleeping grid's cells 2n and entries
+8n; sized for the awake bodies: manifolds 4 active, contacts 16 active, hash 8 active, pairs 10 active, hot grid entries
+8 active and cells 2 active, colour list; spawn records per upload 4096 (larger batches go up in chunks). Appends beyond
+a capacity are dropped and flagged in `Stats.OverflowFlags` (1 pairs, 2 manifolds, 4 contacts — the hot pools or the
+cold store, 8 grid entries, 16 large bodies, 32 unsorted cells, 64 more awake bodies than `MaxActive`); the demo HUD shows
+the flags in red. 65 536 bodies that may all be awake take ~330 MB of GPU memory, 262 144 bodies of which 65 536 may
+be awake ~735 MB, a million of which 65 536 may be awake ~2.3 GB (the cold store — 1.3 KB per body at four manifolds of
+four contacts — and the joint arrays grow with the bodies; the pools do not).
 
 ## Demo
 
@@ -418,20 +427,20 @@ Step times (solver only, `PerformanceTests`, GPU synchronised once after 60-120 
 | Pyramid 74k | 73 811 | 305 k / 1.19 M | | 17.4 ms | 37 ms (27 fps) |
 | Pyramid 22k on a heightfield | 22 141 | 85 k / 345 k (1 600 terrain manifolds) | 6.5 ms | | |
 | Terrain (100 boxes on hills) | 101 | 109 / 396 | 0.8 ms | | |
-| Pyramid (16 rows), asleep | 137 | 287 carried | 0.81 ms | | |
-| Pyramid 22k, asleep | 22 141 | 85 k carried | 1.75 ms | | |
-| Stronghold (17k bricks, castle scale, 1 substep), awake / asleep | 17 130 | 38 k / 157 k | 4.9 ms / 1.3 ms | | |
+| Pyramid (16 rows), asleep | 137 | 0 (326 cold) | 0.79 ms | | |
+| Pyramid 22k, asleep | 22 141 | 0 (90 k cold) | 1.14 ms | | |
+| Stronghold (17k bricks, castle scale, 1 substep), awake / asleep | 17 130 | 38 k / 157 k | 4.7 ms / 1.16 ms | | |
 
 Small scenes are bound by the ~130 indirect dispatches of a step (about 1.5 ms); large piles by the contact traffic
 of the primal sweeps (every iteration re-reads every contact from both bodies), so the iteration count is the main
 knob — the paper uses 4 for its large piles. CPU time per step is 0.1-1 ms (parameter upload, command buffer
 submission). The terrain pass costs what the ground box did: the 22k pyramid on a flat heightfield instead of the box
 steps in 6.5 ms against 6.4 (its 1 600 base cubes carry 8 terrain contacts each instead of 4 box contacts); bodies
-above the surface leave the pass at the mip test. Asleep, a scene costs the copy of its carried manifolds, the passes over
-the constraint index space they still occupy (the dual update above all) and the fixed overhead of ~140 dispatches — the
-sleepers themselves have no thread in any per-body pass once the sleeping grid holds them: the 22k pyramid sleeps whole 3 s
-after it is built (the small pyramid 6 s, its top creeps longer) and the 17k castle 4 s, and they step in 1.75 and 1.3 ms
-from then on; the
+above the surface leave the pass at the mip test. Asleep, a scene costs the fixed overhead of ~150 dispatches, the flat
+passes over the bodies (the hot list flags and their scan) and the copies of the pools sized for the awake bodies — the
+sleepers themselves have no thread in any pass once the sleeping grid and the cold store hold them: the 22k pyramid sleeps
+whole 3 s after it is built (the small pyramid 6 s, its top creeps longer) and the 17k castle 4 s, and they step in 1.14
+and 1.16 ms from then on against a 0.8 ms floor; the
 Outpost under siege sleeps between the volleys with its holding units, and its arrows wake what they hit. In the castle
 player (snapped castles on the tiled hills, 1280 x 720, `-avbd-bench` against `-avbd-nosleep`) the frame drops from
 9.9 to 6.6 ms for the Outpost, 25.0 to 19.1 ms for the Stronghold and 40.3 to 31.2 ms for the Royal citadel; what is
@@ -447,7 +456,8 @@ left is the draw of the brick meshes with shadows and of the terrain tiles.
   the contact multipliers it fell asleep with (no decay while asleep), and the woken bodies are coloured afresh, so at
   10 iterations an impact on a sleeping pile ends a little differently from the same impact on an awake one — as much as
   the Gauss–Seidel order already changes an impact (`SleepTests`: the same boxes fly, the momentum of the hit box within
-  a third at 10 iterations, within 5 % at 40). A fast body in sustained contact with an island keeps the whole island
+  a third at 10 iterations, within 5 % at 40). The contact crosses of `F1` show the manifolds of the step: a sleeping
+  region draws none. A fast body in sustained contact with an island keeps the whole island
   awake (a unit rubbing along the castle wall); a scene that never rests never sleeps (the 50k pile at 10 iterations
   keeps popping cubes out of its depths for a minute). Island labels only merge between relabels, so debris stays in its
   old island for up to `SleepRelabelSteps` after coming apart (a touch on it wakes the old island meanwhile); a sleeping

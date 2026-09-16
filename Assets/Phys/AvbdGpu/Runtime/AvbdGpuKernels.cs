@@ -6,17 +6,18 @@ namespace Phys.AvbdGpu
     /// <summary>The compute shaders (loaded from Resources/AvbdGpu) and their kernel indices.</summary>
     public sealed class AvbdGpuKernels
     {
-        public readonly ComputeShader Util, Scan, Broadphase, Narrowphase, Constraints, Coloring, Solver, Sleep, SleepGrid;
+        public readonly ComputeShader Util, Scan, Broadphase, Narrowphase, Constraints, Coloring, Solver, Sleep, SleepGrid, Cold;
 
         public readonly int BuildArgs, HotFlag, HotScatter, HashClear, CopyStats, ClearUints, SpawnBodies;
         public readonly int ScanBlock, ScanTop, ScanAdd;
-        public readonly int BodyAabb, GridClear, GridCount, GridScatter, GridSortCell, LargeSort, PairGen;
-        public readonly int Collide, CollideTerrain, CarrySleeping;
+        public readonly int BodyAabb, GridClear, GridCount, GridScatter, GridSortCell, LargeSort, PairGen, PairGenWoken;
+        public readonly int Collide, CollideTerrain;
         public readonly int JointList, JointListWoken, PrepareJoints, ConsClear, ConsCount, ConsFill, ConsSort;
         public readonly int ColorInvalidate, ColorRound, ColorFinalize, ColorScan, ColorScatter;
         public readonly int DriveKinematic, Predict, Primal, CommitOverflow, Dual, Velocity;
         public readonly int WakeList, WakeTouch, WakeApply, WakeClear, LabelRound, SleepTimer, RestSpread, RestSleep;
         public readonly int RebuildGate, SleepFlag, SleepScatter, RebuildListArgs, SleepGridClear, SleepGridCount, SleepGridScatter, SleepGridSortCell, SleepMark;
+        public readonly int FreezeCount, FreezeCopy, FreezeFinish, ColdGate, ColdFlag, ColdGather, ColdWrite, ColdFinish, ColdHashClear, ColdHashInsert;
 
         public static bool Supported => SystemInfo.supportsComputeShaders;
 
@@ -31,6 +32,7 @@ namespace Phys.AvbdGpu
             Solver = Load("AvbdSolver");
             Sleep = Load("AvbdSleep");
             SleepGrid = Load("AvbdSleepGrid");
+            Cold = Load("AvbdCold");
 
             BuildArgs = Util.FindKernel("BuildArgs");
             HotFlag = Util.FindKernel("HotFlag");
@@ -49,9 +51,9 @@ namespace Phys.AvbdGpu
             GridSortCell = Broadphase.FindKernel("GridSortCell");
             LargeSort = Broadphase.FindKernel("LargeSort");
             PairGen = Broadphase.FindKernel("PairGen");
+            PairGenWoken = Broadphase.FindKernel("PairGenWoken");
             Collide = Narrowphase.FindKernel("Collide");
             CollideTerrain = Narrowphase.FindKernel("CollideTerrain");
-            CarrySleeping = Narrowphase.FindKernel("CarrySleeping");
             JointList = Constraints.FindKernel("JointList");
             JointListWoken = Constraints.FindKernel("JointListWoken");
             PrepareJoints = Constraints.FindKernel("PrepareJoints");
@@ -87,6 +89,16 @@ namespace Phys.AvbdGpu
             SleepGridScatter = SleepGrid.FindKernel("SleepGridScatter");
             SleepGridSortCell = SleepGrid.FindKernel("SleepGridSortCell");
             SleepMark = SleepGrid.FindKernel("SleepMark");
+            FreezeCount = Cold.FindKernel("FreezeCount");
+            FreezeCopy = Cold.FindKernel("FreezeCopy");
+            FreezeFinish = Cold.FindKernel("FreezeFinish");
+            ColdGate = Cold.FindKernel("ColdGate");
+            ColdFlag = Cold.FindKernel("ColdFlag");
+            ColdGather = Cold.FindKernel("ColdGather");
+            ColdWrite = Cold.FindKernel("ColdWrite");
+            ColdFinish = Cold.FindKernel("ColdFinish");
+            ColdHashClear = Cold.FindKernel("ColdHashClear");
+            ColdHashInsert = Cold.FindKernel("ColdHashInsert");
         }
 
         static ComputeShader Load(string name)

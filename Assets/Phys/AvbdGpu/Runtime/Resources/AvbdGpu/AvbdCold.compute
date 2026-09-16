@@ -1,0 +1,218 @@
+// The cold store: the manifolds of sleeping bodies. A manifold whose bodies are both inactive at the end of a step (one
+// of them fell asleep this step) is frozen: appended to the cold pool with its contacts and the sleep generations of its
+// bodies, and hashed by pair. Nothing visits it until one of its bodies wakes: the narrowphase then finds it through the
+// hash, warm starts the fresh contacts from it and marks it dead. The pool is append-only; the contacts are laid out in
+// the order of the manifolds (a freeze allocates both through scans, so contactStart never decreases along the pool),
+// which lets a compaction (its own command buffer, rare) squeeze the dead entries out in place, chunk by chunk through a
+// scratch, and rebuild the hash.
+#pragma kernel FreezeCount
+#pragma kernel FreezeCopy
+#pragma kernel FreezeFinish
+#pragma kernel ColdGate
+#pragma kernel ColdFlag
+#pragma kernel ColdGather
+#pragma kernel ColdWrite
+#pragma kernel ColdFinish
+#pragma kernel ColdHashClear
+#pragma kernel ColdHashInsert
+
+#include "AvbdCommon.hlsl"
+
+#define OVERFLOW_MANIFOLDS 2u
+#define OVERFLOW_CONTACTS 4u
+#define MAX_PROBES 256
+#define SCAN_BLOCK 1024
+
+StructuredBuffer<BodyDef> _BodyDef;
+StructuredBuffer<uint> _BodySleep;
+StructuredBuffer<uint> _BodyGen;
+StructuredBuffer<Manifold> _ManifoldCur;   // the hot manifolds of the step
+StructuredBuffer<Contact> _ContactsCur;
+RWStructuredBuffer<uint> _FreezeFlag;      // per hot manifold: frozen this step
+RWStructuredBuffer<uint> _FreezeContacts;  // its contact count when frozen
+StructuredBuffer<uint> _FreezeFlagScan;    // exclusive scans of the two (the scan kernels)
+StructuredBuffer<uint> _FreezeContactScan;
+RWStructuredBuffer<Manifold> _ColdManifolds;
+RWStructuredBuffer<Contact> _ColdContacts;
+RWStructuredBuffer<uint> _ColdHash;
+RWStructuredBuffer<uint> _ColdFlag;        // compaction: per cold manifold, live
+RWStructuredBuffer<uint> _ColdContactCount;
+StructuredBuffer<uint> _ColdFlagScan;
+StructuredBuffer<uint> _ColdContactScan;
+RWStructuredBuffer<Manifold> _ColdScratch;         // one chunk of live manifolds, contactStart local to the chunk
+RWStructuredBuffer<Contact> _ColdScratchContacts;
+RWStructuredBuffer<uint> _Counters;
+RWByteAddressBuffer _DispatchArgs;
+int _Chunk;               // ColdGather / ColdWrite: the chunk of this dispatch
+uint _ColdHashSize;
+
+uint groups(uint n) { return (n + AVBD_THREADS - 1) / AVBD_THREADS; }
+void writeArgs(uint slot, uint n) { _DispatchArgs.Store3(slot * 12, uint3(groups(n), 1, 1)); }
+void writeScanArgs(uint slot, uint n) { _DispatchArgs.Store3(slot * 12, uint3((n + SCAN_BLOCK - 1) / SCAN_BLOCK, 1, 1)); }
+
+bool active(uint i) { return activeBody(_BodyDef[i], _BodySleep[i]); }
+
+void insertColdHash(uint a, uint b, uint idx)
+{
+    uint h = coldPairHash(a, b);
+    [loop]
+    for (int probe = 0; probe < MAX_PROBES; probe++)
+    {
+        uint old;
+        InterlockedCompareExchange(_ColdHash[h], 0, idx + 1, old);
+        if (old == 0) break;
+        h = (h + 1) & _ColdHashMask;
+    }
+}
+
+// ------------------------------------------------------------------------------------------------ freeze
+
+// Over the hot manifold capacity (the scans cover it): a manifold of two inactive, alive bodies is frozen.
+[numthreads(AVBD_THREADS, 1, 1)]
+void FreezeCount(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+    if (i >= _MaxManifolds) return;
+    uint flag = 0, contacts = 0;
+    if (i < _Counters[CNT_MANIFOLDS])
+    {
+        Manifold m = _ManifoldCur[i];
+        BodyDef dA = _BodyDef[m.bodyA], dB = _BodyDef[m.bodyB];
+        if (!isDead(dA) && !isDead(dB) && !active(m.bodyA) && !active(m.bodyB)) { flag = 1; contacts = m.numContacts; }
+    }
+    _FreezeFlag[i] = flag;
+    _FreezeContacts[i] = contacts;
+}
+
+// Copies the frozen manifolds behind the pool's end, in hot order, and hashes them.
+[numthreads(AVBD_THREADS, 1, 1)]
+void FreezeCopy(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+    if (i >= _Counters[CNT_MANIFOLDS] || _FreezeFlag[i] == 0) return;
+    uint dst = _Counters[CNT_COLD] + _FreezeFlagScan[i];
+    uint cdst = _Counters[CNT_COLD_CONTACTS] + _FreezeContactScan[i];
+    Manifold m = _ManifoldCur[i];
+    uint dummy;
+    if (dst >= _MaxColdManifolds) { InterlockedOr(_Counters[CNT_OVERFLOW], OVERFLOW_MANIFOLDS, dummy); return; }
+    if (cdst + m.numContacts > _MaxColdContacts)
+    {
+        // no room for the contacts: a dead header keeps the slot from being mistaken for an old manifold
+        InterlockedOr(_Counters[CNT_OVERFLOW], OVERFLOW_CONTACTS, dummy);
+        m.numContacts = 0;
+        _ColdManifolds[dst] = m;
+        return;
+    }
+    [loop]
+    for (uint k = 0; k < m.numContacts; k++) _ColdContacts[cdst + k] = _ContactsCur[m.contactStart + k];
+    m.contactStart = cdst;
+    m.pad = float2(asfloat(_BodyGen[m.bodyA]), asfloat(_BodyGen[m.bodyB]));
+    _ColdManifolds[dst] = m;
+    insertColdHash(m.bodyA, m.bodyB, dst);
+}
+
+[numthreads(1, 1, 1)]
+void FreezeFinish(uint3 id : SV_DispatchThreadID)
+{
+    uint frozen = _FreezeFlagScan[_MaxManifolds];
+    uint contacts = _FreezeContactScan[_MaxManifolds];
+    _Counters[CNT_FROZEN] = frozen;
+    _Counters[CNT_COLD] = min(_Counters[CNT_COLD] + frozen, _MaxColdManifolds);
+    _Counters[CNT_COLD_CONTACTS] = min(_Counters[CNT_COLD_CONTACTS] + contacts, _MaxColdContacts);
+}
+
+// ------------------------------------------------------------------------------------------------ compaction
+
+// Due when a quarter of the pool was thawed, or the pool is three quarters full (stale entries of bodies that woke
+// without re-forming the pair are only found here).
+[numthreads(1, 1, 1)]
+void ColdGate(uint3 id : SV_DispatchThreadID)
+{
+    uint cold = _Counters[CNT_COLD], dead = _Counters[CNT_COLD_DEAD];
+    bool due = cold >= 1024 && (dead * 4 >= cold || cold * 4 >= _MaxColdManifolds * 3);
+    _Counters[CNT_COLD_COMPACT_DUE] = due ? 1u : 0u;
+    writeArgs(ARG_COLD_FLAG, due ? _MaxColdManifolds : 0);
+    writeScanArgs(ARG_COLD_SCAN, due ? _MaxColdManifolds : 0);
+    _DispatchArgs.Store3(ARG_COLD_SCAN_TOP * 12, uint3(due ? 1 : 0, 1, 1));
+    writeArgs(ARG_COLD_CHUNK, due ? COLD_CHUNK : 0);
+    writeArgs(ARG_COLD_HASH, due ? _ColdHashSize : 0);
+    writeArgs(ARG_COLD_INSERT, 0);   // ColdFinish writes the compacted count when the compaction runs
+}
+
+// A cold manifold lives when it was not thawed, its bodies are alive and inactive and their generations still match.
+[numthreads(AVBD_THREADS, 1, 1)]
+void ColdFlag(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+    if (i >= _MaxColdManifolds) return;
+    uint live = 0, contacts = 0;
+    if (i < _Counters[CNT_COLD])
+    {
+        Manifold m = _ColdManifolds[i];
+        BodyDef dA = _BodyDef[m.bodyA], dB = _BodyDef[m.bodyB];
+        if (m.numContacts != 0 && !isDead(dA) && !isDead(dB) && !active(m.bodyA) && !active(m.bodyB)
+            && _BodyGen[m.bodyA] == coldGenA(m) && _BodyGen[m.bodyB] == coldGenB(m)) { live = 1; contacts = m.numContacts; }
+    }
+    _ColdFlag[i] = live;
+    _ColdContactCount[i] = contacts;
+}
+
+// The live manifolds of chunk _Chunk into the scratch, their contacts behind each other from the chunk's first live one.
+[numthreads(AVBD_THREADS, 1, 1)]
+void ColdGather(uint3 id : SV_DispatchThreadID)
+{
+    uint s = (uint)_Chunk * COLD_CHUNK;
+    uint i = s + id.x;
+    if (id.x >= COLD_CHUNK || i >= _Counters[CNT_COLD] || _ColdFlag[i] == 0) return;
+    uint j = _ColdFlagScan[i] - _ColdFlagScan[s];
+    uint cj = _ColdContactScan[i] - _ColdContactScan[s];
+    Manifold m = _ColdManifolds[i];
+    [loop]
+    for (uint k = 0; k < m.numContacts; k++) _ColdScratchContacts[cj + k] = _ColdContacts[m.contactStart + k];
+    m.contactStart = cj;
+    _ColdScratch[j] = m;
+}
+
+// The scratch back into the pool at the chunk's compacted position: everything before it was compacted already, and
+// nothing after it lies below the chunk's own start (contactStart never decreases along the pool).
+[numthreads(AVBD_THREADS, 1, 1)]
+void ColdWrite(uint3 id : SV_DispatchThreadID)
+{
+    uint s = (uint)_Chunk * COLD_CHUNK;
+    uint e = min(s + COLD_CHUNK, _MaxColdManifolds);
+    uint base = _ColdFlagScan[s], cbase = _ColdContactScan[s];
+    uint count = _ColdFlagScan[e] - base;
+    uint j = id.x;
+    if (j >= count) return;
+    Manifold m = _ColdScratch[j];
+    uint local = m.contactStart;
+    [loop]
+    for (uint k = 0; k < m.numContacts; k++) _ColdContacts[cbase + local + k] = _ColdScratchContacts[local + k];
+    m.contactStart = cbase + local;
+    _ColdManifolds[base + j] = m;
+}
+
+[numthreads(1, 1, 1)]
+void ColdFinish(uint3 id : SV_DispatchThreadID)
+{
+    uint cold = _ColdFlagScan[_MaxColdManifolds];
+    _Counters[CNT_COLD] = cold;
+    _Counters[CNT_COLD_CONTACTS] = _ColdContactScan[_MaxColdManifolds];
+    _Counters[CNT_COLD_DEAD] = 0;
+    writeArgs(ARG_COLD_INSERT, cold);
+}
+
+[numthreads(AVBD_THREADS, 1, 1)]
+void ColdHashClear(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x <= _ColdHashMask) _ColdHash[id.x] = 0;
+}
+
+[numthreads(AVBD_THREADS, 1, 1)]
+void ColdHashInsert(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+    if (i >= _Counters[CNT_COLD]) return;
+    Manifold m = _ColdManifolds[i];
+    insertColdHash(m.bodyA, m.bodyB, i);
+}

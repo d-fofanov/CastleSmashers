@@ -25,8 +25,14 @@ StructuredBuffer<float4> _BodyVelLinIn;    // WakeTouch: the speed of the touche
 StructuredBuffer<uint2> _WakeList;         // (body, WAKE_*) uploaded by the CPU for this step
 StructuredBuffer<uint> _BodyConsStart;     // per-body constraint lists: last step's at WakeList time, this step's later
 StructuredBuffer<uint> _BodyConsList;
-StructuredBuffer<Manifold> _ManifoldPrev;  // WakeList (the lists still index last step's manifolds)
 StructuredBuffer<Manifold> _ManifoldCur;   // WakeTouch, LabelRound, RestSpread
+StructuredBuffer<float4> _BodyAabbMin;     // WakeList: a retired body wakes what overlaps it, found in both grids
+StructuredBuffer<float4> _BodyAabbMax;
+StructuredBuffer<uint> _CellStart;         // last step's hot grid (still intact: this runs before the broadphase)
+StructuredBuffer<uint> _CellEntries;
+StructuredBuffer<uint> _SleepCellStart;
+StructuredBuffer<uint> _SleepCellEntries;
+RWStructuredBuffer<uint> _BodyGen;         // sleep generations: RestSleep and a retirement advance them (the cold store's validity)
 StructuredBuffer<JointDef> _JointDef;
 StructuredBuffer<JointState> _JointState;
 StructuredBuffer<SpringDef> _SpringDef;
@@ -51,6 +57,8 @@ int _RestFirst;       // 1: this RestSpread round reads the counters from the sl
 
 #define MARK_ISLAND 1u
 #define MARK_BODY 2u
+
+bool dynamicBody(int i) { return i >= 0 && !isStatic(_BodyDef[i]); }
 
 // The other body of constraint r as seen from body (-1 for world anchors); manifolds looked up in the given list.
 int neighbourOf(uint r, uint body, StructuredBuffer<Manifold> manifolds)
@@ -102,23 +110,58 @@ bool constraintBodies(uint t, out int a, out int b)
     return false;
 }
 
-// A wake clears the sleep word; a body that was in the sleeping grid leaves it (its entries there are skipped from now
-// on, and the grid is rebuilt once enough bodies did so).
+// A wake clears the sleep word (the body is fresh: its cold manifolds warm start the contacts of this step); a body that
+// was in the sleeping grid leaves it (its entries there are skipped from now on, and the grid is rebuilt once enough
+// bodies did so).
 void wakeWord(uint body)
 {
     uint w = _BodySleep[body];
     if (inSleepGrid(w)) { uint dummy; InterlockedAdd(_Counters[CNT_STALE], 1, dummy); }
-    _BodySleep[body] = 0;
+    _BodySleep[body] = SLEEP_FRESH;
 }
 
-bool dynamicBody(int i) { return i >= 0 && !isStatic(_BodyDef[i]); }
+bool aabbOverlap(uint i, uint j)
+{
+    float3 mnI = _BodyAabbMin[i].xyz, mxI = _BodyAabbMax[i].xyz;
+    float3 mnJ = _BodyAabbMin[j].xyz, mxJ = _BodyAabbMax[j].xyz;
+    return all(mnI <= mxJ) && all(mnJ <= mxI);
+}
+
+// Wakes every alive dynamic body whose AABB overlaps the AABB of body (a retired support): its neighbours in the hot
+// grid of the previous step and in the sleeping grid.
+void wakeOverlapping(uint body)
+{
+    int3 cmin = cellCoord(_BodyAabbMin[body].xyz), cmax = cellCoord(_BodyAabbMax[body].xyz);
+    for (int z = cmin.z; z <= cmax.z; z++)
+        for (int y = cmin.y; y <= cmax.y; y++)
+            for (int x = cmin.x; x <= cmax.x; x++)
+            {
+                int3 c = int3(x, y, z);
+                uint h = cellHash(c);
+                uint start = _CellStart[h], end = min(_CellStart[h + 1], _MaxCellEntries);
+                for (uint e = start; e < end; e++)
+                {
+                    uint j = _CellEntries[e];
+                    if (j != body && dynamicBody((int)j) && aabbOverlap(body, j)) wakeWord(j);
+                }
+                h = sleepCellHash(c);
+                start = _SleepCellStart[h]; end = _SleepCellStart[h + 1];
+                for (uint f = start; f < end; f++)
+                {
+                    uint j = _SleepCellEntries[f];
+                    if (j != body && inSleepGrid(_BodySleep[j]) && dynamicBody((int)j) && aabbOverlap(body, j)) wakeWord(j);
+                }
+            }
+}
+
 uint restCounter(uint w) { return w & SLEEP_COUNTER_MASK; }
 bool resting(uint w) { return restCounter(w) >= _SleepSteps; }
 
 // ------------------------------------------------------------------------------------------------ CPU wakes
 
 // Start of the step: the CPU's wake requests. A woken body is awake at pair generation, so its contacts are recomputed,
-// and WakeTouch then wakes what it touches. A retired body wakes what its previous constraint list connected it to.
+// and WakeTouch then wakes what it touches. A retired body wakes whatever overlaps it (its manifolds may be in the cold
+// store, which no list indexes) and advances its slot's generation, so that no cold manifold of it outlives it.
 [numthreads(AVBD_THREADS, 1, 1)]
 void WakeList(uint3 id : SV_DispatchThreadID)
 {
@@ -128,13 +171,9 @@ void WakeList(uint3 id : SV_DispatchThreadID)
     if (body >= _BodyCount) return;
     if (e.y == WAKE_NEIGHBOURS)
     {
-        uint start = _BodyConsStart[body], end = _BodyConsStart[body + 1];
-        for (uint k = start; k < end; k++)
-        {
-            int n = neighbourOf(_BodyConsList[k], body, _ManifoldPrev);
-            if (n >= 0 && (uint)n < _BodyCount) wakeWord((uint)n);
-        }
+        wakeOverlapping(body);
         wakeWord(body);   // the retired body itself leaves the sleeping grid
+        _BodyGen[body] += 1;
         return;
     }
     wakeWord(body);
@@ -169,9 +208,10 @@ void WakeTouch(uint3 id : SV_DispatchThreadID)
 // does not move it is still resting, falls asleep again as soon as its neighbourhood allows (often at the end of the same
 // step) and does not keep its neighbours awake, so a creeping pile does not wake its surroundings. An island woken by a
 // fast touch is held awake for _WakeHoldSteps: whatever lost its support in the impact starts falling meanwhile and stays
-// awake on its own motion. A body that was asleep joins the woken list, and the hot list when it came from the sleeping
-// grid (a sleeper that fell asleep after the last rebuild is in the hot list already). Runs over every body, and only in
-// steps that set a mark.
+// awake on its own motion. A body that was asleep joins the woken list (fresh: the second narrowphase round gives it its
+// contacts, warm started from the cold store), and the hot list when it came from the sleeping grid (a sleeper that
+// fell asleep after the last rebuild is in the hot list already); it keeps the grid bit for the rest of the step, so
+// that the woken bodies find each other in the sleeping grid. Runs over every body, and only in steps that set a mark.
 [numthreads(AVBD_THREADS, 1, 1)]
 void WakeApply(uint3 id : SV_DispatchThreadID)
 {
@@ -194,7 +234,7 @@ void WakeApply(uint3 id : SV_DispatchThreadID)
         InterlockedAdd(_Counters[CNT_HOT], 1, slot);
         _HotList[slot] = i;
     }
-    _BodySleep[i] = c | SLEEP_WOKEN;
+    _BodySleep[i] = c | SLEEP_WOKEN | SLEEP_FRESH | (w & SLEEP_IN_GRID);
 }
 
 [numthreads(AVBD_THREADS, 1, 1)]
@@ -264,7 +304,7 @@ void SleepTimer(uint3 id : SV_DispatchThreadID)
     }
     else
         c = min(c + 1, SLEEP_COUNTER_MAX);
-    _BodySleep[i] = c | (w & SLEEP_WOKEN);
+    _BodySleep[i] = c | (w & SLEEP_STEP_BITS);
 }
 
 // One Jacobi round of the minimum rest counter over a body and its dynamic neighbours: after k rounds a body knows the
@@ -288,8 +328,10 @@ void RestSpread(uint3 id : SV_DispatchThreadID)
     _RestOut[i] = r;
 }
 
-// A body falls asleep when it and its neighbourhood have rested for _SleepSteps: it stops with zero velocities and stays
-// frozen until woken. Counts the newly asleep for the stats, and as pending for the sleeping grid.
+// A body falls asleep when it and its neighbourhood have rested for _SleepSteps: it stops with zero velocities, advances
+// its sleep generation (the cold manifolds it leaves behind belong to this sleep) and stays frozen until woken. The bits
+// of the step (woken, fresh, the grid bit a touch wake kept) end here. Counts the newly asleep for the stats, and as
+// pending for the sleeping grid.
 [numthreads(AVBD_THREADS, 1, 1)]
 void RestSleep(uint3 id : SV_DispatchThreadID)
 {
@@ -299,10 +341,10 @@ void RestSleep(uint3 id : SV_DispatchThreadID)
     uint w = _BodySleep[i];
     uint dummy;
     if (w & SLEEP_ASLEEP) return;
-    // woken this step: solved on carried manifolds, which the next step recomputes before it may sleep on them again
-    if (w & SLEEP_WOKEN) { _BodySleep[i] = w & ~SLEEP_WOKEN; return; }
-    if (_RestIn[i] < _SleepSteps) return;
+    w &= ~SLEEP_STEP_BITS;
+    if (_RestIn[i] < _SleepSteps) { _BodySleep[i] = w; return; }
     _BodySleep[i] = w | SLEEP_ASLEEP;
+    _BodyGen[i] += 1;
     _BodyVelLin[i] = 0;
     _BodyVelAng[i] = 0;
     _BodyPrevVelLin[i] = 0;

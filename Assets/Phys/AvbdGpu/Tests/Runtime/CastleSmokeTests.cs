@@ -182,8 +182,7 @@ namespace Phys.AvbdGpu.Tests
             float side = CastlePlan.Presets[0].Side * Brick.Pitch * m_Demo.Spec.Scale;
             Assert.AreEqual(plateau, field.Height(new float2(0.4f * side, -0.4f * side)), 1e-4f, "the plateau is level across the footprint");
             Assert.GreaterOrEqual(field.MaxOver(new float2(-0.45f * side), new float2(0.45f * side)), plateau - 1e-3f, "the mip bounds it (its 8 m blocks reach into the skirt)");
-            var stats0 = m_Demo.World.GetStatsSync();
-            Assert.Greater(stats0.TerrainManifolds, 100, "the ground course rests on the terrain");
+            Assert.Greater(m_Demo.World.TerrainManifoldsSync(), 100, "the ground course rests on the terrain (asleep by now: in the cold store)");
 
             m_Demo.World.GetPosesSync(out var start, out _);
             float maxMove = 0f;

@@ -166,19 +166,22 @@ namespace Phys.AvbdGpu
         /// <summary>The split capacities: the pools and the hot grid are sized for MaxActive awake bodies; the sleeping grid has its
         /// own hash table (SleepCellMask) and is rebuilt once RebuildMin bodies fell asleep or woke since the last rebuild.</summary>
         public uint MaxActive, SleepCellMask, RebuildMin;
-        public const int Stride = 208;
+        /// <summary>The cold store: the manifolds of sleeping bodies, their contacts, and the hash table that finds them by pair.</summary>
+        public uint MaxColdManifolds, MaxColdContacts, ColdHashMask, Pad5;
+        public const int Stride = 224;
         public const uint NoTerrain = 0xFFFFFFFFu;
     }
 
     /// <summary>Decoding of a body's sleep word (<see cref="AvbdGpuWorld.GetSleepSync"/>): bit 31 = asleep, bit 30 = woken by a
-    /// touch this step, bit 29 = in the sleeping grid (out of the hot list), below them the steps the body has rested within its
-    /// rest anchor.</summary>
+    /// touch this step, bit 29 = in the sleeping grid (out of the hot list), bit 28 = woke this step, below them the steps the
+    /// body has rested within its rest anchor.</summary>
     public static class GpuBodySleep
     {
         public const uint Asleep = 0x80000000u;
         public const uint Woken = 0x40000000u;
         public const uint InGrid = 0x20000000u;
-        public const uint CounterMask = 0x1FFFFFFFu;
+        public const uint Fresh = 0x10000000u;
+        public const uint CounterMask = 0x0FFFFFFFu;
         public static bool IsAsleep(uint w) => (w & Asleep) != 0;
         public static bool IsInGrid(uint w) => (w & InGrid) != 0;
         public static int RestSteps(uint w) => (int)(w & CounterMask);
@@ -203,9 +206,9 @@ namespace Phys.AvbdGpu
     public enum StatSlot
     {
         Pairs = 0, Manifolds = 1, Contacts = 2, LargeBodies = 3, Overflow = 4, OverflowBodies = 5, ColorsUsed = 6, Constraints = 7, ActiveJoints = 8,
-        TerrainManifolds = 9, Sleeping = 10, CarriedManifolds = 11, Woken = 12, PrevManifolds = 13, Hot = 14, WokenList = 15, ActiveSprings = 16,
-        Marks = 17, Active = 18, RebuildDue = 19, AsleepStart = 20,
-        Persistent = 24, Pending = 24, Stale = 25, SleepGrid = 26, Rebuilds = 27, RebuildForce = 28, Count = 32
+        TerrainManifolds = 9, Sleeping = 10, Frozen = 11, Woken = 12, Thawed = 13, Hot = 14, WokenList = 15, ActiveSprings = 16,
+        Marks = 17, Active = 18, RebuildDue = 19, AsleepStart = 20, Pairs1 = 21, ColdCompactDue = 22,
+        Persistent = 24, Pending = 24, Stale = 25, SleepGrid = 26, Rebuilds = 27, RebuildForce = 28, Cold = 29, ColdContacts = 30, ColdDead = 31, Count = 32
     }
 
     /// <summary>Per-step statistics read back asynchronously (one or two frames old).</summary>
@@ -214,9 +217,11 @@ namespace Phys.AvbdGpu
         public int Pairs, Manifolds, Contacts, LargeBodies, OverflowBodies, ColorsUsed, Constraints;
         /// <summary>Manifolds against the terrain (counted in <see cref="Manifolds"/> as well).</summary>
         public int TerrainManifolds;
-        /// <summary>Bodies asleep at the end of the step, manifolds of sleeping bodies carried over unchanged (counted in
-        /// <see cref="Manifolds"/> as well) and sleeping bodies woken by a touch during the step.</summary>
-        public int Sleeping, CarriedManifolds, Woken;
+        /// <summary>Bodies asleep at the end of the step and sleeping bodies woken by a touch during the step.</summary>
+        public int Sleeping, Woken;
+        /// <summary>The cold store: manifolds of sleeping bodies in it (thawed ones included until a compaction), their contacts,
+        /// the thawed ones since the last compaction, and the manifolds frozen and thawed this step.</summary>
+        public int ColdManifolds, ColdContacts, ColdDead, Frozen, Thawed;
         /// <summary>Bodies of the hot list (the per-body passes run over them: active, or asleep but not yet in the sleeping grid)
         /// and active bodies (dynamic, alive, awake) at the start of the step.</summary>
         public int Hot, Active;

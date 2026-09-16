@@ -6,14 +6,15 @@ namespace Phys.AvbdGpu
 {
     /// <summary>Records the whole simulation step into one CommandBuffer. Every count-dependent dispatch is indirect, so the
     /// buffer only has to be re-recorded when the iteration count, the post-stabilisation flag or the active colour count change.
-    /// A second command buffer rebuilds the sleeping grid; the world executes it every few steps and it decides on the GPU
-    /// whether anything is due.</summary>
+    /// Two more command buffers rebuild the sleeping grid and compact the cold store; the world executes them every few steps
+    /// and they decide on the GPU whether anything is due.</summary>
     public sealed class AvbdGpuPipeline
     {
         readonly AvbdGpuKernels m_K;
         readonly AvbdGpuBuffers m_B;
         readonly CommandBuffer m_Cb = new CommandBuffer { name = "AVBD step" };
         readonly CommandBuffer m_RebuildCb = new CommandBuffer { name = "AVBD sleeping grid" };
+        readonly CommandBuffer m_CompactCb = new CommandBuffer { name = "AVBD cold store" };
         CommandBuffer m_Rec;   // the buffer the helpers record into
 
         int m_Iterations = -1, m_ActiveColors = -1, m_ColorRounds = -1, m_TerrainVersion = -1, m_LabelRounds = -1, m_SleepHops = -1;
@@ -22,6 +23,8 @@ namespace Phys.AvbdGpu
         public CommandBuffer CommandBuffer => m_Cb;
         /// <summary>The sleeping grid rebuild (gated on the GPU: nothing runs unless enough bodies fell asleep or woke).</summary>
         public CommandBuffer RebuildCommandBuffer => m_RebuildCb;
+        /// <summary>The cold store compaction (gated on the GPU: nothing runs unless enough of the store was thawed or it is nearly full).</summary>
+        public CommandBuffer CompactCommandBuffer => m_CompactCb;
 
         static readonly int s_Params = Shader.PropertyToID("AvbdParams");
         static readonly int s_Phase = Shader.PropertyToID("_Phase");
@@ -42,12 +45,20 @@ namespace Phys.AvbdGpu
         static readonly int s_SleepCells = Shader.PropertyToID("_SleepCells");
         static readonly int s_MaxBodies = Shader.PropertyToID("_MaxBodies");
         static readonly int s_MaxSleepCellEntries = Shader.PropertyToID("_MaxSleepCellEntries");
+        static readonly int s_PairRound = Shader.PropertyToID("_PairRound");
+        static readonly int s_ListSlot = Shader.PropertyToID("_ListSlot");
+        static readonly int s_Chunk = Shader.PropertyToID("_Chunk");
+        static readonly int s_ColdHashSize = Shader.PropertyToID("_ColdHashSize");
 
         // AvbdCommon.hlsl ARG_*
-        const int ArgBodies = 0, ArgPairs = 1, ArgManifolds = 2, ArgConstraints = 3, ArgJoints = 4, ArgPrevManifolds = 5, ArgWakeList = 6, ArgColor0 = 8;
+        const int ArgBodies = 0, ArgPairs = 1, ArgManifolds = 2, ArgConstraints = 3, ArgJoints = 4, ArgPairs2 = 5, ArgWakeList = 6, ArgColor0 = 8;
         const int ArgHot = ArgColor0 + AvbdGpuConstants.MaxColors + 1, ArgWoken = ArgHot + 1, ArgActiveJoints = ArgHot + 2, ArgActiveSprings = ArgHot + 3, ArgMarked = ArgHot + 4;
         const int ArgSleepFlag = ArgHot + 5, ArgSleepScan = ArgHot + 6, ArgSleepList = ArgHot + 7, ArgSleepCells = ArgHot + 8, ArgSleepCellScan = ArgHot + 9;
         const int ArgSleepScanTop = ArgHot + 10, ArgSleepCellScanTop = ArgHot + 11;
+        const int ArgFreeze = ArgHot + 12, ArgFreezeScan = ArgHot + 13, ArgFreezeScanTop = ArgHot + 14;
+        const int ArgColdFlag = ArgHot + 15, ArgColdScan = ArgHot + 16, ArgColdScanTop = ArgHot + 17, ArgColdChunk = ArgHot + 18, ArgColdHash = ArgHot + 19, ArgColdInsert = ArgHot + 20;
+        // AvbdCommon.hlsl CNT_* the kernels take as parameters
+        const int CntHot = 14, CntWokenList = 15;
         const int Threads = AvbdGpuConstants.ThreadGroupSize;
         const int ScanBlock = 1024;
 
@@ -57,7 +68,7 @@ namespace Phys.AvbdGpu
             m_B = buffers;
         }
 
-        public void Dispose() { m_Cb.Release(); m_RebuildCb.Release(); }
+        public void Dispose() { m_Cb.Release(); m_RebuildCb.Release(); m_CompactCb.Release(); }
 
         static int Groups(int n, int per = Threads) => math.max(1, (n + per - 1) / per);
 
@@ -73,6 +84,7 @@ namespace Phys.AvbdGpu
             m_Terrain = terrain; m_TerrainVersion = terrainVersion; m_Sleep = sleep; m_LabelRounds = labelRounds; m_SleepHops = sleepHops;
             Record();
             RecordRebuild();
+            RecordCompact();
         }
 
         float m_Alpha = -1f;
@@ -137,23 +149,31 @@ namespace Phys.AvbdGpu
                     ("_BodyDef", b.BodyDef), ("_BodySleep", b.BodySleep), ("_HotFlags", b.HotFlags), ("_HotScan", b.HotScan), ("_HotList", b.HotList));
 
             // ---------------------------------------------------------------- broadphase bindings
-            foreach (int kk in new[] { k.BodyAabb, k.GridClear, k.GridCount, k.GridScatter, k.GridSortCell, k.LargeSort, k.PairGen })
+            foreach (int kk in new[] { k.BodyAabb, k.GridClear, k.GridCount, k.GridScatter, k.GridSortCell, k.LargeSort, k.PairGen, k.PairGenWoken })
                 BindAll(k.Broadphase, kk,
                     ("_BodyDef", b.BodyDef), ("_BodyPos", b.BodyPos), ("_BodyRot", b.BodyRot),
                     ("_BodyAabbMin", b.BodyAabbMin), ("_BodyAabbMax", b.BodyAabbMax),
                     ("_CellCount", b.CellCount), ("_CellStart", b.CellStart), ("_CellCursor", b.CellCursor), ("_CellEntries", b.CellEntries),
                     ("_LargeBodies", b.LargeBodies), ("_Counters", b.Counters), ("_Pairs", b.Pairs),
                     ("_LinkStart", b.LinkStart), ("_LinkList", b.LinkList), ("_JointState", b.JointState), ("_BodySleep", b.BodySleep),
-                    ("_HotList", b.HotList), ("_SleepCellStart", b.SleepCellStart), ("_SleepCellEntries", b.SleepCellEntries));
+                    ("_HotList", b.HotList), ("_WokenList", b.WokenList), ("_SleepCellStart", b.SleepCellStart), ("_SleepCellEntries", b.SleepCellEntries));
 
             // ---------------------------------------------------------------- narrowphase bindings
-            foreach (int kk in new[] { k.Collide, k.CollideTerrain, k.CarrySleeping })
+            foreach (int kk in new[] { k.Collide, k.CollideTerrain })
                 BindAll(k.Narrowphase, kk,
                     ("_BodyDef", b.BodyDef), ("_BodyPos", b.BodyPos), ("_BodyRot", b.BodyRot), ("_BodyVelLin", b.BodyVelLin), ("_Pairs", b.Pairs), ("_Counters", b.Counters),
                     ("_ManifoldPrev", b.ManifoldPrev), ("_ContactsPrev", b.ContactsPrev), ("_HashPrev", b.HashPrev),
                     ("_ManifoldCur", b.ManifoldCur), ("_ContactsCur", b.ContactsCur), ("_HashCur", b.HashCur), ("_BodyEvents", b.BodyEvents),
                     ("_BodyAabbMin", b.BodyAabbMin), ("_BodyAabbMax", b.BodyAabbMax), ("_TerrainHeights", b.TerrainHeights), ("_TerrainMaxMip", b.TerrainMaxMip),
-                    ("_BodySleep", b.BodySleep), ("_HotList", b.HotList));
+                    ("_BodySleep", b.BodySleep), ("_HotList", b.HotList), ("_BodyGen", b.BodyGen),
+                    ("_ColdManifoldsRW", b.ColdManifolds), ("_ColdContacts", b.ColdContacts), ("_ColdHash", b.ColdHash));
+
+            // ---------------------------------------------------------------- cold store bindings (the freeze passes)
+            foreach (int kk in new[] { k.FreezeCount, k.FreezeCopy, k.FreezeFinish })
+                BindAll(k.Cold, kk,
+                    ("_BodyDef", b.BodyDef), ("_BodySleep", b.BodySleep), ("_BodyGen", b.BodyGen), ("_ManifoldCur", b.ManifoldCur), ("_ContactsCur", b.ContactsCur),
+                    ("_FreezeFlag", b.FreezeFlag), ("_FreezeContacts", b.FreezeContacts), ("_FreezeFlagScan", b.FreezeFlagScan), ("_FreezeContactScan", b.FreezeContactScan),
+                    ("_ColdManifolds", b.ColdManifolds), ("_ColdContacts", b.ColdContacts), ("_ColdHash", b.ColdHash), ("_Counters", b.Counters), ("_DispatchArgs", b.DispatchArgs));
 
             // ---------------------------------------------------------------- constraint bindings
             foreach (int kk in new[] { k.JointList, k.JointListWoken, k.PrepareJoints, k.ConsClear, k.ConsCount, k.ConsFill, k.ConsSort })
@@ -177,11 +197,13 @@ namespace Phys.AvbdGpu
             foreach (int kk in new[] { k.WakeList, k.WakeTouch, k.WakeApply, k.WakeClear, k.LabelRound, k.SleepTimer, k.RestSpread, k.RestSleep })
                 BindAll(k.Sleep, kk,
                     ("_BodyDef", b.BodyDef), ("_BodyPos", b.BodyPos), ("_BodyRot", b.BodyRot), ("_BodyVelLinIn", b.BodyVelLin), ("_WakeList", b.WakeList),
-                    ("_BodyConsStart", b.BodyConsStart), ("_BodyConsList", b.BodyConsList), ("_ManifoldPrev", b.ManifoldPrev), ("_ManifoldCur", b.ManifoldCur),
+                    ("_BodyConsStart", b.BodyConsStart), ("_BodyConsList", b.BodyConsList), ("_ManifoldCur", b.ManifoldCur),
                     ("_JointDef", b.JointDef), ("_JointState", b.JointState), ("_SpringDef", b.SpringDef),
                     ("_BodySleep", b.BodySleep), ("_BodyLabel", b.BodyLabel), ("_WakeMark", b.WakeMark), ("_BodyRestPose", b.BodyRestPose),
                     ("_BodyVelLin", b.BodyVelLin), ("_BodyVelAng", b.BodyVelAng), ("_BodyPrevVelLin", b.BodyPrevVelLin), ("_Counters", b.Counters),
-                    ("_HotList", b.HotList), ("_WokenList", b.WokenList), ("_ActiveJoints", b.ActiveJoints), ("_ActiveSprings", b.ActiveSprings));
+                    ("_HotList", b.HotList), ("_WokenList", b.WokenList), ("_ActiveJoints", b.ActiveJoints), ("_ActiveSprings", b.ActiveSprings),
+                    ("_BodyAabbMin", b.BodyAabbMin), ("_BodyAabbMax", b.BodyAabbMax), ("_CellStart", b.CellStart), ("_CellEntries", b.CellEntries),
+                    ("_SleepCellStart", b.SleepCellStart), ("_SleepCellEntries", b.SleepCellEntries), ("_BodyGen", b.BodyGen));
 
             // ---------------------------------------------------------------- solver bindings
             foreach (int kk in new[] { k.DriveKinematic, k.Predict, k.Primal, k.CommitOverflow, k.Dual, k.Velocity })
@@ -226,22 +248,35 @@ namespace Phys.AvbdGpu
             cb.EndSample("AVBD broadphase");
 
             cb.BeginSample("AVBD narrowphase");
+            cb.SetComputeIntParam(k.Narrowphase, s_PairRound, 0);
             Indirect(k.Narrowphase, k.Collide, ArgPairs);
+            cb.SetComputeIntParam(k.Narrowphase, s_ListSlot, CntHot);
             if (m_Terrain) Indirect(k.Narrowphase, k.CollideTerrain, ArgHot);   // appends to the same manifold pool
-            if (m_Sleep) Indirect(k.Narrowphase, k.CarrySleeping, ArgPrevManifolds);   // the manifolds of sleeping bodies, unchanged
             BuildArgs(2);
             cb.EndSample("AVBD narrowphase");
 
             if (m_Sleep)
             {
                 // a touch by an awake body wakes the whole island of the touched body before anything is solved; the woken
-                // bodies join the hot list and their joints the active lists
+                // bodies join the hot list, get their contacts in a second narrowphase round (warm started from the cold
+                // store) and their joints join the active lists
                 cb.BeginSample("AVBD wake");
                 Indirect(k.Sleep, k.WakeTouch, ArgConstraints);
                 BuildArgs(5);
                 Indirect(k.Sleep, k.WakeApply, ArgMarked);
                 Indirect(k.Sleep, k.WakeClear, ArgMarked);
                 BuildArgs(4);
+                Indirect(k.Broadphase, k.PairGenWoken, ArgWoken);
+                BuildArgs(7);
+                cb.SetComputeIntParam(k.Narrowphase, s_PairRound, 1);
+                Indirect(k.Narrowphase, k.Collide, ArgPairs2);
+                if (m_Terrain)
+                {
+                    cb.SetComputeBufferParam(k.Narrowphase, k.CollideTerrain, "_HotList", b.WokenList);
+                    cb.SetComputeIntParam(k.Narrowphase, s_ListSlot, CntWokenList);
+                    Indirect(k.Narrowphase, k.CollideTerrain, ArgWoken);
+                    cb.SetComputeBufferParam(k.Narrowphase, k.CollideTerrain, "_HotList", b.HotList);
+                }
                 Indirect(k.Constraints, k.JointListWoken, ArgWoken);
                 BuildArgs(6);
                 cb.EndSample("AVBD wake");
@@ -338,6 +373,16 @@ namespace Phys.AvbdGpu
                 cb.SetComputeBufferParam(k.Sleep, k.RestSleep, s_RestIn, restIn);   // the last round wrote here
                 Indirect(k.Sleep, k.RestSleep, ArgHot);
                 cb.EndSample("AVBD sleep");
+
+                // the manifolds of the bodies that fell asleep move into the cold store (nothing runs when none did)
+                cb.BeginSample("AVBD freeze");
+                BuildArgs(8);
+                Indirect(k.Cold, k.FreezeCount, ArgFreeze);
+                RecordScan(b.FreezeFlag, b.FreezeFlagScan, cfg.MaxManifolds, ArgFreezeScan, ArgFreezeScanTop);
+                RecordScan(b.FreezeContacts, b.FreezeContactScan, cfg.MaxManifolds, ArgFreezeScan, ArgFreezeScanTop);
+                Indirect(k.Cold, k.FreezeCopy, ArgFreeze);
+                Indirect(k.Cold, k.FreezeFinish, ArgFreezeScanTop);
+                cb.EndSample("AVBD freeze");
             }
 
             cb.BeginSample("AVBD end");
@@ -384,6 +429,45 @@ namespace Phys.AvbdGpu
             Indirect(k.SleepGrid, k.SleepGridSortCell, ArgSleepCells);
             Indirect(k.SleepGrid, k.SleepMark, ArgSleepList);
             cb.EndSample("AVBD sleeping grid");
+            m_Rec = m_Cb;
+        }
+
+        /// <summary>The cold store compaction: flags the live manifolds, scans them and their contacts, and squeezes them down in
+        /// place chunk by chunk through the scratch (the contacts lie in manifold order, so a chunk's compacted position never
+        /// reaches into a later chunk), then rebuilds the hash. Every dispatch is indirect from the gate's arguments.</summary>
+        void RecordCompact()
+        {
+            var cb = m_Rec = m_CompactCb;
+            var b = m_B;
+            var k = m_K;
+            var cfg = b.Config;
+            cb.Clear();
+            cb.SetComputeConstantBufferParam(k.Cold, s_Params, b.Params, 0, GpuParams.Stride);
+            foreach (int kk in new[] { k.ColdGate, k.ColdFlag, k.ColdGather, k.ColdWrite, k.ColdFinish, k.ColdHashClear, k.ColdHashInsert })
+                BindAll(k.Cold, kk,
+                    ("_BodyDef", b.BodyDef), ("_BodySleep", b.BodySleep), ("_BodyGen", b.BodyGen),
+                    ("_ColdManifolds", b.ColdManifolds), ("_ColdContacts", b.ColdContacts), ("_ColdHash", b.ColdHash),
+                    ("_ColdFlag", b.ColdFlag), ("_ColdContactCount", b.ColdContactCount), ("_ColdFlagScan", b.ColdFlagScan), ("_ColdContactScan", b.ColdContactScan),
+                    ("_ColdScratch", b.ColdScratch), ("_ColdScratchContacts", b.ColdScratchContacts),
+                    ("_Counters", b.Counters), ("_DispatchArgs", b.DispatchArgs));
+            cb.SetComputeIntParam(k.Cold, s_ColdHashSize, cfg.ColdHashSize);
+
+            cb.BeginSample("AVBD cold store");
+            Direct(k.Cold, k.ColdGate, 1);
+            Indirect(k.Cold, k.ColdFlag, ArgColdFlag);
+            RecordScan(b.ColdFlag, b.ColdFlagScan, cfg.MaxColdManifolds, ArgColdScan, ArgColdScanTop);
+            RecordScan(b.ColdContactCount, b.ColdContactScan, cfg.MaxColdManifolds, ArgColdScan, ArgColdScanTop);
+            int chunks = (cfg.MaxColdManifolds + AvbdGpuConfig.ColdChunk - 1) / AvbdGpuConfig.ColdChunk;
+            for (int c = 0; c < chunks; c++)
+            {
+                cb.SetComputeIntParam(k.Cold, s_Chunk, c);
+                Indirect(k.Cold, k.ColdGather, ArgColdChunk);
+                Indirect(k.Cold, k.ColdWrite, ArgColdChunk);
+            }
+            Indirect(k.Cold, k.ColdFinish, ArgColdScanTop);
+            Indirect(k.Cold, k.ColdHashClear, ArgColdHash);
+            Indirect(k.Cold, k.ColdHashInsert, ArgColdInsert);
+            cb.EndSample("AVBD cold store");
             m_Rec = m_Cb;
         }
     }

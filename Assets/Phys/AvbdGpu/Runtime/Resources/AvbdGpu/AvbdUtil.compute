@@ -43,17 +43,15 @@ void writeArgs(uint slot, uint n)
 
 // The step's indirect arguments, phase by phase: 0 start of step (CPU counts, counter reset); 3 after the hot list;
 // 1 after pair generation (and the active joint lists); 2 after the narrowphase; 5 after the touch marks; 4 after the
-// touched bodies woke (hot and woken lists grown); 6 after their joints joined the active lists.
+// touched bodies woke (hot and woken lists grown); 7 after their pairs; 6 after their joints joined the active lists;
+// 8 after the bodies fell asleep (the freeze passes, when any did).
 [numthreads(1, 1, 1)]
 void BuildArgs(uint3 id : SV_DispatchThreadID)
 {
     if (_Phase == 0)
     {
-        // last step's manifold count drives CarrySleeping: kept in its own slot across the reset; the slots from
-        // CNT_PERSISTENT on (the sleeping grid's bookkeeping) carry over
-        uint prevManifolds = _Counters[CNT_MANIFOLDS];
+        // the slots from CNT_PERSISTENT on (the sleeping grid's and the cold store's bookkeeping) carry over
         for (int i = 0; i < CNT_PERSISTENT; i++) _Counters[i] = 0;
-        _Counters[CNT_PREV_MANIFOLDS] = prevManifolds;
         writeArgs(ARG_BODIES, _BodyCount);
         writeArgs(ARG_JOINTS, _JointCount);
         writeArgs(ARG_PAIRS, 0);
@@ -70,11 +68,25 @@ void BuildArgs(uint3 id : SV_DispatchThreadID)
     {
         uint pairs = min(_Counters[CNT_PAIRS], _MaxPairs);
         _Counters[CNT_PAIRS] = pairs;
+        _Counters[CNT_PAIRS1] = pairs;
         writeArgs(ARG_PAIRS, pairs);
         // (written here rather than in phase 0: a run of stores over the contiguous slots 0..6 broke the kernel on D3D12)
-        writeArgs(ARG_PREV_MANIFOLDS, _Counters[CNT_PREV_MANIFOLDS]);
+        writeArgs(ARG_PAIRS2, 0);
         writeArgs(ARG_ACTIVE_JOINTS, _Counters[CNT_ACTIVE_JOINTS]);
         writeArgs(ARG_ACTIVE_SPRINGS, _Counters[CNT_ACTIVE_SPRINGS]);
+    }
+    else if (_Phase == 7)
+    {
+        uint pairs = min(_Counters[CNT_PAIRS], _MaxPairs);
+        _Counters[CNT_PAIRS] = pairs;
+        writeArgs(ARG_PAIRS2, pairs - _Counters[CNT_PAIRS1]);
+    }
+    else if (_Phase == 8)
+    {
+        bool freeze = _Counters[CNT_SLEEPING] != 0;
+        writeArgs(ARG_FREEZE, freeze ? _MaxManifolds : 0);
+        _DispatchArgs.Store3(ARG_FREEZE_SCAN * 12, uint3(freeze ? (_MaxManifolds + 1023) / 1024 : 0, 1, 1));
+        _DispatchArgs.Store3(ARG_FREEZE_SCAN_TOP * 12, uint3(freeze ? 1 : 0, 1, 1));
     }
     else if (_Phase == 2 || _Phase == 6)
     {

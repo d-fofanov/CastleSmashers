@@ -53,6 +53,9 @@ namespace Phys.AvbdGpu
         /// grid) fell asleep or woke since the last rebuild.</summary>
         public int SleepGridRebuildSteps;
         public int SleepGridRebuildMin;
+        /// <summary>The cold store (the manifolds of sleeping bodies) is compacted at most every this many steps, and only once a
+        /// quarter of it was thawed or it is three quarters full.</summary>
+        public int ColdCompactSteps;
 
         public static AvbdGpuParams Default => new AvbdGpuParams
         {
@@ -60,7 +63,7 @@ namespace Phys.AvbdGpu
             Alpha = 0.99f, BetaLin = 10000f, BetaAng = 100f, Gamma = 0.999f,
             PostStabilize = false, RotatedInertia = false, CellSize = 0f, ColorRounds = 8,
             Sleep = true, SleepTime = 0.5f, SleepDistance = 0.02f, SleepAngle = 0.02f, SleepHops = 2, WakeSpeed = 0.25f, WakeHold = 0.15f,
-            SleepLabelRounds = 4, SleepRelabelSteps = 60, SleepGridRebuildSteps = 15, SleepGridRebuildMin = 64,
+            SleepLabelRounds = 4, SleepRelabelSteps = 60, SleepGridRebuildSteps = 15, SleepGridRebuildMin = 64, ColdCompactSteps = 300,
         };
     }
 
@@ -82,7 +85,7 @@ namespace Phys.AvbdGpu
         readonly GpuBodyDef[] m_BodyDefs;
         readonly GpuBodyDrive[] m_Drives;
         readonly float4[] m_Pos, m_Rot, m_Vel;
-        readonly uint[] m_Uncolored, m_ZeroUints, m_Identity;
+        readonly uint[] m_Uncolored, m_ZeroUints, m_Identity, m_FreshUints;
         int m_BodyCount, m_UploadedBodies;
         double m_ExtentSum; int m_ExtentCount;
         // definitions and drives are CPU-owned: changes to uploaded bodies are re-sent as one range each
@@ -164,6 +167,8 @@ namespace Phys.AvbdGpu
             m_Uncolored = new uint[config.MaxBodies];
             m_ZeroUints = new uint[config.MaxBodies];
             for (int i = 0; i < m_Uncolored.Length; i++) m_Uncolored[i] = 0xFFFFFFFFu;
+            m_FreshUints = new uint[config.MaxBodies];
+            for (int i = 0; i < m_FreshUints.Length; i++) m_FreshUints[i] = GpuBodySleep.Fresh;
             m_Identity = new uint[config.MaxBodies];
             for (int i = 0; i < m_Identity.Length; i++) m_Identity[i] = (uint)i;
             m_WakeArray = new uint2[math.max(config.MaxWakes, 1)];
@@ -530,11 +535,13 @@ namespace Phys.AvbdGpu
             AvbdGpuBuffers.Clear(Buffers.LinkStart);
             AvbdGpuBuffers.Clear(Buffers.BodySleep);
             AvbdGpuBuffers.Clear(Buffers.WakeMark);
-            AvbdGpuBuffers.Clear(Buffers.Counters);   // CarrySleeping runs over last step's manifold count; the sleeping grid is empty
+            AvbdGpuBuffers.Clear(Buffers.Counters);   // the sleeping grid and the cold store are empty
             AvbdGpuBuffers.Clear(Buffers.Stats);
             AvbdGpuBuffers.Clear(Buffers.HotFlags);
             AvbdGpuBuffers.Clear(Buffers.SleepFlags);
             AvbdGpuBuffers.Clear(Buffers.SleepCellStart);
+            AvbdGpuBuffers.Clear(Buffers.BodyGen);
+            AvbdGpuBuffers.Clear(Buffers.ColdHash);
         }
 
         public void BuildScene(int scene)
@@ -573,8 +580,10 @@ namespace Phys.AvbdGpu
             }
             if (m_WakeAll)
             {
-                if (m_BodyCount > 0) b.BodySleep.SetData(m_ZeroUints, 0, 0, m_BodyCount);
-                b.Counters.SetData(m_ZeroPersistent, 0, (int)StatSlot.Persistent, m_ZeroPersistent.Length);   // nothing is in the sleeping grid any more
+                // every body awake and fresh (its contacts warm start from the cold store); nothing is in the sleeping grid any
+                // more, and the cold store's bookkeeping restarts with it (its entries die with their bodies' next sleep)
+                if (m_BodyCount > 0) b.BodySleep.SetData(m_FreshUints, 0, 0, m_BodyCount);
+                b.Counters.SetData(m_ZeroPersistent, 0, (int)StatSlot.Persistent, (int)StatSlot.Cold - (int)StatSlot.Persistent);
                 m_WakeAll = false;
                 m_WakeList.Clear();
             }
@@ -692,6 +701,7 @@ namespace Phys.AvbdGpu
                 Relabel = StepIndex % math.max(1, p.SleepRelabelSteps) == 0 ? 1u : 0u,
                 WakeHoldSteps = (uint)math.max(1, (int)math.ceil(p.WakeHold / dt)),
                 MaxActive = (uint)c.MaxActive, SleepCellMask = (uint)(c.SleepCellCount - 1), RebuildMin = (uint)math.max(1, p.SleepGridRebuildMin),
+                MaxColdManifolds = (uint)c.MaxColdManifolds, MaxColdContacts = (uint)c.MaxColdContacts, ColdHashMask = (uint)(c.ColdHashSize - 1),
             };
             if (m_Terrain != null && m_TerrainBody >= 0)
             {
@@ -720,9 +730,12 @@ namespace Phys.AvbdGpu
                 Params.Sleep, math.max(2, Params.SleepLabelRounds), math.max(1, Params.SleepHops));
 
             m_Watch.Restart();
-            // the sleeping grid rebuild, every few steps; it decides on the GPU whether enough bodies fell asleep or woke
+            // the sleeping grid rebuild and the cold store compaction, every few steps; they decide on the GPU whether enough
+            // bodies fell asleep or woke, or enough of the store was thawed
             if (Params.Sleep && StepIndex % math.max(1, Params.SleepGridRebuildSteps) == 0)
                 Graphics.ExecuteCommandBuffer(m_Pipeline.RebuildCommandBuffer);
+            if (Params.Sleep && StepIndex % math.max(1, Params.ColdCompactSteps) == 0)
+                Graphics.ExecuteCommandBuffer(m_Pipeline.CompactCommandBuffer);
             for (int s = 0; s < substeps; s++)
                 Graphics.ExecuteCommandBuffer(m_Pipeline.CommandBuffer);
             m_Watch.Stop();
@@ -802,7 +815,6 @@ namespace Phys.AvbdGpu
             m_Stats.Constraints = (int)data[(int)StatSlot.Constraints];
             m_Stats.TerrainManifolds = (int)data[(int)StatSlot.TerrainManifolds];
             m_Stats.Sleeping = (int)data[(int)StatSlot.Sleeping];
-            m_Stats.CarriedManifolds = (int)data[(int)StatSlot.CarriedManifolds];
             m_Stats.Woken = (int)data[(int)StatSlot.Woken];
             ReadListStats(ref m_Stats, data);
             m_Stats.ActiveColors = m_ActiveColors;
@@ -886,7 +898,6 @@ namespace Phys.AvbdGpu
             s.Constraints = (int)data[(int)StatSlot.Constraints];
             s.TerrainManifolds = (int)data[(int)StatSlot.TerrainManifolds];
             s.Sleeping = (int)data[(int)StatSlot.Sleeping];
-            s.CarriedManifolds = (int)data[(int)StatSlot.CarriedManifolds];
             s.Woken = (int)data[(int)StatSlot.Woken];
             ReadListStats(ref s, data);
             s.ActiveColors = m_ActiveColors;
@@ -897,12 +908,9 @@ namespace Phys.AvbdGpu
 
         static void ReadListStats(ref AvbdGpuStats s, NativeArray<uint> data)
         {
-            s.Hot = (int)data[(int)StatSlot.Hot];
-            s.Active = (int)data[(int)StatSlot.Active];
-            s.SleepGrid = (int)data[(int)StatSlot.SleepGrid];
-            s.Pending = (int)data[(int)StatSlot.Pending];
-            s.Stale = (int)data[(int)StatSlot.Stale];
-            s.Rebuilds = (int)data[(int)StatSlot.Rebuilds];
+            var slots = new uint[(int)StatSlot.Count];
+            NativeArray<uint>.Copy(data, slots, slots.Length);
+            ReadListStats(ref s, slots);
         }
 
         static void ReadListStats(ref AvbdGpuStats s, uint[] data)
@@ -913,6 +921,45 @@ namespace Phys.AvbdGpu
             s.Pending = (int)data[(int)StatSlot.Pending];
             s.Stale = (int)data[(int)StatSlot.Stale];
             s.Rebuilds = (int)data[(int)StatSlot.Rebuilds];
+            s.ColdManifolds = (int)data[(int)StatSlot.Cold];
+            s.ColdContacts = (int)data[(int)StatSlot.ColdContacts];
+            s.ColdDead = (int)data[(int)StatSlot.ColdDead];
+            s.Frozen = (int)data[(int)StatSlot.Frozen];
+            s.Thawed = (int)data[(int)StatSlot.Thawed];
+        }
+
+        /// <summary>The manifolds against the terrain, in the step and in the cold store (tests: the bodies resting on it, asleep
+        /// or not).</summary>
+        public int TerrainManifoldsSync()
+        {
+            int n = GetStatsSync().TerrainManifolds;
+            if (m_TerrainBody < 0) return n;
+            foreach (var m in GetColdManifoldsSync(out _)) if (m.BodyB == (uint)m_TerrainBody) n++;
+            return n;
+        }
+
+        /// <summary>Synchronous readback of the live manifolds of the cold store (tests): the ones not thawed, whose bodies are
+        /// asleep or static with the generations they were frozen with.</summary>
+        public List<GpuManifold> GetColdManifoldsSync(out GpuContact[] contacts)
+        {
+            var stats = GetStatsSync();
+            var pool = new GpuManifold[math.max(stats.ColdManifolds, 1)];
+            contacts = new GpuContact[math.max(stats.ColdContacts, 1)];
+            if (stats.ColdManifolds > 0) Buffers.ColdManifolds.GetData(pool, 0, 0, stats.ColdManifolds);
+            if (stats.ColdContacts > 0) Buffers.ColdContacts.GetData(contacts, 0, 0, stats.ColdContacts);
+            var gens = new uint[math.max(m_BodyCount, 1)];
+            if (m_BodyCount > 0) Buffers.BodyGen.GetData(gens, 0, 0, m_BodyCount);
+            var words = GetSleepSync();
+            var live = new List<GpuManifold>();
+            for (int i = 0; i < stats.ColdManifolds; i++)
+            {
+                var m = pool[i];
+                if (m.NumContacts == 0) continue;
+                int a = (int)m.BodyA, b = (int)m.BodyB;
+                bool Frozen(int body, float gen) => math.asuint(gen) == gens[body] && (m_BodyDefs[body].IsStatic || GpuBodySleep.IsAsleep(words[body]));
+                if (Frozen(a, m.Pad.x) && Frozen(b, m.Pad.y)) live.Add(m);
+            }
+            return live;
         }
 
         /// <summary>Synchronous readback of the hot list of the last step (tests): the bodies its per-body passes ran over.</summary>

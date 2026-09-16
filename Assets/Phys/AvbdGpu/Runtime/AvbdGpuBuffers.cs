@@ -23,6 +23,9 @@ namespace Phys.AvbdGpu
         public int MaxLargeBodies;
         public int LargeBodyCells;    // bodies spanning more grid cells than this bypass the grid
         public int HashSize;          // power of two, >= 2 * MaxManifolds
+        public int MaxColdManifolds;  // the cold store: manifolds of sleeping bodies and their contacts
+        public int MaxColdContacts;
+        public int ColdHashSize;      // power of two, >= 2 * MaxColdManifolds
         public int CellCount;         // power of two: the hot grid
         public int SleepCellCount;    // power of two: the sleeping grid
         public int MaxSleepCellEntries;
@@ -30,12 +33,14 @@ namespace Phys.AvbdGpu
         public int MaxWakes;          // wake list entries per step (more wake everything)
 
         /// <summary>Capacities for <paramref name="bodies"/> bodies of which at most <paramref name="active"/> are awake at a time
-        /// (0: all of them; then the world behaves as before the split).</summary>
+        /// (0: all of them). The manifold pools are sized for the awake bodies, the cold store (the manifolds of the sleeping ones)
+        /// for four manifolds per body; scenes whose bodies rarely touch (snapped bricks) can lower <see cref="MaxColdManifolds"/>.</summary>
         public static AvbdGpuConfig ForBodies(int bodies, int active = 0)
         {
             bodies = math.max(bodies, 1024);
             active = active <= 0 ? bodies : math.clamp(active, 1024, bodies);
-            int manifolds = bodies * 4;
+            int manifolds = active * 4;
+            int cold = bodies * 4;
             return new AvbdGpuConfig
             {
                 MaxBodies = bodies,
@@ -50,6 +55,9 @@ namespace Phys.AvbdGpu
                 MaxLargeBodies = 256,
                 LargeBodyCells = 64,
                 HashSize = math.ceilpow2(manifolds * 2),
+                MaxColdManifolds = cold,
+                MaxColdContacts = cold * 4,
+                ColdHashSize = math.ceilpow2(cold * 2),
                 CellCount = math.ceilpow2(active * 2),
                 SleepCellCount = math.ceilpow2(bodies * 2),
                 MaxSleepCellEntries = bodies * 8,
@@ -61,11 +69,15 @@ namespace Phys.AvbdGpu
         public static AvbdGpuConfig Default => ForBodies(65536);
 
         public int MaxConstraintRefs => 2 * MaxManifolds + 2 * (MaxJoints + MaxSprings);
+        /// <summary>Manifolds per in-place chunk of the cold store compaction (AvbdCommon.hlsl COLD_CHUNK).</summary>
+        public const int ColdChunk = 16384;
 
         public long EstimatedBytes =>
-            (long)MaxBodies * (GpuBodyDef.Stride + GpuBodyDrive.Stride + 16 * 16 + 32 + 7 * 4) + (long)MaxSpawns * GpuSpawnRecord.Stride + (long)MaxWakes * 8 + (long)MaxLinks * 8 +
+            (long)MaxBodies * (GpuBodyDef.Stride + GpuBodyDrive.Stride + 16 * 16 + 32 + 8 * 4) + (long)MaxSpawns * GpuSpawnRecord.Stride + (long)MaxWakes * 8 + (long)MaxLinks * 8 +
             (long)CellCount * 12 + 4 + (long)MaxCellEntries * 4 + (long)MaxPairs * 8 + (long)SleepCellCount * 12 + 4 + (long)MaxSleepCellEntries * 4 +
-            2L * MaxManifolds * GpuManifold.Stride + 2L * MaxContacts * GpuContact.Stride + 2L * HashSize * 4 +
+            2L * MaxManifolds * GpuManifold.Stride + 2L * MaxContacts * GpuContact.Stride + 2L * HashSize * 4 + (long)MaxManifolds * 16 + 8 +
+            (long)MaxColdManifolds * (GpuManifold.Stride + 16) + 8 + (long)MaxColdContacts * GpuContact.Stride + (long)ColdHashSize * 4 +
+            (long)ColdChunk * (GpuManifold.Stride + 8 * GpuContact.Stride) +
             (long)MaxJoints * (GpuJointDef.Stride + GpuJointState.Stride + 4) + (long)MaxSprings * (GpuSpringDef.Stride + 4) +
             (long)MaxConstraintRefs * 4;
     }
@@ -85,6 +97,10 @@ namespace Phys.AvbdGpu
         public GraphicsBuffer HotFlags, HotScan, HotList, WokenList, ActiveJoints, ActiveSprings;
         // the sleeping grid: its rebuild's flags, scan and body list, and the grid itself
         public GraphicsBuffer SleepFlags, SleepScan, SleepList, SleepCellCount, SleepCellStart, SleepCellCursor, SleepCellEntries;
+        // the cold store: sleep generations, the pool (manifolds, contacts, hash), the freeze flags / counts and their scans,
+        // the compaction flags / counts, their scans and the chunk scratch
+        public GraphicsBuffer BodyGen, ColdManifolds, ColdContacts, ColdHash, FreezeFlag, FreezeContacts, FreezeFlagScan, FreezeContactScan,
+            ColdFlag, ColdContactCount, ColdFlagScan, ColdContactScan, ColdScratch, ColdScratchContacts;
         // links
         public GraphicsBuffer LinkStart, LinkList;
         // the hot grid
@@ -103,7 +119,7 @@ namespace Phys.AvbdGpu
         // misc
         public GraphicsBuffer Counters, Stats, DispatchArgs, Params;
 
-        public const int ArgSlots = 8 + AvbdGpuConstants.MaxColors + 1 + 12;
+        public const int ArgSlots = 8 + AvbdGpuConstants.MaxColors + 1 + 24;
 
         public AvbdGpuBuffers(AvbdGpuConfig config)
         {
@@ -127,6 +143,14 @@ namespace Phys.AvbdGpu
             SleepFlags = Structured(nb, 4); SleepScan = Structured(nb + 1, 4); SleepList = Structured(nb, 4);
             SleepCellCount = Structured(config.SleepCellCount, 4); SleepCellStart = Structured(config.SleepCellCount + 1, 4);
             SleepCellCursor = Structured(config.SleepCellCount, 4); SleepCellEntries = Structured(config.MaxSleepCellEntries, 4);
+            BodyGen = Structured(nb, 4);
+            ColdManifolds = Structured(config.MaxColdManifolds, GpuManifold.Stride); ColdContacts = Structured(config.MaxColdContacts, GpuContact.Stride);
+            ColdHash = Structured(config.ColdHashSize, 4);
+            FreezeFlag = Structured(config.MaxManifolds, 4); FreezeContacts = Structured(config.MaxManifolds, 4);
+            FreezeFlagScan = Structured(config.MaxManifolds + 1, 4); FreezeContactScan = Structured(config.MaxManifolds + 1, 4);
+            ColdFlag = Structured(config.MaxColdManifolds, 4); ColdContactCount = Structured(config.MaxColdManifolds, 4);
+            ColdFlagScan = Structured(config.MaxColdManifolds + 1, 4); ColdContactScan = Structured(config.MaxColdManifolds + 1, 4);
+            ColdScratch = Structured(AvbdGpuConfig.ColdChunk, GpuManifold.Stride); ColdScratchContacts = Structured(AvbdGpuConfig.ColdChunk * 8, GpuContact.Stride);
             LinkStart = Structured(nb + 1, 4); LinkList = Structured(math.max(config.MaxLinks, 1), 8);
             CellCount = Structured(config.CellCount, 4); CellStart = Structured(config.CellCount + 1, 4); CellCursor = Structured(config.CellCount, 4);
             CellEntries = Structured(config.MaxCellEntries, 4); LargeBodies = Structured(config.MaxLargeBodies, 4);

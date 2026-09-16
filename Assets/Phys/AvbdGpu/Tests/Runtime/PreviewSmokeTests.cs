@@ -163,7 +163,7 @@ namespace Phys.AvbdGpu.Tests
             Assert.Greater(m_Demo.Plateau, 1f, "the ridge runs under the castle");
             float3 extent = m_Demo.Assembly.Extent * PieceCatalog.GridToUnity * m_Demo.Spec.Scale;
             Assert.AreEqual(m_Demo.Plateau, field.Height(new float2(0.45f * extent.x, 0.45f * extent.z)), 1e-4f, "level across the footprint");
-            Assert.Greater(m_Demo.World.GetStatsSync().TerrainManifolds, 100, "the ground course rests on the terrain");
+            Assert.Greater(m_Demo.World.TerrainManifoldsSync(), 100, "the ground course rests on the terrain (asleep by now: in the cold store)");
             yield return Run(180);
             Assert.Less(m_Moves.max, 0.25f * BrickHeight, "no brick moved more than a quarter of its height: the castle stands on the ridge");
             Assert.Greater(m_Moves.groundStill, 0.95f, "the pieces on the plateau stay put");

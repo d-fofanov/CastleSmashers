@@ -10,6 +10,7 @@
 #pragma kernel GridSortCell
 #pragma kernel LargeSort
 #pragma kernel PairGen
+#pragma kernel PairGenWoken
 
 #include "AvbdCommon.hlsl"
 
@@ -38,6 +39,7 @@ StructuredBuffer<uint2> _LinkList;         // (other body, constraint ref) sorte
 StructuredBuffer<JointState> _JointState;
 StructuredBuffer<uint> _BodySleep;         // sleep words: pairs need an active body (sleeping bodies keep their old manifolds)
 StructuredBuffer<uint> _HotList;           // the bodies of this step's per-body passes
+StructuredBuffer<uint> _WokenList;         // PairGenWoken: the bodies the touches woke this step
 StructuredBuffer<uint> _SleepCellStart;    // the sleeping grid (rebuilt when enough bodies fell asleep or woke)
 StructuredBuffer<uint> _SleepCellEntries;
 
@@ -197,8 +199,10 @@ void emitPair(uint a, uint b)
 }
 
 // An entry of the sleeping grid is current when the body is still flagged as being in it (a body that woke since the
-// rebuild lost the flag and is found in the hot grid instead) and alive.
+// rebuild lost the flag and is found in the hot grid instead; a body a touch woke this step keeps it until the end of
+// the step, so that the second round finds it here) and alive.
 bool sleepEntryValid(uint j) { return inSleepGrid(_BodySleep[j]) && !isDead(_BodyDef[j]); }
+bool woken(uint j) { return wokenWord(_BodySleep[j]); }
 
 // The cells of the sleeping grid that the active body i overlaps: every current entry overlapping the AABB of i pairs
 // with it, from the owner cell of the pair.
@@ -292,5 +296,76 @@ void PairGen(uint3 id : SV_DispatchThreadID)
         if (!activeI && !active(L)) continue;
         if (!aabbOverlap(i, L)) continue;
         emitPair(min(i, L), max(i, L));
+    }
+}
+
+// ------------------------------------------------------------------------------------------------ second round
+
+// The pairs of a body the touches woke this step (active now, inactive at the first round): every pair with an
+// inactive body, and with another woken body the pair where it has the lower index; a body that was active in the
+// first round emitted its pair with this one already. Woken bodies of the sleeping grid are still there (the bit stays
+// for the step), woken bodies that were pending are in the hot grid.
+void emitWokenPair(uint w, uint j)
+{
+    if (active(j))
+    {
+        if (!woken(j) || j < w) return;
+    }
+    emitPair(min(w, j), max(w, j));
+}
+
+void walkWoken(uint w, float3 mnI, int3 cmin, int3 cmax)
+{
+    for (int z = cmin.z; z <= cmax.z; z++)
+        for (int y = cmin.y; y <= cmax.y; y++)
+            for (int x = cmin.x; x <= cmax.x; x++)
+            {
+                int3 c = int3(x, y, z);
+                uint h = cellHash(c);
+                uint start = _CellStart[h];
+                uint end = min(_CellStart[h + 1], _MaxCellEntries);
+                for (uint e = start; e < end; e++)
+                {
+                    uint j = _CellEntries[e];
+                    if (j == w || !aabbOverlap(w, j)) continue;
+                    int3 o = cellCoord(max(mnI, _BodyAabbMin[j].xyz));
+                    if (any(o != c)) continue;
+                    emitWokenPair(w, j);
+                }
+                h = sleepCellHash(c);
+                start = _SleepCellStart[h];
+                end = _SleepCellStart[h + 1];
+                for (uint f = start; f < end; f++)
+                {
+                    uint j = _SleepCellEntries[f];
+                    if (j == w || !sleepEntryValid(j) || !aabbOverlap(w, j)) continue;
+                    int3 o = cellCoord(max(mnI, _BodyAabbMin[j].xyz));
+                    if (any(o != c)) continue;
+                    emitWokenPair(w, j);
+                }
+            }
+}
+
+[numthreads(AVBD_THREADS, 1, 1)]
+void PairGenWoken(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Counters[CNT_WOKEN_LIST]) return;
+    uint w = _WokenList[id.x];
+    float4 mn4 = _BodyAabbMin[w];
+    float3 mnI = mn4.xyz;
+    int3 cmin = cellCoord(mnI), cmax = cellCoord(_BodyAabbMax[w].xyz);
+    if (mn4.w != 0)
+    {
+        // a large woken body (they are never in the sleeping grid, so it was pending in the hot grid): walks both grids
+        int3 span = cmax - cmin + 1;
+        if ((uint)span.x * (uint)span.y * (uint)span.z > MAX_LARGE_SLEEP_CELLS) { setOverflow(OVERFLOW_LARGE); return; }
+    }
+    walkWoken(w, mnI, cmin, cmax);
+    uint numLarge = _Counters[CNT_LARGE];
+    for (uint l = 0; l < numLarge; l++)
+    {
+        uint L = _LargeBodies[l];
+        if (L == w || !aabbOverlap(w, L)) continue;
+        emitWokenPair(w, L);
     }
 }

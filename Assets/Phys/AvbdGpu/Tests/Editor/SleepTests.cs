@@ -63,11 +63,12 @@ namespace Phys.AvbdGpu.Tests
             world.BuildScene(AvbdScenes.Pyramid);
             int steps = StepUntilAsleep(world, 1200, trace: true);
             var stats = world.GetStatsSync();
-            Debug.Log($"pyramid: asleep after {steps} steps; {stats.Manifolds} manifolds, {stats.CarriedManifolds} carried, {stats.Pairs} pairs");
+            Debug.Log($"pyramid: asleep after {steps} steps; {stats.Manifolds} manifolds, {stats.ColdManifolds} cold, {stats.Pairs} pairs");
             Assert.AreEqual(136, stats.Sleeping, "every box of the pyramid sleeps");
             Assert.AreEqual(0, stats.Pairs, "sleeping bodies pair with nothing");
-            Assert.Greater(stats.Manifolds, 100, "the manifolds of the sleeping pyramid are kept");
-            Assert.AreEqual(stats.Manifolds, stats.CarriedManifolds, "and every one of them is carried over");
+            Assert.AreEqual(0, stats.Manifolds, "the sleeping pyramid has no manifolds in the step");
+            var cold = world.GetColdManifoldsSync(out _);
+            Assert.Greater(cold.Count, 100, "the manifolds of the sleeping pyramid are kept in the cold store");
 
             var labels = world.GetLabelsSync();
             var islands = new HashSet<uint>();
@@ -87,7 +88,7 @@ namespace Phys.AvbdGpu.Tests
         }
 
         /// <summary>The GPU island labels of the sleeping Outpost (snapped: joints connect the bricks, side gaps keep them out of contact)
-        /// cover the connected components of the carried manifolds and joints computed on the CPU: every component lies within one
+        /// cover the connected components of the cold manifolds and joints computed on the CPU: every component lies within one
         /// label. Labels only merge until a relabel, and sleeping bodies keep theirs, so an island may still be the union of
         /// components that touched while settling; the count is logged.</summary>
         [Test]
@@ -120,6 +121,8 @@ namespace Phys.AvbdGpu.Tests
             var stats = world.GetStatsSync();
             for (int m = 0; m < stats.Manifolds; m++)
                 if (Dynamic((int)manifolds[m].BodyA) && Dynamic((int)manifolds[m].BodyB)) Union((int)manifolds[m].BodyA, (int)manifolds[m].BodyB);
+            foreach (var m in world.GetColdManifoldsSync(out _))
+                if (Dynamic((int)m.BodyA) && Dynamic((int)m.BodyB)) Union((int)m.BodyA, (int)m.BodyB);
             var states = world.GetJointStatesSync();
             for (int j = 0; j < world.JointCount; j++)
             {
@@ -261,6 +264,46 @@ namespace Phys.AvbdGpu.Tests
             GpuTestUtil.AssertFinite(world);
         }
 
+        /// <summary>The manifolds of a sleeping stack wait in the cold store with their multipliers: a box woken without being moved
+        /// thaws them, keeps carrying its load (no cold start of the penalties: nothing sinks) and the stack sleeps and freezes again.</summary>
+        [Test]
+        public void ColdManifoldsWarmStartWokenBodies()
+        {
+            using var world = SleepWorld();
+            Ground(world);
+            var stack = new int[5];
+            for (int i = 0; i < stack.Length; i++)
+                stack[i] = world.AddBody(new float3(1, 1, 1), 1f, 0.5f, new float3(0, 0.5f + i, 0), quaternion.identity, float3.zero);
+            StepUntilAsleep(world, 600);
+            for (int i = 0; i <= world.Params.SleepGridRebuildSteps; i++) world.Step();
+            var stats = world.GetStatsSync();
+            Assert.AreEqual(0, stats.Manifolds, "the sleeping stack has no manifolds in the step");
+            var cold = world.GetColdManifoldsSync(out var contacts);
+            Assert.AreEqual(5, cold.Count, "ground-box and the four box-box manifolds are in the cold store");
+            float load = 0f;
+            foreach (var m in cold)
+                if (m.BodyA == 0 || m.BodyB == 0)
+                    for (int c = 0; c < m.NumContacts; c++) load -= contacts[m.ContactStart + c].Lambda.x;
+            Assert.AreEqual(50f, load, 5f, "the ground manifold carries the weight of the stack in its multipliers");
+
+            world.GetPosesSync(out var pos0, out _);
+            world.WakeBody(stack[0]);
+            world.Step();
+            stats = world.GetStatsSync();
+            // the woken box thaws its two manifolds; being fresh (its rest counter restarted) it also wakes the box on top of it
+            // through their contact, which thaws that box's manifold with the next one
+            Assert.AreEqual(3, stats.Thawed, "the woken box and the neighbour it woke thawed their manifolds");
+            Assert.AreEqual(3, stats.ColdDead);
+            for (int i = 0; i < 60; i++) world.Step();
+            world.GetPosesSync(out var pos1, out _);
+            foreach (int b in stack) Assert.Less(math.length(pos1[b].xyz - pos0[b].xyz), 0.002f, $"box {b} moved on the wake: {pos1[b]} vs {pos0[b]}");
+
+            StepUntilAsleep(world, 600);
+            for (int i = 0; i <= world.Params.SleepGridRebuildSteps; i++) world.Step();
+            Assert.AreEqual(5, world.GetColdManifoldsSync(out _).Count, "the stack is frozen again");
+            Assert.AreEqual(0, world.GetStatsSync().OverflowFlags);
+        }
+
         [Test]
         public void TwoStacksAreTwoIslands()
         {
@@ -300,7 +343,9 @@ namespace Phys.AvbdGpu.Tests
                 for (int i = 7; i <= 12; i++) Assert.IsTrue(Asleep(words, i), $"box {i} of the other stack still sleeps");
                 world.GetVelocitiesSync(out var vel, out _);
                 Assert.Greater(vel[1].x, 0.5f, "the hit box took momentum in the impact step (it was solved, not treated as static)");
-                Assert.Greater(world.GetStatsSync().Woken, 0, "the stats count the woken bodies");
+                var st = world.GetStatsSync();
+                Assert.Greater(st.Woken, 0, "the stats count the woken bodies");
+                Assert.Greater(st.Thawed, 0, "the woken stack warm started from its cold manifolds");
             }
             Assert.GreaterOrEqual(impactStep, 0, "the shot reached the stack");
             _ = shot;

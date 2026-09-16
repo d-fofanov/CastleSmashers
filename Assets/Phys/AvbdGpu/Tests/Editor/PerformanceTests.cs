@@ -39,7 +39,7 @@ namespace Phys.AvbdGpu.Tests
             sw.Stop();
             GpuTestUtil.AssertFinite(world);
             UnityEngine.Debug.Log($"PERF {label}: {world.BodyCount} bodies, {iterations} iterations{(sleep ? ", sleeping" : "")}: {sw.Elapsed.TotalMilliseconds / steps:F2} ms/step, cpu submit {world.Stats.AvgStepMs:F2} ms " +
-                $"(pairs {stats.Pairs}, manifolds {stats.Manifolds} ({stats.TerrainManifolds} terrain, {stats.CarriedManifolds} carried), contacts {stats.Contacts}, colours {stats.ColorsUsed}, overflow bodies {stats.OverflowBodies}, flags {stats.OverflowFlags}, asleep {stats.Sleeping})");
+                $"(pairs {stats.Pairs}, manifolds {stats.Manifolds} ({stats.TerrainManifolds} terrain, {stats.ColdManifolds} cold), contacts {stats.Contacts}, colours {stats.ColorsUsed}, overflow bodies {stats.OverflowBodies}, flags {stats.OverflowFlags}, asleep {stats.Sleeping}, hot {stats.Hot})");
             Assert.AreEqual(0, stats.OverflowFlags, "capacity overflow");
         }
 
