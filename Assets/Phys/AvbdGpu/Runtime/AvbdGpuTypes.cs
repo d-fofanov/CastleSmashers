@@ -162,19 +162,25 @@ namespace Phys.AvbdGpu
         public uint Relabel;
         public float WakeSpeedSq;
         /// <summary>Steps an island woken by a fast touch stays awake at least.</summary>
-        public uint WakeHoldSteps, Pad2, Pad3, Pad4;
+        public uint WakeHoldSteps;
+        /// <summary>The split capacities: the pools and the hot grid are sized for MaxActive awake bodies; the sleeping grid has its
+        /// own hash table (SleepCellMask) and is rebuilt once RebuildMin bodies fell asleep or woke since the last rebuild.</summary>
+        public uint MaxActive, SleepCellMask, RebuildMin;
         public const int Stride = 208;
         public const uint NoTerrain = 0xFFFFFFFFu;
     }
 
     /// <summary>Decoding of a body's sleep word (<see cref="AvbdGpuWorld.GetSleepSync"/>): bit 31 = asleep, bit 30 = woken by a
-    /// touch this step, below them the steps the body has rested within its rest anchor.</summary>
+    /// touch this step, bit 29 = in the sleeping grid (out of the hot list), below them the steps the body has rested within its
+    /// rest anchor.</summary>
     public static class GpuBodySleep
     {
         public const uint Asleep = 0x80000000u;
         public const uint Woken = 0x40000000u;
-        public const uint CounterMask = 0x3FFFFFFFu;
+        public const uint InGrid = 0x20000000u;
+        public const uint CounterMask = 0x1FFFFFFFu;
         public static bool IsAsleep(uint w) => (w & Asleep) != 0;
+        public static bool IsInGrid(uint w) => (w & InGrid) != 0;
         public static int RestSteps(uint w) => (int)(w & CounterMask);
     }
 
@@ -193,11 +199,13 @@ namespace Phys.AvbdGpu
         public static uint Index(uint r) => r & 0x3FFFFFFFu;
     }
 
-    /// <summary>Counter / stats slots (AvbdCommon.hlsl CNT_*).</summary>
+    /// <summary>Counter / stats slots (AvbdCommon.hlsl CNT_*); the slots from <see cref="Persistent"/> on carry over between steps.</summary>
     public enum StatSlot
     {
         Pairs = 0, Manifolds = 1, Contacts = 2, LargeBodies = 3, Overflow = 4, OverflowBodies = 5, ColorsUsed = 6, Constraints = 7, ActiveJoints = 8,
-        TerrainManifolds = 9, Sleeping = 10, CarriedManifolds = 11, Woken = 12, PrevManifolds = 13, Count = 16
+        TerrainManifolds = 9, Sleeping = 10, CarriedManifolds = 11, Woken = 12, PrevManifolds = 13, Hot = 14, WokenList = 15, ActiveSprings = 16,
+        Marks = 17, Active = 18, RebuildDue = 19, AsleepStart = 20,
+        Persistent = 24, Pending = 24, Stale = 25, SleepGrid = 26, Rebuilds = 27, RebuildForce = 28, Count = 32
     }
 
     /// <summary>Per-step statistics read back asynchronously (one or two frames old).</summary>
@@ -209,7 +217,14 @@ namespace Phys.AvbdGpu
         /// <summary>Bodies asleep at the end of the step, manifolds of sleeping bodies carried over unchanged (counted in
         /// <see cref="Manifolds"/> as well) and sleeping bodies woken by a touch during the step.</summary>
         public int Sleeping, CarriedManifolds, Woken;
-        /// <summary>Capacity overflow bits: 1 pairs, 2 manifolds, 4 contacts, 8 cell entries, 16 large bodies, 32 unsorted cells.</summary>
+        /// <summary>Bodies of the hot list (the per-body passes run over them: active, or asleep but not yet in the sleeping grid)
+        /// and active bodies (dynamic, alive, awake) at the start of the step.</summary>
+        public int Hot, Active;
+        /// <summary>Bodies in the sleeping grid (static ones included), bodies that fell asleep (pending) or woke (stale) since it
+        /// was rebuilt, and the rebuilds so far.</summary>
+        public int SleepGrid, Pending, Stale, Rebuilds;
+        /// <summary>Capacity overflow bits: 1 pairs, 2 manifolds, 4 contacts, 8 cell entries, 16 large bodies, 32 unsorted cells,
+        /// 64 more active bodies than <see cref="AvbdGpuConfig.MaxActive"/>.</summary>
         public int OverflowFlags;
         public int ActiveColors;
         public float LastStepMs, AvgStepMs, MaxStepMs;

@@ -46,6 +46,8 @@ StructuredBuffer<SpringDef> _SpringDef;
 StructuredBuffer<uint> _Counters;
 StructuredBuffer<BodyDrive> _BodyDrive;         // read by DriveKinematic, Predict
 StructuredBuffer<uint> _BodySleep;              // sleep words: sleeping bodies are frozen (Predict, Dual, Velocity skip them)
+StructuredBuffer<uint> _HotList;                // the bodies of the per-body passes
+StructuredBuffer<uint> _ActiveJoints;           // the joints with an active body (Dual)
 
 int _ColorSlot;       // colour group of this primal dispatch
 int _WriteToNew;      // 1: write positions to the double buffer (overflow group)
@@ -57,8 +59,7 @@ float _AlphaIt;       // stabilisation parameter of this iteration (post-stabili
 [numthreads(AVBD_THREADS, 1, 1)]
 void DriveKinematic(uint3 id : SV_DispatchThreadID)
 {
-    uint i = id.x;
-    if (i >= _BodyCount) return;
+    HOT_BODY(id, i)
     BodyDef d = _BodyDef[i];
     if (!activeBody(d, _BodySleep[i]) || (d.flags & (FLAG_HEADING | FLAG_ALIGN_VELOCITY)) == 0) return;
     if (d.flags & FLAG_ALIGN_VELOCITY)
@@ -99,8 +100,7 @@ float3 driveAcceleration(uint i, BodyDef d, float3 pos, float3 vel)
 [numthreads(AVBD_THREADS, 1, 1)]
 void Predict(uint3 id : SV_DispatchThreadID)
 {
-    uint i = id.x;
-    if (i >= _BodyCount) return;
+    HOT_BODY(id, i)
     BodyDef d = _BodyDef[i];
     float3 pos = _BodyPos[i].xyz;
     float4 rot = _BodyRot[i];
@@ -538,7 +538,7 @@ void Dual(uint3 id : SV_DispatchThreadID)
     uint m = _Counters[CNT_MANIFOLDS];
     if (t < m) { dualManifold(t); return; }
     t -= m;
-    if (t < _JointCount) { dualJoint(t); return; }
+    if (t < _Counters[CNT_ACTIVE_JOINTS]) { dualJoint(_ActiveJoints[t]); return; }
     // springs have no dual variables
 }
 
@@ -547,8 +547,7 @@ void Dual(uint3 id : SV_DispatchThreadID)
 [numthreads(AVBD_THREADS, 1, 1)]
 void Velocity(uint3 id : SV_DispatchThreadID)
 {
-    uint i = id.x;
-    if (i >= _BodyCount) return;
+    HOT_BODY(id, i)
     _BodyPrevVelLin[i] = _BodyVelLin[i];
     BodyDef d = _BodyDef[i];
     if (!activeBody(d, _BodySleep[i])) return;   // a sleeping body keeps its zero velocities

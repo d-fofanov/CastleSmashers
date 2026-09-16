@@ -1,6 +1,8 @@
-// Bookkeeping kernels: indirect dispatch arguments from CPU counts / GPU counters, counter reset, hash clear, stats copy,
-// spawning bodies into retired slots.
+// Bookkeeping kernels: indirect dispatch arguments from CPU counts / GPU counters, counter reset, the hot list (the bodies
+// the per-body passes run over), hash clear, stats copy, spawning bodies into retired slots.
 #pragma kernel BuildArgs
+#pragma kernel HotFlag
+#pragma kernel HotScatter
 #pragma kernel HashClear
 #pragma kernel CopyStats
 #pragma kernel ClearUints
@@ -13,6 +15,11 @@ RWStructuredBuffer<uint> _Stats;
 RWByteAddressBuffer _DispatchArgs;
 RWStructuredBuffer<uint> _HashCur;
 RWStructuredBuffer<uint> _ClearTarget;
+StructuredBuffer<BodyDef> _BodyDef;
+StructuredBuffer<uint> _BodySleep;
+RWStructuredBuffer<uint> _HotFlags;        // HotFlag: 1 for every body of the hot list
+StructuredBuffer<uint> _HotScan;           // exclusive scan of the flags (the scan kernels)
+RWStructuredBuffer<uint> _HotList;
 StructuredBuffer<SpawnRecord> _SpawnRecords;
 RWStructuredBuffer<float4> _BodyPos;
 RWStructuredBuffer<float4> _BodyRot;
@@ -25,6 +32,8 @@ int _Phase;
 int _ClearCount;
 int _SpawnCount;
 
+#define OVERFLOW_ACTIVE 64u
+
 uint groups(uint n) { return (n + AVBD_THREADS - 1) / AVBD_THREADS; }
 
 void writeArgs(uint slot, uint n)
@@ -32,15 +41,18 @@ void writeArgs(uint slot, uint n)
     _DispatchArgs.Store3(slot * 12, uint3(groups(n), 1, 1));
 }
 
-// Phase 0: start of step (CPU counts); phase 1: after pair generation; phase 2: after the narrowphase.
+// The step's indirect arguments, phase by phase: 0 start of step (CPU counts, counter reset); 3 after the hot list;
+// 1 after pair generation (and the active joint lists); 2 after the narrowphase; 5 after the touch marks; 4 after the
+// touched bodies woke (hot and woken lists grown); 6 after their joints joined the active lists.
 [numthreads(1, 1, 1)]
 void BuildArgs(uint3 id : SV_DispatchThreadID)
 {
     if (_Phase == 0)
     {
-        // last step's manifold count drives CarrySleeping: kept in its own slot across the reset
+        // last step's manifold count drives CarrySleeping: kept in its own slot across the reset; the slots from
+        // CNT_PERSISTENT on (the sleeping grid's bookkeeping) carry over
         uint prevManifolds = _Counters[CNT_MANIFOLDS];
-        for (int i = 0; i < CNT_COUNT; i++) _Counters[i] = 0;
+        for (int i = 0; i < CNT_PERSISTENT; i++) _Counters[i] = 0;
         _Counters[CNT_PREV_MANIFOLDS] = prevManifolds;
         writeArgs(ARG_BODIES, _BodyCount);
         writeArgs(ARG_JOINTS, _JointCount);
@@ -49,6 +61,11 @@ void BuildArgs(uint3 id : SV_DispatchThreadID)
         writeArgs(ARG_CONSTRAINTS, 0);
         writeArgs(ARG_WAKE_LIST, _WakeCount);
     }
+    else if (_Phase == 3)
+    {
+        writeArgs(ARG_HOT, _Counters[CNT_HOT]);
+        if (_Counters[CNT_ACTIVE] > _MaxActive) _Counters[CNT_OVERFLOW] |= OVERFLOW_ACTIVE;
+    }
     else if (_Phase == 1)
     {
         uint pairs = min(_Counters[CNT_PAIRS], _MaxPairs);
@@ -56,16 +73,75 @@ void BuildArgs(uint3 id : SV_DispatchThreadID)
         writeArgs(ARG_PAIRS, pairs);
         // (written here rather than in phase 0: a run of stores over the contiguous slots 0..6 broke the kernel on D3D12)
         writeArgs(ARG_PREV_MANIFOLDS, _Counters[CNT_PREV_MANIFOLDS]);
+        writeArgs(ARG_ACTIVE_JOINTS, _Counters[CNT_ACTIVE_JOINTS]);
+        writeArgs(ARG_ACTIVE_SPRINGS, _Counters[CNT_ACTIVE_SPRINGS]);
     }
-    else
+    else if (_Phase == 2 || _Phase == 6)
     {
         uint manifolds = min(_Counters[CNT_MANIFOLDS], _MaxManifolds);
         _Counters[CNT_MANIFOLDS] = manifolds;
-        uint constraints = manifolds + _JointCount + _SpringCount;
+        uint constraints = manifolds + _Counters[CNT_ACTIVE_JOINTS] + _Counters[CNT_ACTIVE_SPRINGS];
         _Counters[CNT_CONSTRAINTS] = constraints;
         writeArgs(ARG_MANIFOLDS, manifolds);
         writeArgs(ARG_CONSTRAINTS, constraints);
+        if (_Phase == 6)
+        {
+            writeArgs(ARG_ACTIVE_JOINTS, _Counters[CNT_ACTIVE_JOINTS]);
+            writeArgs(ARG_ACTIVE_SPRINGS, _Counters[CNT_ACTIVE_SPRINGS]);
+        }
     }
+    else if (_Phase == 5)
+    {
+        writeArgs(ARG_MARKED, _Counters[CNT_MARKS] != 0 ? _BodyCount : 0);
+    }
+    else if (_Phase == 4)
+    {
+        writeArgs(ARG_HOT, _Counters[CNT_HOT]);
+        writeArgs(ARG_WOKEN, _Counters[CNT_WOKEN_LIST]);
+    }
+}
+
+// ------------------------------------------------------------------------------------------------ hot list
+
+// A body is hot when it is alive, not the terrain slot, and either active or not yet in the sleeping grid (a body that
+// fell asleep after the last rebuild keeps its place in the hot grid until the next one). Counts the active bodies and
+// the sleeping dynamic ones (the stats: asleep at the end of the step = these, less the woken, plus the newly asleep).
+groupshared uint gs_active, gs_asleep;
+
+[numthreads(AVBD_THREADS, 1, 1)]
+void HotFlag(uint3 id : SV_DispatchThreadID, uint3 gtid : SV_GroupThreadID)
+{
+    if (gtid.x == 0) { gs_active = 0; gs_asleep = 0; }
+    GroupMemoryBarrierWithGroupSync();
+    uint i = id.x;
+    if (i < _BodyCount)
+    {
+        BodyDef d = _BodyDef[i];
+        uint w = _BodySleep[i];
+        bool active = activeBody(d, w);
+        bool hot = !isDead(d) && !isTerrain(d) && (active || !inSleepGrid(w));
+        _HotFlags[i] = hot ? 1u : 0u;
+        uint dummy;
+        if (active) InterlockedAdd(gs_active, 1, dummy);
+        else if (!isStatic(d) && asleepWord(w)) InterlockedAdd(gs_asleep, 1, dummy);
+    }
+    GroupMemoryBarrierWithGroupSync();
+    if (gtid.x == 0)
+    {
+        uint dummy;
+        if (gs_active != 0) InterlockedAdd(_Counters[CNT_ACTIVE], gs_active, dummy);
+        if (gs_asleep != 0) InterlockedAdd(_Counters[CNT_ASLEEP_START], gs_asleep, dummy);
+    }
+}
+
+// Compacts the flagged bodies into the hot list (in index order: the scan gives every body its slot).
+[numthreads(AVBD_THREADS, 1, 1)]
+void HotScatter(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+    if (i == 0) _Counters[CNT_HOT] = _HotScan[_BodyCount];
+    if (i >= _BodyCount) return;
+    if (_HotFlags[i] != 0) _HotList[_HotScan[i]] = i;
 }
 
 [numthreads(AVBD_THREADS, 1, 1)]
@@ -80,10 +156,15 @@ void ClearUints(uint3 id : SV_DispatchThreadID)
     if (id.x < (uint)_ClearCount) _ClearTarget[id.x] = 0;
 }
 
+// The stats of the step; the bodies asleep at its end are the ones asleep at its start, less the woken, plus the newly
+// asleep (the sleepers of the sleeping grid have no thread that could count them at the end).
 [numthreads(CNT_COUNT, 1, 1)]
 void CopyStats(uint3 id : SV_DispatchThreadID)
 {
-    if (id.x < CNT_COUNT) _Stats[id.x] = _Counters[id.x];
+    if (id.x >= CNT_COUNT) return;
+    uint v = _Counters[id.x];
+    if (id.x == CNT_SLEEPING) v += _Counters[CNT_ASLEEP_START] - _Counters[CNT_WOKEN];
+    _Stats[id.x] = v;
 }
 
 // Writes the GPU-owned state of spawned bodies (pose, velocities, colour, events); the definition and the drive are

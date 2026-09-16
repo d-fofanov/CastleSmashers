@@ -7,13 +7,17 @@ using UnityEngine;
 namespace Phys.AvbdGpu.Tests
 {
     /// <summary>Sleeping islands: resting islands freeze and cost no pairs, a touch wakes a whole island in the same step, an
-    /// island sleeps only when all of it rests, gameplay changes wake, debris leaves its island, and it is all deterministic.</summary>
+    /// island sleeps only when all of it rests, gameplay changes wake, debris leaves its island, sleepers leave the hot list for
+    /// the sleeping grid, and it is all deterministic.</summary>
     public class SleepTests
     {
+        /// <summary>A sleeping test world whose sleeping grid is rebuilt for a single changed body, so that even the smallest
+        /// scenes go through the grid.</summary>
         static AvbdGpuWorld SleepWorld(int bodies = 4096)
         {
             var world = GpuTestUtil.NewWorld(bodies);
             world.Params.Sleep = true;
+            world.Params.SleepGridRebuildMin = 1;
             return world;
         }
 
@@ -135,6 +139,126 @@ namespace Phys.AvbdGpu.Tests
             Debug.Log($"outpost: {islands.Count} islands on the GPU, {components.Count} connected components on the CPU");
             Assert.Greater(islands.Count, 1, "the castle is several islands");
             Assert.LessOrEqual(islands.Count, components.Count, "islands are unions of components");
+        }
+
+        /// <summary>Once the pyramid sleeps, a rebuild moves it into the sleeping grid: the hot list shrinks to the ground box (large,
+        /// so never in a grid), the stats count the grid, and a box dropped onto the apex is found through the grid, wakes the box
+        /// it lands on (which joins the hot list), and the lot sleeps and returns to the grid.</summary>
+        [Test]
+        public void SleepersLeaveTheHotListForTheSleepingGrid()
+        {
+            using var world = SleepWorld();
+            world.BuildScene(AvbdScenes.Pyramid);
+            StepUntilAsleep(world, 1200);
+            for (int i = 0; i <= world.Params.SleepGridRebuildSteps; i++) world.Step();
+            var stats = world.GetStatsSync();
+            Assert.AreEqual(136, stats.SleepGrid, "every box of the pyramid is in the sleeping grid");
+            Assert.AreEqual(136, stats.Sleeping, "and counted as asleep");
+            Assert.AreEqual(1, stats.Hot, "only the ground box stays hot");
+            Assert.AreEqual(0, stats.Active);
+            Assert.AreEqual(0, stats.Pending); Assert.AreEqual(0, stats.Stale);
+            Assert.Greater(stats.Rebuilds, 0);
+            Assert.AreEqual(0, stats.OverflowFlags);
+            CollectionAssert.AreEqual(new[] { 0 }, world.GetHotListSync());
+            var words = world.GetSleepSync();
+            for (int i = 1; i < world.BodyCount; i++) Assert.IsTrue(GpuBodySleep.IsInGrid(words[i]), $"box {i} carries the grid flag");
+
+            world.GetPosesSync(out var pos, out _);
+            int top = 1;
+            for (int i = 2; i < world.BodyCount; i++) if (pos[i].y > pos[top].y) top = i;
+            int dropped = world.AddBody(new float3(1, 1, 1), 1f, 0.5f, new float3(pos[top].x, pos[top].y + 2.5f, pos[top].z), quaternion.identity, float3.zero);
+            bool woke = false;
+            for (int i = 0; i < 90 && !woke; i++)
+            {
+                world.Step();
+                woke = !Asleep(world.GetSleepSync(), top);
+                if (woke)
+                {
+                    stats = world.GetStatsSync();
+                    Assert.Greater(stats.Hot, 2, "the woken boxes joined the hot list");
+                    Assert.Greater(stats.Pairs, 0, "the dropped box found the sleeping apex through the sleeping grid");
+                }
+            }
+            Assert.IsTrue(woke, "the dropped box woke the apex");
+            for (int i = 0; i < 120; i++) world.Step();
+            world.GetPosesSync(out pos, out _);
+            Assert.Greater(pos[dropped].y, 0.9f, "and came to rest on the pyramid, not on the ground");
+
+            StepUntilAsleep(world, 1200);
+            for (int i = 0; i <= world.Params.SleepGridRebuildSteps; i++) world.Step();
+            stats = world.GetStatsSync();
+            Assert.AreEqual(137, stats.SleepGrid, "the dropped box sleeps in the grid with the pyramid");
+            Assert.AreEqual(1, stats.Hot);
+            Assert.AreEqual(0, stats.OverflowFlags);
+        }
+
+        /// <summary>A square pyramid of <paramref name="n"/> rows of unit cubes with its base centred at <paramref name="at"/>; returns
+        /// the first body.</summary>
+        static int AddPyramid(AvbdGpuWorld world, int n, float3 at)
+        {
+            int first = world.BodyCount;
+            const float pitch = 1.02f;
+            for (int layer = 0; layer < n; layer++)
+            {
+                int k = n - layer;
+                float offset = -(k - 1) * 0.5f * pitch;
+                for (int i = 0; i < k; i++)
+                    for (int j = 0; j < k; j++)
+                        world.AddBody(new float3(1, 1, 1), 1f, 0.5f, at + new float3(offset + i * pitch, layer + 0.5f, offset + j * pitch), quaternion.identity, float3.zero);
+            }
+            return first;
+        }
+
+        /// <summary>More bodies than the active capacity: four 385-cube pyramids are built one after another into a world with room
+        /// for 4096 bodies of which 1024 may be awake, each once the previous one sleeps. Nothing overflows, all 1540 sleep in the
+        /// grid, and a shot into one pyramid wakes that island alone.</summary>
+        [Test]
+        public void WorldsLargerThanTheActiveCapacity()
+        {
+            if (!AvbdGpuKernels.Supported) Assert.Ignore("no compute");
+            using var world = new AvbdGpuWorld(AvbdGpuConfig.ForBodies(4096, 1024));
+            world.Params.SleepGridRebuildMin = 1;
+            Assert.AreEqual(1024, world.Config.MaxActive);
+            world.AddBody(new float3(400, 1, 400), 0f, 0.5f, new float3(0, -0.5f, 0), quaternion.identity, float3.zero);
+            const int n = 10;   // 385 cubes each
+            var firsts = new int[4];
+            for (int p = 0; p < 4; p++)
+            {
+                firsts[p] = AddPyramid(world, n, new float3(p * 30f - 45f, 0, 0));
+                StepUntilAsleep(world, 900);
+                var st = world.GetStatsSync();
+                Assert.AreEqual(0, st.OverflowFlags, $"no overflow with pyramid {p} ({world.BodyCount} bodies, {st.Active} active)");
+                Assert.LessOrEqual(st.Hot, 1 + 385, "at most one pyramid is hot at a time");
+            }
+            for (int i = 0; i <= world.Params.SleepGridRebuildSteps; i++) world.Step();
+            var stats = world.GetStatsSync();
+            Assert.AreEqual(1541, world.BodyCount);
+            Assert.AreEqual(1540, stats.Sleeping, "every cube sleeps");
+            Assert.AreEqual(1540, stats.SleepGrid, "in the sleeping grid");
+            Assert.AreEqual(1, stats.Hot, "only the ground is hot");
+            Assert.AreEqual(0, stats.OverflowFlags);
+
+            // a fast box into the second pyramid wakes its island in the impact step and nothing else
+            int shot = world.AddBody(new float3(1, 1, 1), 2f, 0.5f, new float3(-15f, 2f, -12f), quaternion.identity, new float3(0, 0, 18f));
+            int impact = -1;
+            for (int i = 0; i < 120 && impact < 0; i++)
+            {
+                world.Step();
+                var words = world.GetSleepSync();
+                if (Asleep(words, firsts[1])) continue;
+                impact = i;
+                int awake = 0;
+                for (int b = firsts[1]; b < firsts[2]; b++) if (!Asleep(words, b)) awake++;
+                Assert.AreEqual(385, awake, "the whole hit pyramid woke");
+                for (int b = firsts[0]; b < firsts[1]; b++) Assert.IsTrue(Asleep(words, b), $"cube {b} of the first pyramid sleeps on");
+                for (int b = firsts[2]; b < world.BodyCount - 1; b++) Assert.IsTrue(Asleep(words, b), $"cube {b} of a later pyramid sleeps on");
+                var st = world.GetStatsSync();
+                Assert.LessOrEqual(st.Hot, 1 + 385 + 1, "the hot list holds the woken pyramid and the shot");
+                Assert.AreEqual(0, st.OverflowFlags);
+            }
+            Assert.GreaterOrEqual(impact, 0, "the shot hit the second pyramid");
+            _ = shot;
+            GpuTestUtil.AssertFinite(world);
         }
 
         [Test]

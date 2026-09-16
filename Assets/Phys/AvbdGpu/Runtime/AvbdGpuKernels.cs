@@ -6,16 +6,17 @@ namespace Phys.AvbdGpu
     /// <summary>The compute shaders (loaded from Resources/AvbdGpu) and their kernel indices.</summary>
     public sealed class AvbdGpuKernels
     {
-        public readonly ComputeShader Util, Scan, Broadphase, Narrowphase, Constraints, Coloring, Solver, Sleep;
+        public readonly ComputeShader Util, Scan, Broadphase, Narrowphase, Constraints, Coloring, Solver, Sleep, SleepGrid;
 
-        public readonly int BuildArgs, HashClear, CopyStats, ClearUints, SpawnBodies;
+        public readonly int BuildArgs, HotFlag, HotScatter, HashClear, CopyStats, ClearUints, SpawnBodies;
         public readonly int ScanBlock, ScanTop, ScanAdd;
         public readonly int BodyAabb, GridClear, GridCount, GridScatter, GridSortCell, LargeSort, PairGen;
         public readonly int Collide, CollideTerrain, CarrySleeping;
-        public readonly int PrepareJoints, ConsClear, ConsCount, ConsFill, ConsSort;
+        public readonly int JointList, JointListWoken, PrepareJoints, ConsClear, ConsCount, ConsFill, ConsSort;
         public readonly int ColorInvalidate, ColorRound, ColorFinalize, ColorScan, ColorScatter;
         public readonly int DriveKinematic, Predict, Primal, CommitOverflow, Dual, Velocity;
         public readonly int WakeList, WakeTouch, WakeApply, WakeClear, LabelRound, SleepTimer, RestSpread, RestSleep;
+        public readonly int RebuildGate, SleepFlag, SleepScatter, RebuildListArgs, SleepGridClear, SleepGridCount, SleepGridScatter, SleepGridSortCell, SleepMark;
 
         public static bool Supported => SystemInfo.supportsComputeShaders;
 
@@ -29,8 +30,11 @@ namespace Phys.AvbdGpu
             Coloring = Load("AvbdColoring");
             Solver = Load("AvbdSolver");
             Sleep = Load("AvbdSleep");
+            SleepGrid = Load("AvbdSleepGrid");
 
             BuildArgs = Util.FindKernel("BuildArgs");
+            HotFlag = Util.FindKernel("HotFlag");
+            HotScatter = Util.FindKernel("HotScatter");
             HashClear = Util.FindKernel("HashClear");
             CopyStats = Util.FindKernel("CopyStats");
             ClearUints = Util.FindKernel("ClearUints");
@@ -48,6 +52,8 @@ namespace Phys.AvbdGpu
             Collide = Narrowphase.FindKernel("Collide");
             CollideTerrain = Narrowphase.FindKernel("CollideTerrain");
             CarrySleeping = Narrowphase.FindKernel("CarrySleeping");
+            JointList = Constraints.FindKernel("JointList");
+            JointListWoken = Constraints.FindKernel("JointListWoken");
             PrepareJoints = Constraints.FindKernel("PrepareJoints");
             ConsClear = Constraints.FindKernel("ConsClear");
             ConsCount = Constraints.FindKernel("ConsCount");
@@ -72,6 +78,15 @@ namespace Phys.AvbdGpu
             SleepTimer = Sleep.FindKernel("SleepTimer");
             RestSpread = Sleep.FindKernel("RestSpread");
             RestSleep = Sleep.FindKernel("RestSleep");
+            RebuildGate = SleepGrid.FindKernel("RebuildGate");
+            SleepFlag = SleepGrid.FindKernel("SleepFlag");
+            SleepScatter = SleepGrid.FindKernel("SleepScatter");
+            RebuildListArgs = SleepGrid.FindKernel("RebuildListArgs");
+            SleepGridClear = SleepGrid.FindKernel("SleepGridClear");
+            SleepGridCount = SleepGrid.FindKernel("SleepGridCount");
+            SleepGridScatter = SleepGrid.FindKernel("SleepGridScatter");
+            SleepGridSortCell = SleepGrid.FindKernel("SleepGridSortCell");
+            SleepMark = SleepGrid.FindKernel("SleepMark");
         }
 
         static ComputeShader Load(string name)

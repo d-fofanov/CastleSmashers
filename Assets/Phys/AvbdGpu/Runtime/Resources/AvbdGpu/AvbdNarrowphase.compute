@@ -37,6 +37,7 @@ RWStructuredBuffer<Contact> _ContactsCur;
 RWStructuredBuffer<uint> _HashCur;
 RWStructuredBuffer<uint> _BodyEvents;      // FLAG_REPORT_EVENTS bodies: kinds touched, count of new projectile manifolds
 StructuredBuffer<uint> _BodySleep;         // sleep words: sleeping bodies get no new contacts, their old ones are carried
+StructuredBuffer<uint> _HotList;           // CollideTerrain: the bodies of the per-body passes
 
 // Per-thread scratch in group shared memory: FXC cannot dynamically index register arrays with data-dependent
 // trip counts, group shared memory can be indexed freely. Two clip polygons and the contact set per thread.
@@ -562,8 +563,8 @@ void Collide(uint3 id : SV_DispatchThreadID, uint3 gtid : SV_GroupThreadID)
 [numthreads(AVBD_THREADS, 1, 1)]
 void CollideTerrain(uint3 id : SV_DispatchThreadID, uint3 gtid : SV_GroupThreadID)
 {
-    uint i = id.x;
-    if (i >= _BodyCount || _TerrainSlot == NO_TERRAIN) return;
+    if (_TerrainSlot == NO_TERRAIN) return;
+    HOT_BODY(id, i)
     uint t = gtid.x;
     BodyDef d = _BodyDef[i];
     if (!activeBody(d, _BodySleep[i])) return;   // a sleeping body keeps last step's terrain manifold (CarrySleeping)

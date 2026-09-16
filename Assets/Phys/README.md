@@ -62,6 +62,7 @@ Assets/Models/construction_pieces      the 27-piece pack (bricks, plates, tiles,
 
 ```csharp
 var world = new AvbdGpuWorld(AvbdGpuConfig.ForBodies(65536));   // capacities; buffers are allocated once
+// ForBodies(262144, 65536): room for 262 144 bodies of which 65 536 may be awake at a time (the rest sleep in their own grid)
 int ground = world.AddBody(new float3(100, 1, 100), 0f, 0.5f, float3.zero, quaternion.identity, float3.zero); // density 0 = static
 int box = world.AddBody(new float3(1, 1, 1), 1f, 0.5f, new float3(0, 4, 0), quaternion.identity, float3.zero);
 int joint = world.AddJointIndexed(-1, box, new float3(0, 6, 0), float3.zero, 5000f, 0f);   // bodyA -1: world anchor
@@ -175,6 +176,19 @@ sleep), flags, joints and springs added, removed or re-anchored, ignore links, a
 the terrain and gravity (everything). A body drawn in the `Sleep` colour mode (`F2`) shows its island in a dim hashed
 colour while asleep.
 
+Sleeping bodies cost no threads either: every per-body pass of the step runs over the **hot list** — the awake bodies and
+the ones that fell asleep since the **sleeping grid** was last rebuilt — and the joint and spring passes over the joints of
+the awake bodies. Every `SleepGridRebuildSteps` steps, once `SleepGridRebuildMin` bodies (or a 64th of the grid) fell asleep
+or woke since the last time, the sleeping grid is rebuilt from the inactive bodies (asleep, or static and small) and they
+leave the hot list; awake bodies walk both grids, so a sleeper is still found by whatever moves against it, and a woken
+body rejoins the hot list in the step of its wake. A world can therefore hold more bodies than it has room to simulate:
+`ForBodies(total, active)` sizes the per-body arrays for `total` and the pairs, the hot grid and the colour list for
+`active`, and as long as fewer than `active` bodies are awake at a time nothing overflows (`Stats.Hot`, `Active`, `SleepGrid`,
+`Pending`, `Stale`, `Rebuilds` count the lists; the HUD shows them next to the body count). A rebuild is one counting
+sort of the sleepers (a few milliseconds for a million), a gate on the GPU skips it when nothing is due, and everything the
+CPU moves outside the solver (the terrain, gravity, `WakeAll`) wakes all bodies at once — an overflow when there are more
+than `active` of them.
+
 ## Parameters (`AvbdGpuParams`, defaults = reference, sleeping on)
 
 | Parameter | Default | Meaning |
@@ -193,6 +207,7 @@ colour while asleep.
 | `SleepHops` | 2 | how far (contacts / joints) the neighbourhood must rest before a body sleeps |
 | `WakeSpeed`, `WakeHold` | 0.25 m/s, 0.15 s | a faster touch wakes the whole island, which then stays awake this long |
 | `SleepLabelRounds`, `SleepRelabelSteps` | 4, 60 | island label rounds per step; awake bodies restart their labels this often |
+| `SleepGridRebuildSteps`, `SleepGridRebuildMin` | 15, 64 | the sleeping grid is rebuilt at most this often, once this many bodies (or a 64th of the grid) slept or woke |
 
 Constants (`AvbdGpuConstants` / `AvbdCommon.hlsl`): penalty bounds 1 .. 1e10, collision margin 0.01, stick
 threshold 1e-5, hard stiffness ≥ 1e30 (`float.PositiveInfinity` accepted), 8 contacts per manifold, 32 colours,
@@ -205,11 +220,12 @@ axis, `snapAxis` ±1 x / ±2 y / ±3 z) exceeds `fractureTension`, when the part
 or when the anchors are `breakDistance` apart; compression along the axis never breaks it. Jointed bodies do not collide
 until the joint breaks.
 
-Capacities (`AvbdGpuConfig.ForBodies(n)`): bodies n, joints max(n, 4096), springs n/4, manifolds 4n, contacts 16n,
-pairs 10n, grid entries 8n, hash 8n (power of two), cells 2n, spawn records per upload 4096 (larger batches go up in
-chunks). Appends beyond a capacity are dropped and flagged in `Stats.OverflowFlags` (1 pairs, 2 manifolds, 4 contacts, 8
-grid entries, 16 large bodies, 32 unsorted cells); the demo HUD shows the flags in red. 65 536 bodies take ~275 MB of GPU
-memory.
+Capacities (`AvbdGpuConfig.ForBodies(n, active = n)`): bodies n, joints max(n, 4096), springs n/4, manifolds 4n, contacts
+16n, the sleeping grid's cells 2n and entries 8n, hash 8n (power of two); sized for the awake bodies: pairs 10 active, hot
+grid entries 8 active and cells 2 active, colour list; spawn records per upload 4096 (larger batches go up in chunks).
+Appends beyond a capacity are dropped and flagged in `Stats.OverflowFlags` (1 pairs, 2 manifolds, 4 contacts, 8 grid
+entries, 16 large bodies, 32 unsorted cells, 64 more awake bodies than `MaxActive`); the demo HUD shows the flags in red.
+65 536 bodies take ~275 MB of GPU memory.
 
 ## Demo
 
@@ -402,18 +418,20 @@ Step times (solver only, `PerformanceTests`, GPU synchronised once after 60-120 
 | Pyramid 74k | 73 811 | 305 k / 1.19 M | | 17.4 ms | 37 ms (27 fps) |
 | Pyramid 22k on a heightfield | 22 141 | 85 k / 345 k (1 600 terrain manifolds) | 6.5 ms | | |
 | Terrain (100 boxes on hills) | 101 | 109 / 396 | 0.8 ms | | |
-| Pyramid (16 rows), asleep | 137 | 287 carried | 0.76 ms | | |
-| Pyramid 22k, asleep | 22 141 | 85 k carried | 1.8 ms | | |
-| Stronghold (17k bricks, castle scale, 1 substep), awake / asleep | 17 130 | 38 k / 157 k | 4.7 ms / 1.8 ms | | |
+| Pyramid (16 rows), asleep | 137 | 287 carried | 0.81 ms | | |
+| Pyramid 22k, asleep | 22 141 | 85 k carried | 1.75 ms | | |
+| Stronghold (17k bricks, castle scale, 1 substep), awake / asleep | 17 130 | 38 k / 157 k | 4.9 ms / 1.3 ms | | |
 
 Small scenes are bound by the ~130 indirect dispatches of a step (about 1.5 ms); large piles by the contact traffic
 of the primal sweeps (every iteration re-reads every contact from both bodies), so the iteration count is the main
 knob — the paper uses 4 for its large piles. CPU time per step is 0.1-1 ms (parameter upload, command buffer
 submission). The terrain pass costs what the ground box did: the 22k pyramid on a flat heightfield instead of the box
 steps in 6.5 ms against 6.4 (its 1 600 base cubes carry 8 terrain contacts each instead of 4 box contacts); bodies
-above the surface leave the pass at the mip test. Asleep, a scene costs its broadphase (the sleepers stay in the grid but
-walk no cells), the copy of its carried manifolds and the fixed overhead: the 22k pyramid sleeps whole 3 s after it is
-built (the small pyramid 6 s, its top creeps longer) and the 17k castle 4 s, and both step in 1.8 ms from then on; the
+above the surface leave the pass at the mip test. Asleep, a scene costs the copy of its carried manifolds, the passes over
+the constraint index space they still occupy (the dual update above all) and the fixed overhead of ~140 dispatches — the
+sleepers themselves have no thread in any per-body pass once the sleeping grid holds them: the 22k pyramid sleeps whole 3 s
+after it is built (the small pyramid 6 s, its top creeps longer) and the 17k castle 4 s, and they step in 1.75 and 1.3 ms
+from then on; the
 Outpost under siege sleeps between the volleys with its holding units, and its arrows wake what they hit. In the castle
 player (snapped castles on the tiled hills, 1280 x 720, `-avbd-bench` against `-avbd-nosleep`) the frame drops from
 9.9 to 6.6 ms for the Outpost, 25.0 to 19.1 ms for the Stronghold and 40.3 to 31.2 ms for the Royal citadel; what is
@@ -432,7 +450,11 @@ left is the draw of the brick meshes with shadows and of the terrain tiles.
   a third at 10 iterations, within 5 % at 40). A fast body in sustained contact with an island keeps the whole island
   awake (a unit rubbing along the castle wall); a scene that never rests never sleeps (the 50k pile at 10 iterations
   keeps popping cubes out of its depths for a minute). Island labels only merge between relabels, so debris stays in its
-  old island for up to `SleepRelabelSteps` after coming apart (a touch on it wakes the old island meanwhile).
+  old island for up to `SleepRelabelSteps` after coming apart (a touch on it wakes the old island meanwhile); a sleeping
+  body keeps the label it fell asleep with, so a body that comes to rest against an already sleeping island is an island
+  of its own until it wakes, and a fast touch on one of the two wakes the other a step later through the boundary.
+* The hot list is capped by `MaxActive` only through the pools: with more awake bodies than that, pairs, grid entries
+  and colour lists overflow (flag 64 reports the count) and contacts go missing until enough bodies sleep again.
 * One terrain per world, with one friction value, touched by dynamic bodies only; it is sampled at a box's 26 lattice
   points, so terrain features smaller than about half a box extent can poke into a face between them, and a body more
   than its size below the surface is pushed out along the local normal (a heightfield has no other side). Unity terrains

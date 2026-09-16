@@ -48,6 +48,11 @@ namespace Phys.AvbdGpu
         /// <summary>Every this many steps the awake bodies restart their island labels, so that bodies which came apart stop
         /// sharing an island.</summary>
         public int SleepRelabelSteps;
+        /// <summary>The sleeping grid (the broadphase of the sleeping bodies, which leave the per-body passes once they are in it) is
+        /// rebuilt at most every this many steps, and only once at least <see cref="SleepGridRebuildMin"/> bodies (or a 64th of the
+        /// grid) fell asleep or woke since the last rebuild.</summary>
+        public int SleepGridRebuildSteps;
+        public int SleepGridRebuildMin;
 
         public static AvbdGpuParams Default => new AvbdGpuParams
         {
@@ -55,12 +60,15 @@ namespace Phys.AvbdGpu
             Alpha = 0.99f, BetaLin = 10000f, BetaAng = 100f, Gamma = 0.999f,
             PostStabilize = false, RotatedInertia = false, CellSize = 0f, ColorRounds = 8,
             Sleep = true, SleepTime = 0.5f, SleepDistance = 0.02f, SleepAngle = 0.02f, SleepHops = 2, WakeSpeed = 0.25f, WakeHold = 0.15f,
-            SleepLabelRounds = 4, SleepRelabelSteps = 60,
+            SleepLabelRounds = 4, SleepRelabelSteps = 60, SleepGridRebuildSteps = 15, SleepGridRebuildMin = 64,
         };
     }
 
     /// <summary>A GPU AVBD world: bodies, joints, springs and collision links are created on the CPU and uploaded once;
-    /// the whole step then runs on the GPU. Body indices are creation order (also the ISceneBuilder ids).</summary>
+    /// the whole step then runs on the GPU. Body indices are creation order (also the ISceneBuilder ids). The world holds up to
+    /// <see cref="AvbdGpuConfig.MaxBodies"/> bodies of which <see cref="AvbdGpuConfig.MaxActive"/> may be awake at a time: the
+    /// per-body passes run over the awake bodies (and the ones that fell asleep since the sleeping grid was last rebuilt), the
+    /// sleepers wait in the sleeping grid to be found by whatever moves against them.</summary>
     public sealed class AvbdGpuWorld : ISceneBuilder, IDisposable
     {
         public readonly AvbdGpuConfig Config;
@@ -82,6 +90,8 @@ namespace Phys.AvbdGpu
         readonly List<GpuSpawnRecord> m_SpawnQueue = new List<GpuSpawnRecord>();
         readonly GpuSpawnRecord[] m_SpawnChunk;
         static readonly int s_SpawnCount = Shader.PropertyToID("_SpawnCount");
+        readonly uint[] m_ZeroPersistent = new uint[(int)StatSlot.Count - (int)StatSlot.Persistent];
+        readonly uint[] m_One = { 1u };
         // sleeping: the wake requests of this step (applied by the WakeList kernel), or everything at once
         readonly List<uint2> m_WakeList = new List<uint2>();
         readonly uint2[] m_WakeArray;
@@ -98,6 +108,9 @@ namespace Phys.AvbdGpu
         int m_SpringCount, m_UploadedSprings;
 
         readonly List<(int a, int b, uint r)> m_Links = new List<(int, int, uint)>();
+        /// <summary>The "other body" of a link entry for a world-anchored joint: sorts after every body index and matches none, so
+        /// the collision filter ignores it while the active joint list still finds the joint from body B.</summary>
+        const int WorldLink = int.MaxValue;
         bool m_LinksDirty;
         readonly uint[] m_LinkStart;
         readonly uint2[] m_LinkList;
@@ -410,6 +423,7 @@ namespace Phys.AvbdGpu
             }
             m_JointDefs[j] = def;
             if (bodyA >= 0) AddLink(bodyA, bodyB, ConsRef.Make(ConsRef.Joint, (uint)j));
+            else AddWorldLink(bodyB, ConsRef.Make(ConsRef.Joint, (uint)j));
             Wake(bodyA, WakeMode.Self);
             Wake(bodyB, WakeMode.Self);
             return j;
@@ -434,6 +448,7 @@ namespace Phys.AvbdGpu
                 FractureLateral = AvbdGpuConstants.HardStiffness, FractureTension = AvbdGpuConstants.HardStiffness, BreakDistance = AvbdGpuConstants.HardStiffness,
             };
             if (def.BodyA >= 0) RemoveLink(def.BodyA, def.BodyB, ConsRef.Make(ConsRef.Joint, (uint)joint));
+            else RemoveWorldLink(def.BodyB, ConsRef.Make(ConsRef.Joint, (uint)joint));
             if (joint < m_UploadedJoints) m_DirtyJoints.Add(joint);
             m_FreeJoints.Add(joint);
             Wake(def.BodyA, WakeMode.Self);
@@ -476,6 +491,18 @@ namespace Phys.AvbdGpu
             m_LinksDirty = true;
         }
 
+        void AddWorldLink(int b, uint r)
+        {
+            m_Links.Add((b, WorldLink, r));
+            m_LinksDirty = true;
+        }
+
+        void RemoveWorldLink(int b, uint r)
+        {
+            m_Links.RemoveAll(l => l.r == r && l.a == b && l.b == WorldLink);
+            m_LinksDirty = true;
+        }
+
         /// <summary>Removes everything (GPU buffers keep their allocation).</summary>
         public void Clear()
         {
@@ -503,8 +530,11 @@ namespace Phys.AvbdGpu
             AvbdGpuBuffers.Clear(Buffers.LinkStart);
             AvbdGpuBuffers.Clear(Buffers.BodySleep);
             AvbdGpuBuffers.Clear(Buffers.WakeMark);
-            AvbdGpuBuffers.Clear(Buffers.Counters);   // CarrySleeping runs over last step's manifold count
+            AvbdGpuBuffers.Clear(Buffers.Counters);   // CarrySleeping runs over last step's manifold count; the sleeping grid is empty
             AvbdGpuBuffers.Clear(Buffers.Stats);
+            AvbdGpuBuffers.Clear(Buffers.HotFlags);
+            AvbdGpuBuffers.Clear(Buffers.SleepFlags);
+            AvbdGpuBuffers.Clear(Buffers.SleepCellStart);
         }
 
         public void BuildScene(int scene)
@@ -526,6 +556,10 @@ namespace Phys.AvbdGpu
                 b.BodyDrive.SetData(m_Drives, start, start, count);
                 b.BodyPos.SetData(m_Pos, start, start, count);
                 b.BodyRot.SetData(m_Rot, start, start, count);
+                // the start-of-step poses that the solve reads for a manifold partner: Predict writes them for the hot bodies
+                // only, and a static body (the terrain slot above all) may never be hot
+                b.BodyInitialLin.SetData(m_Pos, start, start, count);
+                b.BodyInitialAng.SetData(m_Rot, start, start, count);
                 b.BodyVelLin.SetData(m_Vel, start, start, count);
                 b.BodyPrevVelLin.SetData(m_Vel, start, start, count);
                 b.BodyVelAng.SetData(new float4[count], 0, start, count);
@@ -534,10 +568,13 @@ namespace Phys.AvbdGpu
                 b.BodySleep.SetData(m_ZeroUints, start, start, count);   // awake, and each its own island
                 b.BodyLabel.SetData(m_Identity, start, start, count);
                 m_UploadedBodies = m_BodyCount;
+                // static bodies never fall asleep, so nothing but a requested rebuild would move new ones into the sleeping grid
+                b.Counters.SetData(m_One, 0, (int)StatSlot.RebuildForce, 1);
             }
             if (m_WakeAll)
             {
                 if (m_BodyCount > 0) b.BodySleep.SetData(m_ZeroUints, 0, 0, m_BodyCount);
+                b.Counters.SetData(m_ZeroPersistent, 0, (int)StatSlot.Persistent, m_ZeroPersistent.Length);   // nothing is in the sleeping grid any more
                 m_WakeAll = false;
                 m_WakeList.Clear();
             }
@@ -654,6 +691,7 @@ namespace Phys.AvbdGpu
                 SleepDistSq = p.SleepDistance * p.SleepDistance, SleepAngleSq = p.SleepAngle * p.SleepAngle, WakeSpeedSq = p.WakeSpeed * p.WakeSpeed,
                 Relabel = StepIndex % math.max(1, p.SleepRelabelSteps) == 0 ? 1u : 0u,
                 WakeHoldSteps = (uint)math.max(1, (int)math.ceil(p.WakeHold / dt)),
+                MaxActive = (uint)c.MaxActive, SleepCellMask = (uint)(c.SleepCellCount - 1), RebuildMin = (uint)math.max(1, p.SleepGridRebuildMin),
             };
             if (m_Terrain != null && m_TerrainBody >= 0)
             {
@@ -682,6 +720,9 @@ namespace Phys.AvbdGpu
                 Params.Sleep, math.max(2, Params.SleepLabelRounds), math.max(1, Params.SleepHops));
 
             m_Watch.Restart();
+            // the sleeping grid rebuild, every few steps; it decides on the GPU whether enough bodies fell asleep or woke
+            if (Params.Sleep && StepIndex % math.max(1, Params.SleepGridRebuildSteps) == 0)
+                Graphics.ExecuteCommandBuffer(m_Pipeline.RebuildCommandBuffer);
             for (int s = 0; s < substeps; s++)
                 Graphics.ExecuteCommandBuffer(m_Pipeline.CommandBuffer);
             m_Watch.Stop();
@@ -763,6 +804,7 @@ namespace Phys.AvbdGpu
             m_Stats.Sleeping = (int)data[(int)StatSlot.Sleeping];
             m_Stats.CarriedManifolds = (int)data[(int)StatSlot.CarriedManifolds];
             m_Stats.Woken = (int)data[(int)StatSlot.Woken];
+            ReadListStats(ref m_Stats, data);
             m_Stats.ActiveColors = m_ActiveColors;
             m_Stats.Frame++;
             AdaptColors();
@@ -846,10 +888,41 @@ namespace Phys.AvbdGpu
             s.Sleeping = (int)data[(int)StatSlot.Sleeping];
             s.CarriedManifolds = (int)data[(int)StatSlot.CarriedManifolds];
             s.Woken = (int)data[(int)StatSlot.Woken];
+            ReadListStats(ref s, data);
             s.ActiveColors = m_ActiveColors;
             m_Stats = s;
             AdaptColors();
             return s;
+        }
+
+        static void ReadListStats(ref AvbdGpuStats s, NativeArray<uint> data)
+        {
+            s.Hot = (int)data[(int)StatSlot.Hot];
+            s.Active = (int)data[(int)StatSlot.Active];
+            s.SleepGrid = (int)data[(int)StatSlot.SleepGrid];
+            s.Pending = (int)data[(int)StatSlot.Pending];
+            s.Stale = (int)data[(int)StatSlot.Stale];
+            s.Rebuilds = (int)data[(int)StatSlot.Rebuilds];
+        }
+
+        static void ReadListStats(ref AvbdGpuStats s, uint[] data)
+        {
+            s.Hot = (int)data[(int)StatSlot.Hot];
+            s.Active = (int)data[(int)StatSlot.Active];
+            s.SleepGrid = (int)data[(int)StatSlot.SleepGrid];
+            s.Pending = (int)data[(int)StatSlot.Pending];
+            s.Stale = (int)data[(int)StatSlot.Stale];
+            s.Rebuilds = (int)data[(int)StatSlot.Rebuilds];
+        }
+
+        /// <summary>Synchronous readback of the hot list of the last step (tests): the bodies its per-body passes ran over.</summary>
+        public int[] GetHotListSync()
+        {
+            var stats = GetStatsSync();
+            var list = new int[math.max(stats.Hot, 1)];
+            if (stats.Hot > 0) Buffers.HotList.GetData(list, 0, 0, stats.Hot);
+            if (stats.Hot == 0) return new int[0];
+            return list;
         }
 
         /// <summary>Forces the active colour count (tests / benchmarks).</summary>

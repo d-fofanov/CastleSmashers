@@ -20,11 +20,14 @@
 #define HIT_MIN_SPEED 2.0       // a projectile slower than this does not count as a hit in the event words
 
 // Sleep word (_BodySleep, GPU-owned): bit 31 = asleep, bit 30 = woken by a touch this step (its manifolds were carried, not
-// recomputed, so it may not fall asleep again before the next step), bits 0..29 = steps at rest within the rest anchor.
+// recomputed, so it may not fall asleep again before the next step), bit 29 = the body's cells are in the sleeping grid
+// (set by the grid rebuild, only ever set on an inactive body; every wake overwrites the word and so clears it),
+// bits 0..28 = steps at rest within the rest anchor.
 #define SLEEP_ASLEEP 0x80000000u
 #define SLEEP_WOKEN 0x40000000u
-#define SLEEP_COUNTER_MASK 0x3FFFFFFFu
-#define SLEEP_COUNTER_MAX 0x20000000u
+#define SLEEP_IN_GRID 0x20000000u
+#define SLEEP_COUNTER_MASK 0x1FFFFFFFu
+#define SLEEP_COUNTER_MAX 0x10000000u
 
 // Wake list entries (_WakeList.y, uploaded by the CPU): wake the body; wake the bodies of its previous constraint list
 // (a retired support); a spawn (sleep word and island label reset).
@@ -69,33 +72,59 @@
 #define CONS_INDEX(r) ((r) & 0x3FFFFFFFu)
 #define CONS_REF(t, i) (((t) << 30) | (i))
 
-// Counter slots (_Counters) and stats slots (_Stats copies them at the end of the step).
+// Counter slots (_Counters) and stats slots (_Stats copies them at the end of the step). Slots below CNT_PERSISTENT are
+// reset at the start of every step; the rest carry over (the sleeping grid's bookkeeping).
 #define CNT_PAIRS 0
 #define CNT_MANIFOLDS 1
 #define CNT_CONTACTS 2
 #define CNT_LARGE 3
-#define CNT_OVERFLOW 4          // bit mask: 1 pairs, 2 manifolds, 4 contacts, 8 cell entries, 16 large bodies, 32 unsorted cells
+#define CNT_OVERFLOW 4          // bit mask: 1 pairs, 2 manifolds, 4 contacts, 8 cell entries, 16 large bodies, 32 unsorted cells, 64 active bodies
 #define CNT_OVERFLOW_BODIES 5   // bodies that ended in the Jacobi overflow colour
 #define CNT_COLORS_USED 6
-#define CNT_CONSTRAINTS 7       // manifolds + joints + springs (dual / CSR index space)
-#define CNT_ACTIVE_JOINTS 8
+#define CNT_CONSTRAINTS 7       // manifolds + active joints + active springs (dual / CSR index space)
+#define CNT_ACTIVE_JOINTS 8     // joints with an active body (the active joint list)
 #define CNT_TERRAIN 9           // manifolds against the terrain (a subset of CNT_MANIFOLDS)
-#define CNT_SLEEPING 10         // bodies asleep at the end of the step
+#define CNT_SLEEPING 10         // bodies that fell asleep this step; the stats slot holds the bodies asleep at the end of the step
 #define CNT_CARRIED 11          // manifolds of sleeping bodies carried over unchanged (a subset of CNT_MANIFOLDS)
 #define CNT_WOKEN 12            // sleeping bodies woken by a touch this step
 #define CNT_PREV_MANIFOLDS 13   // last step's manifold count (CarrySleeping runs over last step's list)
-#define CNT_COUNT 16
+#define CNT_HOT 14              // bodies of the hot list: active, or not yet in the sleeping grid
+#define CNT_WOKEN_LIST 15       // bodies woken by a touch this step that were in the sleeping grid (appended to the hot list)
+#define CNT_ACTIVE_SPRINGS 16   // springs with an active body (the active spring list)
+#define CNT_MARKS 17            // wake marks set this step (gates WakeApply / WakeClear)
+#define CNT_ACTIVE 18           // active bodies at the start of the step (dynamic, alive, awake)
+#define CNT_REBUILD_DUE 19      // the sleeping grid rebuild that ran before this step did rebuild (its gate)
+#define CNT_ASLEEP_START 20     // dynamic bodies asleep at the start of the step (after the CPU wakes)
+#define CNT_PERSISTENT 24
+#define CNT_PENDING 24          // bodies that fell asleep since the sleeping grid was rebuilt (still inserted into the hot grid)
+#define CNT_STALE 25            // bodies that woke since the rebuild (their entries in the sleeping grid are skipped)
+#define CNT_SLEEP_GRID 26       // bodies in the sleeping grid
+#define CNT_REBUILDS 27         // sleeping grid rebuilds so far
+#define CNT_REBUILD_FORCE 28    // set by the CPU: rebuild at the next opportunity whatever the counts (new bodies were uploaded)
+#define CNT_COUNT 32
 
 // Indirect dispatch argument slots (uint3 each, byte offset = slot * 12).
-#define ARG_BODIES 0
+#define ARG_BODIES 0            // every body (the flat passes: wake marks, constraint count reset)
 #define ARG_PAIRS 1
 #define ARG_MANIFOLDS 2
 #define ARG_CONSTRAINTS 3
-#define ARG_JOINTS 4
+#define ARG_JOINTS 4            // every joint (debug draw)
 #define ARG_PREV_MANIFOLDS 5    // last step's manifold count (CarrySleeping)
 #define ARG_WAKE_LIST 6         // the CPU wake list
 #define ARG_COLOR0 8            // 33 slots: colours 0..31 and the overflow group at _ActiveColors
-#define ARG_COUNT (ARG_COLOR0 + MAX_COLORS + 1)
+#define ARG_HOT (ARG_COLOR0 + MAX_COLORS + 1)   // the hot list (per-body passes)
+#define ARG_WOKEN (ARG_HOT + 1)                 // the bodies woken by a touch this step
+#define ARG_ACTIVE_JOINTS (ARG_HOT + 2)
+#define ARG_ACTIVE_SPRINGS (ARG_HOT + 3)
+#define ARG_MARKED (ARG_HOT + 4)                // every body when a wake mark was set this step, nothing otherwise
+#define ARG_SLEEP_FLAG (ARG_HOT + 5)            // sleeping grid rebuild: every body, or nothing when no rebuild is due
+#define ARG_SLEEP_SCAN (ARG_HOT + 6)            // rebuild: scan groups over the bodies
+#define ARG_SLEEP_LIST (ARG_HOT + 7)            // rebuild: the bodies going into the sleeping grid
+#define ARG_SLEEP_CELLS (ARG_HOT + 8)           // rebuild: the sleeping grid's cells
+#define ARG_SLEEP_CELL_SCAN (ARG_HOT + 9)       // rebuild: scan groups over the cells
+#define ARG_SLEEP_SCAN_TOP (ARG_HOT + 10)       // rebuild: the single group of the scans' top level (or nothing)
+#define ARG_SLEEP_CELL_SCAN_TOP (ARG_HOT + 11)
+#define ARG_COUNT (ARG_HOT + 12)
 
 struct BodyDef
 {
@@ -226,7 +255,11 @@ cbuffer AvbdParams
     uint _Relabel;              // 1: awake bodies restart their island labels from their own index this step
     float _WakeSpeedSq;
     uint _WakeHoldSteps;        // an island woken by a fast touch stays awake at least this long
-    uint _Pad2, _Pad3, _Pad4;
+    // the split capacities: the pools and the hot grid are sized for _MaxActive awake bodies; the sleeping grid (its own
+    // hash table, _SleepCellMask) holds the sleepers and is rebuilt once pending + stale bodies reach _RebuildMin
+    uint _MaxActive;
+    uint _SleepCellMask;
+    uint _RebuildMin;
 };
 
 // ------------------------------------------------------------------------------------------------ quaternions
@@ -431,11 +464,9 @@ uint wangHash(uint s)
     return s;
 }
 
-uint cellHash(int3 c)
-{
-    uint h = (uint)c.x * 73856093u ^ (uint)c.y * 19349663u ^ (uint)c.z * 83492791u;
-    return h & _CellMask;
-}
+uint cellHashRaw(int3 c) { return (uint)c.x * 73856093u ^ (uint)c.y * 19349663u ^ (uint)c.z * 83492791u; }
+uint cellHash(int3 c) { return cellHashRaw(c) & _CellMask; }             // the hot grid
+uint sleepCellHash(int3 c) { return cellHashRaw(c) & _SleepCellMask; }   // the sleeping grid
 
 uint pairHash(uint a, uint b)
 {
@@ -443,6 +474,17 @@ uint pairHash(uint a, uint b)
 }
 
 int3 cellCoord(float3 p) { return (int3)floor(p * _InvCellSize); }
+
+// World AABB of a box at the given pose, expanded by the collision margin; cells = the grid cells it spans (capped).
+void bodyAabb(BodyDef d, float3 pos, float4 rot, out float3 mn, out float3 mx, out uint cells)
+{
+    float3x3 R = qmatrix(rot);
+    float3 half = d.size * 0.5;
+    float3 extent = float3(dot(abs(R[0]), half), dot(abs(R[1]), half), dot(abs(R[2]), half)) + COLLISION_MARGIN;
+    mn = pos - extent; mx = pos + extent;
+    int3 span = min(cellCoord(mx) - cellCoord(mn) + 1, 4096);
+    cells = (uint)span.x * (uint)span.y * (uint)span.z;
+}
 
 // Colouring priority: hashed index, ties broken by the index
 bool higherPriority(uint i, uint j)
@@ -461,5 +503,11 @@ bool lockedRotation(BodyDef d) { return (d.flags & (FLAG_LOCK_ROTATION | FLAG_HE
 // an active body is dynamic, alive and awake. With sleeping off no word counts as asleep.
 bool asleepWord(uint w) { return _SleepSteps != 0 && (w & SLEEP_ASLEEP) != 0; }
 bool activeBody(BodyDef d, uint sleepWord) { return !isStatic(d) && !asleepWord(sleepWord); }
+// The body's cells are in the sleeping grid (a rebuild put them there and it has not woken since).
+bool inSleepGrid(uint sleepWord) { return (sleepWord & SLEEP_IN_GRID) != 0; }
+
+// Per-body kernels run over the hot list (_HotList, CNT_HOT entries): the bodies that are active or not yet in the
+// sleeping grid. Bodies in the sleeping grid are inactive and skipped by everything until something wakes them.
+#define HOT_BODY(id, i) if (id.x >= _Counters[CNT_HOT]) return; uint i = _HotList[id.x];
 
 #endif

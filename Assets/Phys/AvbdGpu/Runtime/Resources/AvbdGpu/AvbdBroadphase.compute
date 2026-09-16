@@ -1,6 +1,8 @@
 // Broadphase: world AABBs at x-, hashed uniform grid with multi-cell insertion (counting sort), per-cell sort for
 // determinism, large bodies in a separate brute-force list, pair generation with the owner-cell rule and the
-// joint / spring / ignore-collision filter.
+// joint / spring / ignore-collision filter. Only the hot bodies (active, or asleep but not yet in the sleeping grid)
+// enter the hot grid every step; the sleepers sit in the sleeping grid (AvbdSleepGrid.compute), which the active
+// bodies walk as well.
 #pragma kernel BodyAabb
 #pragma kernel GridClear
 #pragma kernel GridCount
@@ -35,32 +37,22 @@ StructuredBuffer<uint> _LinkStart;
 StructuredBuffer<uint2> _LinkList;         // (other body, constraint ref) sorted by other body
 StructuredBuffer<JointState> _JointState;
 StructuredBuffer<uint> _BodySleep;         // sleep words: pairs need an active body (sleeping bodies keep their old manifolds)
+StructuredBuffer<uint> _HotList;           // the bodies of this step's per-body passes
+StructuredBuffer<uint> _SleepCellStart;    // the sleeping grid (rebuilt when enough bodies fell asleep or woke)
+StructuredBuffer<uint> _SleepCellEntries;
+
+#define MAX_LARGE_SLEEP_CELLS 4096         // cells an active large body walks in the sleeping grid before giving up (flag 16)
 
 void setOverflow(uint bit) { uint dummy; InterlockedOr(_Counters[CNT_OVERFLOW], bit, dummy); }
 
+// The AABBs of the hot bodies (retired slots and the terrain slot are never hot: they are in no cell and in no list; a
+// sleeper in the sleeping grid keeps the AABB the rebuild computed).
 [numthreads(AVBD_THREADS, 1, 1)]
 void BodyAabb(uint3 id : SV_DispatchThreadID)
 {
-    uint i = id.x;
-    if (i >= _BodyCount) return;
-    BodyDef d = _BodyDef[i];
-    if (isDead(d) || isTerrain(d))
-    {
-        // a retired slot, or the terrain slot (its contacts come from CollideTerrain): in no cell and not in the large-body
-        // list, with an AABB that overlaps nothing
-        _BodyAabbMin[i] = float4(1.0e30, 1.0e30, 1.0e30, 1);
-        _BodyAabbMax[i] = float4(-1.0e30, -1.0e30, -1.0e30, 0);
-        return;
-    }
-    float3 pos = _BodyPos[i].xyz;
-    float3x3 R = qmatrix(_BodyRot[i]);
-    float3 half = d.size * 0.5;
-    float3 extent = float3(dot(abs(R[0]), half), dot(abs(R[1]), half), dot(abs(R[2]), half)) + COLLISION_MARGIN;
-    float3 mn = pos - extent, mx = pos + extent;
-
-    int3 cmin = cellCoord(mn), cmax = cellCoord(mx);
-    int3 span = min(cmax - cmin + 1, 4096);
-    uint cells = (uint)span.x * (uint)span.y * (uint)span.z;
+    HOT_BODY(id, i)
+    float3 mn, mx; uint cells;
+    bodyAabb(_BodyDef[i], _BodyPos[i].xyz, _BodyRot[i], mn, mx, cells);
     float large = 0;
     if (cells > _LargeBodyCells)
     {
@@ -85,8 +77,7 @@ void GridClear(uint3 id : SV_DispatchThreadID)
 [numthreads(AVBD_THREADS, 1, 1)]
 void GridCount(uint3 id : SV_DispatchThreadID)
 {
-    uint i = id.x;
-    if (i >= _BodyCount) return;
+    HOT_BODY(id, i)
     float4 mn = _BodyAabbMin[i];
     if (mn.w != 0) return;
     int3 cmin = cellCoord(mn.xyz), cmax = cellCoord(_BodyAabbMax[i].xyz);
@@ -100,8 +91,7 @@ void GridCount(uint3 id : SV_DispatchThreadID)
 [numthreads(AVBD_THREADS, 1, 1)]
 void GridScatter(uint3 id : SV_DispatchThreadID)
 {
-    uint i = id.x;
-    if (i >= _BodyCount) return;
+    HOT_BODY(id, i)
     float4 mn = _BodyAabbMin[i];
     if (mn.w != 0) return;
     int3 cmin = cellCoord(mn.xyz), cmax = cellCoord(_BodyAabbMax[i].xyz);
@@ -206,15 +196,42 @@ void emitPair(uint a, uint b)
     else setOverflow(OVERFLOW_PAIRS);
 }
 
+// An entry of the sleeping grid is current when the body is still flagged as being in it (a body that woke since the
+// rebuild lost the flag and is found in the hot grid instead) and alive.
+bool sleepEntryValid(uint j) { return inSleepGrid(_BodySleep[j]) && !isDead(_BodyDef[j]); }
+
+// The cells of the sleeping grid that the active body i overlaps: every current entry overlapping the AABB of i pairs
+// with it, from the owner cell of the pair.
+void walkSleepingGrid(uint i, float3 mnI, int3 cmin, int3 cmax)
+{
+    for (int z = cmin.z; z <= cmax.z; z++)
+        for (int y = cmin.y; y <= cmax.y; y++)
+            for (int x = cmin.x; x <= cmax.x; x++)
+            {
+                int3 c = int3(x, y, z);
+                uint h = sleepCellHash(c);
+                uint start = _SleepCellStart[h];
+                uint end = _SleepCellStart[h + 1];
+                for (uint e = start; e < end; e++)
+                {
+                    uint j = _SleepCellEntries[e];
+                    if (j == i || !sleepEntryValid(j)) continue;
+                    if (!aabbOverlap(i, j)) continue;
+                    int3 o = cellCoord(max(mnI, _BodyAabbMin[j].xyz));
+                    if (any(o != c)) continue;
+                    emitPair(min(i, j), max(i, j));
+                }
+            }
+}
+
 [numthreads(AVBD_THREADS, 1, 1)]
 void PairGen(uint3 id : SV_DispatchThreadID)
 {
-    uint i = id.x;
-    if (i >= _BodyCount) return;
+    HOT_BODY(id, i)
     uint numLarge = _Counters[CNT_LARGE];
 
     // Large-large pairs, once, by the first thread
-    if (i == 0)
+    if (id.x == 0)
     {
         for (uint p = 0; p < numLarge; p++)
             for (uint q = p + 1; q < numLarge; q++)
@@ -225,14 +242,24 @@ void PairGen(uint3 id : SV_DispatchThreadID)
     }
 
     float4 mn4 = _BodyAabbMin[i];
-    if (mn4.w != 0) return;   // large bodies are handled from the small bodies' side
     bool activeI = active(i);
     float3 mnI = mn4.xyz;
     int3 cmin = cellCoord(mnI), cmax = cellCoord(_BodyAabbMax[i].xyz);
+    if (mn4.w != 0)
+    {
+        // a large body is handled from the small hot bodies' side; an active one walks the sleeping grid itself (the
+        // sleepers there have no thread), as long as its span is not absurd
+        if (!activeI) return;
+        int3 span = cmax - cmin + 1;
+        if ((uint)span.x * (uint)span.y * (uint)span.z > MAX_LARGE_SLEEP_CELLS) { setOverflow(OVERFLOW_LARGE); return; }
+        walkSleepingGrid(i, mnI, cmin, cmax);
+        return;
+    }
 
     // Only an active body walks its cells: it takes every pair with an inactive (static / sleeping) body and, with
     // another active body, the pair where it has the lower index; inactive bodies stay in the grid to be found.
     if (activeI)
+    {
         for (int z = cmin.z; z <= cmax.z; z++)
             for (int y = cmin.y; y <= cmax.y; y++)
                 for (int x = cmin.x; x <= cmax.x; x++)
@@ -253,8 +280,12 @@ void PairGen(uint3 id : SV_DispatchThreadID)
                         emitPair(min(i, j), max(i, j));
                     }
                 }
+        // the sleepers in the sleeping grid (all inactive: every pair is taken from this side)
+        walkSleepingGrid(i, mnI, cmin, cmax);
+    }
 
-    // The large bodies are tested from every small body, so that an active large body still finds sleeping ones
+    // The large bodies are tested from every small hot body, so that an active large body still finds the sleepers
+    // that are not in the sleeping grid yet
     for (uint l = 0; l < numLarge; l++)
     {
         uint L = _LargeBodies[l];

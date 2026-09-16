@@ -1,5 +1,9 @@
-// Joint warm start (Joint::initialize) and the body -> constraint CSR lists used by the primal update and the colouring.
-// Constraint index space (also used by the dual update): [0, manifolds) manifolds, then joints, then springs.
+// The active joint and spring lists (the joints and springs with an active body, gathered from the active bodies' link
+// lists), the joint warm start (Joint::initialize) and the body -> constraint CSR lists used by the primal update and
+// the colouring. Constraint index space (also used by the dual update and the wakes): [0, manifolds) manifolds, then
+// the active joints, then the active springs.
+#pragma kernel JointList
+#pragma kernel JointListWoken
 #pragma kernel PrepareJoints
 #pragma kernel ConsClear
 #pragma kernel ConsCount
@@ -15,24 +19,109 @@ StructuredBuffer<JointDef> _JointDef;
 RWStructuredBuffer<JointState> _JointState;
 StructuredBuffer<SpringDef> _SpringDef;
 StructuredBuffer<Manifold> _ManifoldCur;
-StructuredBuffer<uint> _Counters;
+RWStructuredBuffer<uint> _Counters;
 RWStructuredBuffer<uint> _BodyConsCount;
 RWStructuredBuffer<uint> _BodyConsCursor;
 StructuredBuffer<uint> _BodyConsStart;
 RWStructuredBuffer<uint> _BodyConsList;
 StructuredBuffer<uint> _BodySleep;         // sleep words: joints of sleeping bodies keep their state, their lists stay unsorted
+StructuredBuffer<uint> _HotList;           // the bodies of the per-body passes
+StructuredBuffer<uint> _WokenList;         // the bodies woken by a touch this step
+StructuredBuffer<uint> _LinkStart;         // per-body (other body, constraint ref) lists: the joints and springs of a body
+StructuredBuffer<uint2> _LinkList;
+RWStructuredBuffer<uint> _ActiveJoints;    // the active joint list (indices into _JointDef)
+RWStructuredBuffer<uint> _ActiveSprings;
 
 bool active(int i) { return i >= 0 && activeBody(_BodyDef[i], _BodySleep[i]); }
+bool woken(int i) { return i >= 0 && (_BodySleep[i] & SLEEP_WOKEN) != 0; }   // asleep at the start of the step, woken by a touch
+
+// ------------------------------------------------------------------------------------------------ active lists
+
+void appendJoint(uint j)
+{
+    uint slot;
+    InterlockedAdd(_Counters[CNT_ACTIVE_JOINTS], 1, slot);
+    if (slot < _JointCount) _ActiveJoints[slot] = j;
+}
+
+void appendSpring(uint sp)
+{
+    uint slot;
+    InterlockedAdd(_Counters[CNT_ACTIVE_SPRINGS], 1, slot);
+    if (slot < _SpringCount) _ActiveSprings[slot] = sp;
+}
+
+// Every active hot body walks its links: a joint or spring joins the active list once, from body B when B is active,
+// otherwise from body A (world-anchored joints have only B). Broken joints are left out.
+[numthreads(AVBD_THREADS, 1, 1)]
+void JointList(uint3 id : SV_DispatchThreadID)
+{
+    HOT_BODY(id, b)
+    if (!active((int)b)) return;
+    uint start = _LinkStart[b], end = _LinkStart[b + 1];
+    for (uint k = start; k < end; k++)
+    {
+        uint r = _LinkList[k].y;
+        uint type = CONS_TYPE(r);
+        uint idx = CONS_INDEX(r);
+        if (type == CONS_JOINT)
+        {
+            if (_JointState[idx].broken) continue;
+            JointDef d = _JointDef[idx];
+            if (d.bodyB == (int)b || !active(d.bodyB)) appendJoint(idx);
+        }
+        else if (type == CONS_SPRING)
+        {
+            SpringDef sd = _SpringDef[idx];
+            if (sd.bodyB == (int)b || !active(sd.bodyB)) appendSpring(idx);
+        }
+    }
+}
+
+// After the touches woke bodies: their joints and springs join the lists unless a body that was active at the start
+// of the step already brought them (again once each: from B, or from A when B is not woken either).
+[numthreads(AVBD_THREADS, 1, 1)]
+void JointListWoken(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Counters[CNT_WOKEN_LIST]) return;
+    uint w = _WokenList[id.x];
+    uint start = _LinkStart[w], end = _LinkStart[w + 1];
+    for (uint k = start; k < end; k++)
+    {
+        uint r = _LinkList[k].y;
+        uint type = CONS_TYPE(r);
+        uint idx = CONS_INDEX(r);
+        int a, b;
+        if (type == CONS_JOINT)
+        {
+            if (_JointState[idx].broken) continue;
+            JointDef d = _JointDef[idx];
+            a = d.bodyA; b = d.bodyB;
+        }
+        else if (type == CONS_SPRING)
+        {
+            SpringDef sd = _SpringDef[idx];
+            a = sd.bodyA; b = sd.bodyB;
+        }
+        else continue;
+        bool activeBefore = (active(a) && !woken(a)) || (active(b) && !woken(b));
+        if (activeBefore) continue;
+        bool mine = b == (int)w || !woken(b);
+        if (!mine) continue;
+        if (type == CONS_JOINT) appendJoint(idx); else appendSpring(idx);
+    }
+}
+
+// ------------------------------------------------------------------------------------------------ joints
 
 [numthreads(AVBD_THREADS, 1, 1)]
 void PrepareJoints(uint3 id : SV_DispatchThreadID)
 {
-    uint j = id.x;
-    if (j >= _JointCount) return;
+    if (id.x >= _Counters[CNT_ACTIVE_JOINTS]) return;
+    uint j = _ActiveJoints[id.x];
     JointDef d = _JointDef[j];
     JointState s = _JointState[j];
     if (s.broken) return;
-    if (!active(d.bodyA) && !active(d.bodyB)) return;   // a joint of sleeping bodies is frozen with them (no decay)
 
     float3 pA = d.rA;
     float4 qA = float4(0, 0, 0, 1);
@@ -72,18 +161,21 @@ bool decodeConstraint(uint t, out uint type, out uint idx, out int a, out int b)
         return true;
     }
     t -= m;
-    if (t < _JointCount)
+    uint joints = _Counters[CNT_ACTIVE_JOINTS];
+    if (t < joints)
     {
-        if (_JointState[t].broken) return false;
-        JointDef d = _JointDef[t];
-        type = CONS_JOINT; idx = t; a = d.bodyA; b = d.bodyB;
+        uint j = _ActiveJoints[t];
+        if (_JointState[j].broken) return false;
+        JointDef d = _JointDef[j];
+        type = CONS_JOINT; idx = j; a = d.bodyA; b = d.bodyB;
         return true;
     }
-    t -= _JointCount;
-    if (t < _SpringCount)
+    t -= joints;
+    if (t < _Counters[CNT_ACTIVE_SPRINGS])
     {
-        SpringDef d = _SpringDef[t];
-        type = CONS_SPRING; idx = t; a = d.bodyA; b = d.bodyB;
+        uint sp = _ActiveSprings[t];
+        SpringDef d = _SpringDef[sp];
+        type = CONS_SPRING; idx = sp; a = d.bodyA; b = d.bodyB;
         return true;
     }
     return false;
@@ -147,8 +239,7 @@ uint consKey(uint r, uint body)
 [numthreads(AVBD_THREADS, 1, 1)]
 void ConsSort(uint3 id : SV_DispatchThreadID)
 {
-    uint body = id.x;
-    if (body >= _BodyCount) return;
+    HOT_BODY(id, body)
     if (!active((int)body)) return;   // sleeping bodies are not solved; their lists serve the islands and wakes unsorted
     uint start = _BodyConsStart[body];
     uint end = _BodyConsStart[body + 1];

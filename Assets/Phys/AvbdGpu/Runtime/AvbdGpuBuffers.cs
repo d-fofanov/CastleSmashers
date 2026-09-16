@@ -5,11 +5,14 @@ using UnityEngine;
 
 namespace Phys.AvbdGpu
 {
-    /// <summary>Buffer capacities. Everything is allocated once; appends beyond a capacity are dropped and reported in the stats.</summary>
+    /// <summary>Buffer capacities. Everything is allocated once; appends beyond a capacity are dropped and reported in the stats.
+    /// <see cref="MaxBodies"/> bounds the bodies of the world (the per-body arrays), <see cref="MaxActive"/> the awake ones (the
+    /// hot grid, the pairs and the colour list are sized for them; sleeping bodies live in their own grid).</summary>
     [Serializable]
     public struct AvbdGpuConfig
     {
         public int MaxBodies;
+        public int MaxActive;
         public int MaxJoints;
         public int MaxSprings;
         public int MaxLinks;          // joint + spring + ignore entries, two per link
@@ -20,28 +23,36 @@ namespace Phys.AvbdGpu
         public int MaxLargeBodies;
         public int LargeBodyCells;    // bodies spanning more grid cells than this bypass the grid
         public int HashSize;          // power of two, >= 2 * MaxManifolds
-        public int CellCount;         // power of two
+        public int CellCount;         // power of two: the hot grid
+        public int SleepCellCount;    // power of two: the sleeping grid
+        public int MaxSleepCellEntries;
         public int MaxSpawns;         // spawn records uploaded per step (larger batches are flushed in chunks)
         public int MaxWakes;          // wake list entries per step (more wake everything)
 
-        public static AvbdGpuConfig ForBodies(int bodies)
+        /// <summary>Capacities for <paramref name="bodies"/> bodies of which at most <paramref name="active"/> are awake at a time
+        /// (0: all of them; then the world behaves as before the split).</summary>
+        public static AvbdGpuConfig ForBodies(int bodies, int active = 0)
         {
             bodies = math.max(bodies, 1024);
+            active = active <= 0 ? bodies : math.clamp(active, 1024, bodies);
             int manifolds = bodies * 4;
             return new AvbdGpuConfig
             {
                 MaxBodies = bodies,
+                MaxActive = active,
                 MaxJoints = math.max(bodies, 4096),
                 MaxSprings = math.max(bodies / 4, 1024),
                 MaxLinks = math.max(bodies * 4, 16384),
                 MaxManifolds = manifolds,
                 MaxContacts = manifolds * 4,
-                MaxPairs = bodies * 10,      // tightly packed piles pair every box with ~6-8 AABB neighbours
-                MaxCellEntries = bodies * 8,
+                MaxPairs = active * 10,      // tightly packed piles pair every box with ~6-8 AABB neighbours
+                MaxCellEntries = active * 8,
                 MaxLargeBodies = 256,
                 LargeBodyCells = 64,
                 HashSize = math.ceilpow2(manifolds * 2),
-                CellCount = math.ceilpow2(bodies * 2),
+                CellCount = math.ceilpow2(active * 2),
+                SleepCellCount = math.ceilpow2(bodies * 2),
+                MaxSleepCellEntries = bodies * 8,
                 MaxSpawns = 4096,
                 MaxWakes = 4096,
             };
@@ -52,10 +63,10 @@ namespace Phys.AvbdGpu
         public int MaxConstraintRefs => 2 * MaxManifolds + 2 * (MaxJoints + MaxSprings);
 
         public long EstimatedBytes =>
-            (long)MaxBodies * (GpuBodyDef.Stride + GpuBodyDrive.Stride + 16 * 16 + 32) + (long)MaxSpawns * GpuSpawnRecord.Stride + (long)MaxWakes * 8 + (long)MaxLinks * 8 +
-            (long)CellCount * 12 + 4 + (long)MaxCellEntries * 4 + (long)MaxPairs * 8 +
+            (long)MaxBodies * (GpuBodyDef.Stride + GpuBodyDrive.Stride + 16 * 16 + 32 + 7 * 4) + (long)MaxSpawns * GpuSpawnRecord.Stride + (long)MaxWakes * 8 + (long)MaxLinks * 8 +
+            (long)CellCount * 12 + 4 + (long)MaxCellEntries * 4 + (long)MaxPairs * 8 + (long)SleepCellCount * 12 + 4 + (long)MaxSleepCellEntries * 4 +
             2L * MaxManifolds * GpuManifold.Stride + 2L * MaxContacts * GpuContact.Stride + 2L * HashSize * 4 +
-            (long)MaxJoints * (GpuJointDef.Stride + GpuJointState.Stride) + (long)MaxSprings * GpuSpringDef.Stride +
+            (long)MaxJoints * (GpuJointDef.Stride + GpuJointState.Stride + 4) + (long)MaxSprings * (GpuSpringDef.Stride + 4) +
             (long)MaxConstraintRefs * 4;
     }
 
@@ -70,9 +81,13 @@ namespace Phys.AvbdGpu
             BodyVelLin, BodyVelAng, BodyPrevVelLin, BodyAabbMin, BodyAabbMax, BodyColor, BodyColorTmp, BodyDrive, BodyEvents, SpawnRecords;
         // sleeping: sleep words, island labels (ping-pong), neighbourhood rest minima (ping-pong), wake marks, rest anchors, the CPU wake list
         public GraphicsBuffer BodySleep, BodyLabel, BodyLabelTmp, RestMin, RestMinTmp, WakeMark, BodyRestPose, WakeList;
+        // the hot list (flags, their scan, the list), the bodies woken by a touch, the active joint and spring lists
+        public GraphicsBuffer HotFlags, HotScan, HotList, WokenList, ActiveJoints, ActiveSprings;
+        // the sleeping grid: its rebuild's flags, scan and body list, and the grid itself
+        public GraphicsBuffer SleepFlags, SleepScan, SleepList, SleepCellCount, SleepCellStart, SleepCellCursor, SleepCellEntries;
         // links
         public GraphicsBuffer LinkStart, LinkList;
-        // grid
+        // the hot grid
         public GraphicsBuffer CellCount, CellStart, CellCursor, CellEntries, LargeBodies, BlockSums;
         // pairs and manifolds
         public GraphicsBuffer Pairs, ManifoldPrev, ManifoldCur, ContactsPrev, ContactsCur, HashPrev, HashCur;
@@ -88,7 +103,7 @@ namespace Phys.AvbdGpu
         // misc
         public GraphicsBuffer Counters, Stats, DispatchArgs, Params;
 
-        public const int ArgSlots = 8 + AvbdGpuConstants.MaxColors + 1;
+        public const int ArgSlots = 8 + AvbdGpuConstants.MaxColors + 1 + 12;
 
         public AvbdGpuBuffers(AvbdGpuConfig config)
         {
@@ -107,6 +122,11 @@ namespace Phys.AvbdGpu
             BodySleep = Structured(nb, 4); BodyLabel = Structured(nb, 4); BodyLabelTmp = Structured(nb, 4);
             RestMin = Structured(nb, 4); RestMinTmp = Structured(nb, 4); WakeMark = Structured(nb, 4); BodyRestPose = Structured(nb, 32);
             WakeList = Structured(math.max(config.MaxWakes, 1), 8);
+            HotFlags = Structured(nb, 4); HotScan = Structured(nb + 1, 4); HotList = Structured(nb, 4); WokenList = Structured(nb, 4);
+            ActiveJoints = Structured(config.MaxJoints, 4); ActiveSprings = Structured(config.MaxSprings, 4);
+            SleepFlags = Structured(nb, 4); SleepScan = Structured(nb + 1, 4); SleepList = Structured(nb, 4);
+            SleepCellCount = Structured(config.SleepCellCount, 4); SleepCellStart = Structured(config.SleepCellCount + 1, 4);
+            SleepCellCursor = Structured(config.SleepCellCount, 4); SleepCellEntries = Structured(config.MaxSleepCellEntries, 4);
             LinkStart = Structured(nb + 1, 4); LinkList = Structured(math.max(config.MaxLinks, 1), 8);
             CellCount = Structured(config.CellCount, 4); CellStart = Structured(config.CellCount + 1, 4); CellCursor = Structured(config.CellCount, 4);
             CellEntries = Structured(config.MaxCellEntries, 4); LargeBodies = Structured(config.MaxLargeBodies, 4);

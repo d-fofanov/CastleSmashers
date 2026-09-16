@@ -24,6 +24,7 @@ RWStructuredBuffer<uint> _ColorList;
 RWStructuredBuffer<uint> _Counters;
 RWByteAddressBuffer _DispatchArgs;
 StructuredBuffer<uint> _BodySleep;         // sleep words: sleeping bodies are coloured like static ones (not solved)
+StructuredBuffer<uint> _HotList;           // the bodies of the per-body passes (sleepers in the sleeping grid keep their colour word)
 
 // The other body of constraint r as seen from body; -1 for world anchors.
 int neighbour(uint r, uint body)
@@ -50,8 +51,7 @@ bool dynamicNeighbour(int n) { return n >= 0 && activeBody(_BodyDef[n], _BodySle
 [numthreads(AVBD_THREADS, 1, 1)]
 void ColorInvalidate(uint3 id : SV_DispatchThreadID)
 {
-    uint body = id.x;
-    if (body >= _BodyCount) return;
+    HOT_BODY(id, body)
     if (!activeBody(_BodyDef[body], _BodySleep[body])) { _ColorOut[body] = STATIC_COLOR; return; }
     uint c = _ColorIn[body];
     if (c >= _ActiveColors) { _ColorOut[body] = UNCOLORED; return; }
@@ -69,8 +69,7 @@ void ColorInvalidate(uint3 id : SV_DispatchThreadID)
 [numthreads(AVBD_THREADS, 1, 1)]
 void ColorRound(uint3 id : SV_DispatchThreadID)
 {
-    uint body = id.x;
-    if (body >= _BodyCount) return;
+    HOT_BODY(id, body)
     uint c = _ColorIn[body];
     if (c != UNCOLORED) { _ColorOut[body] = c; return; }
     uint start = _BodyConsStart[body], end = _BodyConsStart[body + 1];
@@ -100,8 +99,7 @@ void ColorRound(uint3 id : SV_DispatchThreadID)
 [numthreads(AVBD_THREADS, 1, 1)]
 void ColorFinalize(uint3 id : SV_DispatchThreadID)
 {
-    uint body = id.x;
-    if (body >= _BodyCount) return;
+    HOT_BODY(id, body)
     uint c = _ColorIn[body];
     if (c == STATIC_COLOR) { _ColorOut[body] = c; return; }
     uint dummy;
@@ -141,8 +139,7 @@ void ColorScan(uint3 tid : SV_GroupThreadID)
 [numthreads(AVBD_THREADS, 1, 1)]
 void ColorScatter(uint3 id : SV_DispatchThreadID)
 {
-    uint body = id.x;
-    if (body >= _BodyCount) return;
+    HOT_BODY(id, body)
     uint c = _ColorIn[body];
     if (c > MAX_COLORS) return;   // static
     uint slot;

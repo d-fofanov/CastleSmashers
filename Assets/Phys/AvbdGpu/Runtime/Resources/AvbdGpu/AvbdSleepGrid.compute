@@ -1,0 +1,184 @@
+// The sleeping grid: the hashed uniform grid of the inactive bodies (asleep or static, alive, not the terrain slot, not
+// large), which the active bodies walk in PairGen next to the hot grid. Sleepers do not move, so the grid is not
+// rebuilt every step but once enough bodies fell asleep (pending: still in the hot grid meanwhile) or woke (stale: their
+// entries here are skipped) since the last rebuild. The rebuild is one command buffer executed before a step: a gate
+// kernel decides on the GPU and writes the dispatch arguments (zero when nothing is due), so the bodies are flagged,
+// compacted into a list, counted into cells (counting sort with an exclusive scan), scattered, sorted per cell for
+// determinism and marked with SLEEP_IN_GRID.
+#pragma kernel RebuildGate
+#pragma kernel SleepFlag
+#pragma kernel SleepScatter
+#pragma kernel RebuildListArgs
+#pragma kernel SleepGridClear
+#pragma kernel SleepGridCount
+#pragma kernel SleepGridScatter
+#pragma kernel SleepGridSortCell
+#pragma kernel SleepMark
+
+#include "AvbdCommon.hlsl"
+
+#define OVERFLOW_CELLS 8u
+#define OVERFLOW_UNSORTED 32u
+#define MAX_SORTED_CELL 256
+
+StructuredBuffer<BodyDef> _BodyDef;
+StructuredBuffer<float4> _BodyPos;
+StructuredBuffer<float4> _BodyRot;
+RWStructuredBuffer<uint> _BodySleep;
+RWStructuredBuffer<float4> _BodyAabbMin;   // the sleepers' AABBs (read by PairGen from the walkers' side)
+RWStructuredBuffer<float4> _BodyAabbMax;
+RWStructuredBuffer<uint> _SleepFlags;      // 1 for every body going into the grid
+StructuredBuffer<uint> _SleepScan;         // exclusive scan of the flags
+RWStructuredBuffer<uint> _SleepList;       // the bodies of the grid, in index order
+RWStructuredBuffer<uint> _SleepCellCount;
+StructuredBuffer<uint> _SleepCellStart;
+RWStructuredBuffer<uint> _SleepCellCursor;
+RWStructuredBuffer<uint> _SleepCellEntries;
+RWStructuredBuffer<uint> _Counters;
+RWByteAddressBuffer _DispatchArgs;
+uint _SleepCells;                          // cells of the sleeping grid (a power of two, _SleepCellMask + 1)
+uint _MaxBodies;                           // capacity (the scans run over it)
+uint _MaxSleepCellEntries;
+
+#define SCAN_BLOCK 1024
+
+uint groups(uint n) { return (n + AVBD_THREADS - 1) / AVBD_THREADS; }
+void writeArgs(uint slot, uint n) { _DispatchArgs.Store3(slot * 12, uint3(groups(n), 1, 1)); }
+void writeScanArgs(uint slot, uint n) { _DispatchArgs.Store3(slot * 12, uint3((n + SCAN_BLOCK - 1) / SCAN_BLOCK, 1, 1)); }
+
+// Due when the bodies that fell asleep or woke since the last rebuild reach the threshold (at least _RebuildMin, and a
+// share of the grid so that a large sleeping world is not rebuilt for a trickle). Resets the bookkeeping at once: what
+// happens in the step after this rebuild counts towards the next one.
+[numthreads(1, 1, 1)]
+void RebuildGate(uint3 id : SV_DispatchThreadID)
+{
+    uint changed = _Counters[CNT_PENDING] + _Counters[CNT_STALE];
+    uint threshold = max(max(_RebuildMin, 1u), _Counters[CNT_SLEEP_GRID] >> 6);
+    bool due = changed >= threshold || _Counters[CNT_REBUILD_FORCE] != 0;
+    if (due)
+    {
+        _Counters[CNT_PENDING] = 0;
+        _Counters[CNT_STALE] = 0;
+        _Counters[CNT_REBUILD_FORCE] = 0;
+        _Counters[CNT_REBUILDS] += 1;
+    }
+    _Counters[CNT_REBUILD_DUE] = due ? 1u : 0u;
+    writeArgs(ARG_SLEEP_FLAG, due ? _BodyCount : 0);
+    writeScanArgs(ARG_SLEEP_SCAN, due ? _MaxBodies : 0);
+    _DispatchArgs.Store3(ARG_SLEEP_SCAN_TOP * 12, uint3(due ? 1 : 0, 1, 1));
+    writeArgs(ARG_SLEEP_CELLS, due ? _SleepCells : 0);
+    writeScanArgs(ARG_SLEEP_CELL_SCAN, due ? _SleepCells : 0);
+    _DispatchArgs.Store3(ARG_SLEEP_CELL_SCAN_TOP * 12, uint3(due ? 1 : 0, 1, 1));
+}
+
+// An inactive, alive body that is not the terrain slot goes into the grid with a fresh AABB, unless it spans more cells
+// than the grid takes (it stays hot and in the large-body list instead).
+[numthreads(AVBD_THREADS, 1, 1)]
+void SleepFlag(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+    if (i >= _BodyCount) return;
+    BodyDef d = _BodyDef[i];
+    uint w = _BodySleep[i];
+    uint flag = 0;
+    if (!isDead(d) && !isTerrain(d) && !activeBody(d, w))
+    {
+        float3 mn, mx; uint cells;
+        bodyAabb(d, _BodyPos[i].xyz, _BodyRot[i], mn, mx, cells);
+        if (cells <= _LargeBodyCells)
+        {
+            _BodyAabbMin[i] = float4(mn, 0);
+            _BodyAabbMax[i] = float4(mx, 0);
+            flag = 1;
+        }
+    }
+    _SleepFlags[i] = flag;
+}
+
+[numthreads(AVBD_THREADS, 1, 1)]
+void SleepScatter(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+    if (i == 0) _Counters[CNT_SLEEP_GRID] = _SleepScan[_BodyCount];
+    if (i >= _BodyCount) return;
+    if (_SleepFlags[i] != 0) _SleepList[_SleepScan[i]] = i;
+}
+
+[numthreads(1, 1, 1)]
+void RebuildListArgs(uint3 id : SV_DispatchThreadID)
+{
+    writeArgs(ARG_SLEEP_LIST, _Counters[CNT_REBUILD_DUE] != 0 ? _Counters[CNT_SLEEP_GRID] : 0);
+}
+
+[numthreads(AVBD_THREADS, 1, 1)]
+void SleepGridClear(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x > _SleepCellMask) return;
+    _SleepCellCount[id.x] = 0;
+    _SleepCellCursor[id.x] = 0;
+}
+
+[numthreads(AVBD_THREADS, 1, 1)]
+void SleepGridCount(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Counters[CNT_SLEEP_GRID]) return;
+    uint i = _SleepList[id.x];
+    int3 cmin = cellCoord(_BodyAabbMin[i].xyz), cmax = cellCoord(_BodyAabbMax[i].xyz);
+    uint dummy;
+    for (int z = cmin.z; z <= cmax.z; z++)
+        for (int y = cmin.y; y <= cmax.y; y++)
+            for (int x = cmin.x; x <= cmax.x; x++)
+                InterlockedAdd(_SleepCellCount[sleepCellHash(int3(x, y, z))], 1, dummy);
+}
+
+[numthreads(AVBD_THREADS, 1, 1)]
+void SleepGridScatter(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Counters[CNT_SLEEP_GRID]) return;
+    uint i = _SleepList[id.x];
+    int3 cmin = cellCoord(_BodyAabbMin[i].xyz), cmax = cellCoord(_BodyAabbMax[i].xyz);
+    for (int z = cmin.z; z <= cmax.z; z++)
+        for (int y = cmin.y; y <= cmax.y; y++)
+            for (int x = cmin.x; x <= cmax.x; x++)
+            {
+                uint h = sleepCellHash(int3(x, y, z));
+                uint slot;
+                InterlockedAdd(_SleepCellCursor[h], 1, slot);
+                uint e = _SleepCellStart[h] + slot;
+                if (e < _MaxSleepCellEntries) _SleepCellEntries[e] = i;
+                else { uint dummy; InterlockedOr(_Counters[CNT_OVERFLOW], OVERFLOW_CELLS, dummy); }
+            }
+}
+
+[numthreads(AVBD_THREADS, 1, 1)]
+void SleepGridSortCell(uint3 id : SV_DispatchThreadID)
+{
+    uint h = id.x;
+    if (h > _SleepCellMask) return;
+    uint start = _SleepCellStart[h];
+    uint end = min(_SleepCellStart[h + 1], _MaxSleepCellEntries);
+    if (end <= start + 1) return;
+    if (end - start > MAX_SORTED_CELL) { uint dummy; InterlockedOr(_Counters[CNT_OVERFLOW], OVERFLOW_UNSORTED, dummy); return; }
+    for (uint i = start + 1; i < end; i++)
+    {
+        uint v = _SleepCellEntries[i];
+        uint j = i;
+        while (j > start)
+        {
+            uint prev = _SleepCellEntries[j - 1];
+            if (prev <= v) break;
+            _SleepCellEntries[j] = prev;
+            j--;
+        }
+        _SleepCellEntries[j] = v;
+    }
+}
+
+// The bodies of the grid carry the flag from now on: they leave the hot list, and their entries are current until they wake.
+[numthreads(AVBD_THREADS, 1, 1)]
+void SleepMark(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Counters[CNT_SLEEP_GRID]) return;
+    uint i = _SleepList[id.x];
+    _BodySleep[i] |= SLEEP_IN_GRID;
+}

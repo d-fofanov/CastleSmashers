@@ -5,17 +5,23 @@ using UnityEngine.Rendering;
 namespace Phys.AvbdGpu
 {
     /// <summary>Records the whole simulation step into one CommandBuffer. Every count-dependent dispatch is indirect, so the
-    /// buffer only has to be re-recorded when the iteration count, the post-stabilisation flag or the active colour count change.</summary>
+    /// buffer only has to be re-recorded when the iteration count, the post-stabilisation flag or the active colour count change.
+    /// A second command buffer rebuilds the sleeping grid; the world executes it every few steps and it decides on the GPU
+    /// whether anything is due.</summary>
     public sealed class AvbdGpuPipeline
     {
         readonly AvbdGpuKernels m_K;
         readonly AvbdGpuBuffers m_B;
         readonly CommandBuffer m_Cb = new CommandBuffer { name = "AVBD step" };
+        readonly CommandBuffer m_RebuildCb = new CommandBuffer { name = "AVBD sleeping grid" };
+        CommandBuffer m_Rec;   // the buffer the helpers record into
 
         int m_Iterations = -1, m_ActiveColors = -1, m_ColorRounds = -1, m_TerrainVersion = -1, m_LabelRounds = -1, m_SleepHops = -1;
         bool m_PostStabilize, m_Terrain, m_Sleep;
 
         public CommandBuffer CommandBuffer => m_Cb;
+        /// <summary>The sleeping grid rebuild (gated on the GPU: nothing runs unless enough bodies fell asleep or woke).</summary>
+        public CommandBuffer RebuildCommandBuffer => m_RebuildCb;
 
         static readonly int s_Params = Shader.PropertyToID("AvbdParams");
         static readonly int s_Phase = Shader.PropertyToID("_Phase");
@@ -33,8 +39,15 @@ namespace Phys.AvbdGpu
         static readonly int s_RestIn = Shader.PropertyToID("_RestIn");
         static readonly int s_RestOut = Shader.PropertyToID("_RestOut");
         static readonly int s_RestFirst = Shader.PropertyToID("_RestFirst");
+        static readonly int s_SleepCells = Shader.PropertyToID("_SleepCells");
+        static readonly int s_MaxBodies = Shader.PropertyToID("_MaxBodies");
+        static readonly int s_MaxSleepCellEntries = Shader.PropertyToID("_MaxSleepCellEntries");
 
+        // AvbdCommon.hlsl ARG_*
         const int ArgBodies = 0, ArgPairs = 1, ArgManifolds = 2, ArgConstraints = 3, ArgJoints = 4, ArgPrevManifolds = 5, ArgWakeList = 6, ArgColor0 = 8;
+        const int ArgHot = ArgColor0 + AvbdGpuConstants.MaxColors + 1, ArgWoken = ArgHot + 1, ArgActiveJoints = ArgHot + 2, ArgActiveSprings = ArgHot + 3, ArgMarked = ArgHot + 4;
+        const int ArgSleepFlag = ArgHot + 5, ArgSleepScan = ArgHot + 6, ArgSleepList = ArgHot + 7, ArgSleepCells = ArgHot + 8, ArgSleepCellScan = ArgHot + 9;
+        const int ArgSleepScanTop = ArgHot + 10, ArgSleepCellScanTop = ArgHot + 11;
         const int Threads = AvbdGpuConstants.ThreadGroupSize;
         const int ScanBlock = 1024;
 
@@ -44,7 +57,7 @@ namespace Phys.AvbdGpu
             m_B = buffers;
         }
 
-        public void Dispose() => m_Cb.Release();
+        public void Dispose() { m_Cb.Release(); m_RebuildCb.Release(); }
 
         static int Groups(int n, int per = Threads) => math.max(1, (n + per - 1) / per);
 
@@ -59,39 +72,57 @@ namespace Phys.AvbdGpu
             m_Iterations = iterations; m_ActiveColors = activeColors; m_PostStabilize = postStabilize; m_ColorRounds = colorRounds; m_Alpha = alpha;
             m_Terrain = terrain; m_TerrainVersion = terrainVersion; m_Sleep = sleep; m_LabelRounds = labelRounds; m_SleepHops = sleepHops;
             Record();
+            RecordRebuild();
         }
 
         float m_Alpha = -1f;
 
-        void Bind(ComputeShader cs, int kernel, string name, GraphicsBuffer buffer) => m_Cb.SetComputeBufferParam(cs, kernel, name, buffer);
+        void Bind(ComputeShader cs, int kernel, string name, GraphicsBuffer buffer) => m_Rec.SetComputeBufferParam(cs, kernel, name, buffer);
 
         void BindAll(ComputeShader cs, int kernel, params (string, GraphicsBuffer)[] bindings)
         {
             foreach (var (name, buffer) in bindings) Bind(cs, kernel, name, buffer);
         }
 
-        void Indirect(ComputeShader cs, int kernel, int argSlot) => m_Cb.DispatchCompute(cs, kernel, m_B.DispatchArgs, (uint)(argSlot * 12));
+        void Indirect(ComputeShader cs, int kernel, int argSlot) => m_Rec.DispatchCompute(cs, kernel, m_B.DispatchArgs, (uint)(argSlot * 12));
 
-        void Direct(ComputeShader cs, int kernel, int groups) => m_Cb.DispatchCompute(cs, kernel, groups, 1, 1);
+        void Direct(ComputeShader cs, int kernel, int groups) => m_Rec.DispatchCompute(cs, kernel, groups, 1, 1);
 
-        void RecordScan(GraphicsBuffer src, GraphicsBuffer dst, int n)
+        /// <summary>Exclusive scan of <paramref name="n"/> entries; with arg slots the three dispatches are indirect (the rebuild
+        /// gate writes them, zero when nothing is due).</summary>
+        void RecordScan(GraphicsBuffer src, GraphicsBuffer dst, int n, int argSlot = -1, int argTopSlot = -1)
         {
             var cs = m_K.Scan;
             foreach (int k in new[] { m_K.ScanBlock, m_K.ScanTop, m_K.ScanAdd })
             {
-                m_Cb.SetComputeBufferParam(cs, k, s_ScanIn, src);
-                m_Cb.SetComputeBufferParam(cs, k, s_ScanOut, dst);
+                m_Rec.SetComputeBufferParam(cs, k, s_ScanIn, src);
+                m_Rec.SetComputeBufferParam(cs, k, s_ScanOut, dst);
                 Bind(cs, k, "_BlockSums", m_B.BlockSums);
             }
-            m_Cb.SetComputeIntParam(cs, s_ScanN, n);
-            Direct(cs, m_K.ScanBlock, Groups(n, ScanBlock));
-            Direct(cs, m_K.ScanTop, 1);
-            Direct(cs, m_K.ScanAdd, Groups(n, ScanBlock));
+            m_Rec.SetComputeIntParam(cs, s_ScanN, n);
+            if (argSlot < 0)
+            {
+                Direct(cs, m_K.ScanBlock, Groups(n, ScanBlock));
+                Direct(cs, m_K.ScanTop, 1);
+                Direct(cs, m_K.ScanAdd, Groups(n, ScanBlock));
+            }
+            else
+            {
+                Indirect(cs, m_K.ScanBlock, argSlot);
+                Indirect(cs, m_K.ScanTop, argTopSlot);
+                Indirect(cs, m_K.ScanAdd, argSlot);
+            }
+        }
+
+        void BuildArgs(int phase)
+        {
+            m_Rec.SetComputeIntParam(m_K.Util, s_Phase, phase);
+            Direct(m_K.Util, m_K.BuildArgs, 1);
         }
 
         void Record()
         {
-            var cb = m_Cb;
+            var cb = m_Rec = m_Cb;
             var b = m_B;
             var k = m_K;
             var cfg = b.Config;
@@ -101,8 +132,9 @@ namespace Phys.AvbdGpu
                 cb.SetComputeConstantBufferParam(cs, s_Params, b.Params, 0, GpuParams.Stride);
 
             // ---------------------------------------------------------------- util bindings
-            foreach (int kk in new[] { k.BuildArgs, k.HashClear, k.CopyStats })
-                BindAll(k.Util, kk, ("_Counters", b.Counters), ("_Stats", b.Stats), ("_DispatchArgs", b.DispatchArgs), ("_HashCur", b.HashCur));
+            foreach (int kk in new[] { k.BuildArgs, k.HashClear, k.CopyStats, k.HotFlag, k.HotScatter })
+                BindAll(k.Util, kk, ("_Counters", b.Counters), ("_Stats", b.Stats), ("_DispatchArgs", b.DispatchArgs), ("_HashCur", b.HashCur),
+                    ("_BodyDef", b.BodyDef), ("_BodySleep", b.BodySleep), ("_HotFlags", b.HotFlags), ("_HotScan", b.HotScan), ("_HotList", b.HotList));
 
             // ---------------------------------------------------------------- broadphase bindings
             foreach (int kk in new[] { k.BodyAabb, k.GridClear, k.GridCount, k.GridScatter, k.GridSortCell, k.LargeSort, k.PairGen })
@@ -111,7 +143,8 @@ namespace Phys.AvbdGpu
                     ("_BodyAabbMin", b.BodyAabbMin), ("_BodyAabbMax", b.BodyAabbMax),
                     ("_CellCount", b.CellCount), ("_CellStart", b.CellStart), ("_CellCursor", b.CellCursor), ("_CellEntries", b.CellEntries),
                     ("_LargeBodies", b.LargeBodies), ("_Counters", b.Counters), ("_Pairs", b.Pairs),
-                    ("_LinkStart", b.LinkStart), ("_LinkList", b.LinkList), ("_JointState", b.JointState), ("_BodySleep", b.BodySleep));
+                    ("_LinkStart", b.LinkStart), ("_LinkList", b.LinkList), ("_JointState", b.JointState), ("_BodySleep", b.BodySleep),
+                    ("_HotList", b.HotList), ("_SleepCellStart", b.SleepCellStart), ("_SleepCellEntries", b.SleepCellEntries));
 
             // ---------------------------------------------------------------- narrowphase bindings
             foreach (int kk in new[] { k.Collide, k.CollideTerrain, k.CarrySleeping })
@@ -120,16 +153,17 @@ namespace Phys.AvbdGpu
                     ("_ManifoldPrev", b.ManifoldPrev), ("_ContactsPrev", b.ContactsPrev), ("_HashPrev", b.HashPrev),
                     ("_ManifoldCur", b.ManifoldCur), ("_ContactsCur", b.ContactsCur), ("_HashCur", b.HashCur), ("_BodyEvents", b.BodyEvents),
                     ("_BodyAabbMin", b.BodyAabbMin), ("_BodyAabbMax", b.BodyAabbMax), ("_TerrainHeights", b.TerrainHeights), ("_TerrainMaxMip", b.TerrainMaxMip),
-                    ("_BodySleep", b.BodySleep));
+                    ("_BodySleep", b.BodySleep), ("_HotList", b.HotList));
 
             // ---------------------------------------------------------------- constraint bindings
-            foreach (int kk in new[] { k.PrepareJoints, k.ConsClear, k.ConsCount, k.ConsFill, k.ConsSort })
+            foreach (int kk in new[] { k.JointList, k.JointListWoken, k.PrepareJoints, k.ConsClear, k.ConsCount, k.ConsFill, k.ConsSort })
                 BindAll(k.Constraints, kk,
                     ("_BodyDef", b.BodyDef), ("_BodyPos", b.BodyPos), ("_BodyRot", b.BodyRot),
                     ("_JointDef", b.JointDef), ("_JointState", b.JointState), ("_SpringDef", b.SpringDef),
                     ("_ManifoldCur", b.ManifoldCur), ("_Counters", b.Counters),
                     ("_BodyConsCount", b.BodyConsCount), ("_BodyConsCursor", b.BodyConsCursor), ("_BodyConsStart", b.BodyConsStart), ("_BodyConsList", b.BodyConsList),
-                    ("_BodySleep", b.BodySleep));
+                    ("_BodySleep", b.BodySleep), ("_HotList", b.HotList), ("_WokenList", b.WokenList), ("_LinkStart", b.LinkStart), ("_LinkList", b.LinkList),
+                    ("_ActiveJoints", b.ActiveJoints), ("_ActiveSprings", b.ActiveSprings));
 
             // ---------------------------------------------------------------- colouring bindings
             foreach (int kk in new[] { k.ColorInvalidate, k.ColorRound, k.ColorFinalize, k.ColorScan, k.ColorScatter })
@@ -137,7 +171,7 @@ namespace Phys.AvbdGpu
                     ("_BodyDef", b.BodyDef), ("_BodyConsStart", b.BodyConsStart), ("_BodyConsList", b.BodyConsList),
                     ("_ManifoldCur", b.ManifoldCur), ("_JointDef", b.JointDef), ("_SpringDef", b.SpringDef),
                     ("_ColorCount", b.ColorCount), ("_ColorStart", b.ColorStart), ("_ColorCursor", b.ColorCursor), ("_ColorList", b.ColorList),
-                    ("_Counters", b.Counters), ("_DispatchArgs", b.DispatchArgs), ("_BodySleep", b.BodySleep));
+                    ("_Counters", b.Counters), ("_DispatchArgs", b.DispatchArgs), ("_BodySleep", b.BodySleep), ("_HotList", b.HotList));
 
             // ---------------------------------------------------------------- sleeping bindings
             foreach (int kk in new[] { k.WakeList, k.WakeTouch, k.WakeApply, k.WakeClear, k.LabelRound, k.SleepTimer, k.RestSpread, k.RestSleep })
@@ -146,7 +180,8 @@ namespace Phys.AvbdGpu
                     ("_BodyConsStart", b.BodyConsStart), ("_BodyConsList", b.BodyConsList), ("_ManifoldPrev", b.ManifoldPrev), ("_ManifoldCur", b.ManifoldCur),
                     ("_JointDef", b.JointDef), ("_JointState", b.JointState), ("_SpringDef", b.SpringDef),
                     ("_BodySleep", b.BodySleep), ("_BodyLabel", b.BodyLabel), ("_WakeMark", b.WakeMark), ("_BodyRestPose", b.BodyRestPose),
-                    ("_BodyVelLin", b.BodyVelLin), ("_BodyVelAng", b.BodyVelAng), ("_BodyPrevVelLin", b.BodyPrevVelLin), ("_Counters", b.Counters));
+                    ("_BodyVelLin", b.BodyVelLin), ("_BodyVelAng", b.BodyVelAng), ("_BodyPrevVelLin", b.BodyPrevVelLin), ("_Counters", b.Counters),
+                    ("_HotList", b.HotList), ("_WokenList", b.WokenList), ("_ActiveJoints", b.ActiveJoints), ("_ActiveSprings", b.ActiveSprings));
 
             // ---------------------------------------------------------------- solver bindings
             foreach (int kk in new[] { k.DriveKinematic, k.Predict, k.Primal, k.CommitOverflow, k.Dual, k.Velocity })
@@ -162,53 +197,63 @@ namespace Phys.AvbdGpu
                     ("_ColorStart", b.ColorStart), ("_ColorList", b.ColorList),
                     ("_ManifoldCur", b.ManifoldCur), ("_ContactsCur", b.ContactsCur), ("_ContactsCurRW", b.ContactsCur),
                     ("_JointDef", b.JointDef), ("_JointState", b.JointState), ("_JointStateRW", b.JointState), ("_SpringDef", b.SpringDef), ("_Counters", b.Counters),
-                    ("_BodyDrive", b.BodyDrive), ("_BodySleep", b.BodySleep));
+                    ("_BodyDrive", b.BodyDrive), ("_BodySleep", b.BodySleep), ("_HotList", b.HotList), ("_ActiveJoints", b.ActiveJoints));
 
             // ================================================================ step
-            cb.BeginSample("AVBD broadphase");
-            cb.SetComputeIntParam(k.Util, s_Phase, 0);
-            Direct(k.Util, k.BuildArgs, 1);
+            cb.BeginSample("AVBD hot list");
+            BuildArgs(0);
             Direct(k.Util, k.HashClear, Groups(cfg.HashSize));
             if (m_Sleep) Indirect(k.Sleep, k.WakeList, ArgWakeList);   // CPU wakes, before the pairs: a woken body gets fresh contacts
+            // the hot list: the bodies of every per-body pass (index order through the scan), then their joints and springs
+            Indirect(k.Util, k.HotFlag, ArgBodies);
+            RecordScan(b.HotFlags, b.HotScan, cfg.MaxBodies);
+            Indirect(k.Util, k.HotScatter, ArgBodies);
+            BuildArgs(3);
+            Indirect(k.Constraints, k.JointList, ArgHot);
+            cb.EndSample("AVBD hot list");
 
-            Indirect(k.Solver, k.DriveKinematic, ArgBodies);   // heading / velocity-aligned orientations before the contacts are found
-            Indirect(k.Broadphase, k.BodyAabb, ArgBodies);
+            cb.BeginSample("AVBD broadphase");
+            Indirect(k.Solver, k.DriveKinematic, ArgHot);   // heading / velocity-aligned orientations before the contacts are found
+            Indirect(k.Broadphase, k.BodyAabb, ArgHot);
             Direct(k.Broadphase, k.GridClear, Groups(cfg.CellCount));
-            Indirect(k.Broadphase, k.GridCount, ArgBodies);
+            Indirect(k.Broadphase, k.GridCount, ArgHot);
             RecordScan(b.CellCount, b.CellStart, cfg.CellCount);
-            Indirect(k.Broadphase, k.GridScatter, ArgBodies);
+            Indirect(k.Broadphase, k.GridScatter, ArgHot);
             Direct(k.Broadphase, k.GridSortCell, Groups(cfg.CellCount));
             Direct(k.Broadphase, k.LargeSort, 1);
-            Indirect(k.Broadphase, k.PairGen, ArgBodies);
-            cb.SetComputeIntParam(k.Util, s_Phase, 1);
-            Direct(k.Util, k.BuildArgs, 1);
+            Indirect(k.Broadphase, k.PairGen, ArgHot);
+            BuildArgs(1);
             cb.EndSample("AVBD broadphase");
 
             cb.BeginSample("AVBD narrowphase");
             Indirect(k.Narrowphase, k.Collide, ArgPairs);
-            if (m_Terrain) Indirect(k.Narrowphase, k.CollideTerrain, ArgBodies);   // appends to the same manifold pool
+            if (m_Terrain) Indirect(k.Narrowphase, k.CollideTerrain, ArgHot);   // appends to the same manifold pool
             if (m_Sleep) Indirect(k.Narrowphase, k.CarrySleeping, ArgPrevManifolds);   // the manifolds of sleeping bodies, unchanged
-            cb.SetComputeIntParam(k.Util, s_Phase, 2);
-            Direct(k.Util, k.BuildArgs, 1);
+            BuildArgs(2);
             cb.EndSample("AVBD narrowphase");
 
             if (m_Sleep)
             {
-                // a touch by an awake body wakes the whole island of the touched body before anything is solved
+                // a touch by an awake body wakes the whole island of the touched body before anything is solved; the woken
+                // bodies join the hot list and their joints the active lists
                 cb.BeginSample("AVBD wake");
                 Indirect(k.Sleep, k.WakeTouch, ArgConstraints);
-                Indirect(k.Sleep, k.WakeApply, ArgBodies);
-                Indirect(k.Sleep, k.WakeClear, ArgBodies);
+                BuildArgs(5);
+                Indirect(k.Sleep, k.WakeApply, ArgMarked);
+                Indirect(k.Sleep, k.WakeClear, ArgMarked);
+                BuildArgs(4);
+                Indirect(k.Constraints, k.JointListWoken, ArgWoken);
+                BuildArgs(6);
                 cb.EndSample("AVBD wake");
             }
 
             cb.BeginSample("AVBD constraints");
-            Indirect(k.Constraints, k.PrepareJoints, ArgJoints);
+            Indirect(k.Constraints, k.PrepareJoints, ArgActiveJoints);
             Indirect(k.Constraints, k.ConsClear, ArgBodies);
             Indirect(k.Constraints, k.ConsCount, ArgConstraints);
             RecordScan(b.BodyConsCount, b.BodyConsStart, cfg.MaxBodies);
             Indirect(k.Constraints, k.ConsFill, ArgConstraints);
-            Indirect(k.Constraints, k.ConsSort, ArgBodies);
+            Indirect(k.Constraints, k.ConsSort, ArgHot);
             cb.EndSample("AVBD constraints");
 
             if (m_Sleep)
@@ -221,7 +266,7 @@ namespace Phys.AvbdGpu
                     cb.SetComputeBufferParam(k.Sleep, k.LabelRound, s_LabelIn, (r & 1) == 0 ? b.BodyLabel : b.BodyLabelTmp);
                     cb.SetComputeBufferParam(k.Sleep, k.LabelRound, s_LabelOut, (r & 1) == 0 ? b.BodyLabelTmp : b.BodyLabel);
                     cb.SetComputeIntParam(k.Sleep, s_LabelRound, r);
-                    Indirect(k.Sleep, k.LabelRound, ArgBodies);
+                    Indirect(k.Sleep, k.LabelRound, ArgHot);
                 }
                 cb.EndSample("AVBD islands");
             }
@@ -231,28 +276,28 @@ namespace Phys.AvbdGpu
             int rounds = m_ColorRounds;
             if ((rounds & 1) != 0) rounds++;
             var colorA = b.BodyColor; var colorB = b.BodyColorTmp;
-            m_Cb.SetComputeBufferParam(k.Coloring, k.ColorInvalidate, s_ColorIn, colorA);
-            m_Cb.SetComputeBufferParam(k.Coloring, k.ColorInvalidate, s_ColorOut, colorB);
-            Indirect(k.Coloring, k.ColorInvalidate, ArgBodies);
+            cb.SetComputeBufferParam(k.Coloring, k.ColorInvalidate, s_ColorIn, colorA);
+            cb.SetComputeBufferParam(k.Coloring, k.ColorInvalidate, s_ColorOut, colorB);
+            Indirect(k.Coloring, k.ColorInvalidate, ArgHot);
             var cin = colorB; var cout = colorA;
             for (int r = 0; r < rounds; r++)
             {
-                m_Cb.SetComputeBufferParam(k.Coloring, k.ColorRound, s_ColorIn, cin);
-                m_Cb.SetComputeBufferParam(k.Coloring, k.ColorRound, s_ColorOut, cout);
-                Indirect(k.Coloring, k.ColorRound, ArgBodies);
+                cb.SetComputeBufferParam(k.Coloring, k.ColorRound, s_ColorIn, cin);
+                cb.SetComputeBufferParam(k.Coloring, k.ColorRound, s_ColorOut, cout);
+                Indirect(k.Coloring, k.ColorRound, ArgHot);
                 (cin, cout) = (cout, cin);
             }
             // after an even number of rounds the latest colours are in colorB
-            m_Cb.SetComputeBufferParam(k.Coloring, k.ColorFinalize, s_ColorIn, colorB);
-            m_Cb.SetComputeBufferParam(k.Coloring, k.ColorFinalize, s_ColorOut, colorA);
-            Indirect(k.Coloring, k.ColorFinalize, ArgBodies);
+            cb.SetComputeBufferParam(k.Coloring, k.ColorFinalize, s_ColorIn, colorB);
+            cb.SetComputeBufferParam(k.Coloring, k.ColorFinalize, s_ColorOut, colorA);
+            Indirect(k.Coloring, k.ColorFinalize, ArgHot);
             Direct(k.Coloring, k.ColorScan, 1);
-            m_Cb.SetComputeBufferParam(k.Coloring, k.ColorScatter, s_ColorIn, colorA);
-            Indirect(k.Coloring, k.ColorScatter, ArgBodies);
+            cb.SetComputeBufferParam(k.Coloring, k.ColorScatter, s_ColorIn, colorA);
+            Indirect(k.Coloring, k.ColorScatter, ArgHot);
             cb.EndSample("AVBD coloring");
 
             cb.BeginSample("AVBD solve");
-            Indirect(k.Solver, k.Predict, ArgBodies);
+            Indirect(k.Solver, k.Predict, ArgHot);
             int total = m_Iterations + (m_PostStabilize ? 1 : 0);
             for (int it = 0; it < total; it++)
             {
@@ -270,7 +315,7 @@ namespace Phys.AvbdGpu
                 Indirect(k.Solver, k.CommitOverflow, ArgColor0 + m_ActiveColors);
 
                 if (it < m_Iterations) Indirect(k.Solver, k.Dual, ArgConstraints);
-                if (it == m_Iterations - 1) Indirect(k.Solver, k.Velocity, ArgBodies);
+                if (it == m_Iterations - 1) Indirect(k.Solver, k.Velocity, ArgHot);
             }
             cb.EndSample("AVBD solve");
 
@@ -279,7 +324,7 @@ namespace Phys.AvbdGpu
                 // rest counters, their minimum over each body's neighbourhood (one round per hop), and the bodies whose
                 // neighbourhood has rested long enough fall asleep
                 cb.BeginSample("AVBD sleep");
-                Indirect(k.Sleep, k.SleepTimer, ArgBodies);
+                Indirect(k.Sleep, k.SleepTimer, ArgHot);
                 int hops = math.max(1, m_SleepHops);
                 var restIn = b.RestMin; var restOut = b.RestMinTmp;
                 for (int r = 0; r < hops; r++)
@@ -287,11 +332,11 @@ namespace Phys.AvbdGpu
                     cb.SetComputeIntParam(k.Sleep, s_RestFirst, r == 0 ? 1 : 0);
                     cb.SetComputeBufferParam(k.Sleep, k.RestSpread, s_RestIn, restIn);
                     cb.SetComputeBufferParam(k.Sleep, k.RestSpread, s_RestOut, restOut);
-                    Indirect(k.Sleep, k.RestSpread, ArgBodies);
+                    Indirect(k.Sleep, k.RestSpread, ArgHot);
                     (restIn, restOut) = (restOut, restIn);
                 }
                 cb.SetComputeBufferParam(k.Sleep, k.RestSleep, s_RestIn, restIn);   // the last round wrote here
-                Indirect(k.Sleep, k.RestSleep, ArgBodies);
+                Indirect(k.Sleep, k.RestSleep, ArgHot);
                 cb.EndSample("AVBD sleep");
             }
 
@@ -301,6 +346,45 @@ namespace Phys.AvbdGpu
             cb.CopyBuffer(b.HashCur, b.HashPrev);
             Direct(k.Util, k.CopyStats, 1);
             cb.EndSample("AVBD end");
+        }
+
+        /// <summary>The sleeping grid rebuild: flags the inactive bodies, compacts them into a list, counting-sorts them into the
+        /// grid's cells and marks them. Every dispatch is indirect from the gate's arguments, so an undue rebuild costs nothing
+        /// but the empty dispatches.</summary>
+        void RecordRebuild()
+        {
+            var cb = m_Rec = m_RebuildCb;
+            var b = m_B;
+            var k = m_K;
+            var cfg = b.Config;
+            cb.Clear();
+            cb.SetComputeConstantBufferParam(k.SleepGrid, s_Params, b.Params, 0, GpuParams.Stride);
+            cb.SetComputeConstantBufferParam(k.Scan, s_Params, b.Params, 0, GpuParams.Stride);
+            foreach (int kk in new[] { k.RebuildGate, k.SleepFlag, k.SleepScatter, k.RebuildListArgs, k.SleepGridClear, k.SleepGridCount, k.SleepGridScatter, k.SleepGridSortCell, k.SleepMark })
+                BindAll(k.SleepGrid, kk,
+                    ("_BodyDef", b.BodyDef), ("_BodyPos", b.BodyPos), ("_BodyRot", b.BodyRot), ("_BodySleep", b.BodySleep),
+                    ("_BodyAabbMin", b.BodyAabbMin), ("_BodyAabbMax", b.BodyAabbMax),
+                    ("_SleepFlags", b.SleepFlags), ("_SleepScan", b.SleepScan), ("_SleepList", b.SleepList),
+                    ("_SleepCellCount", b.SleepCellCount), ("_SleepCellStart", b.SleepCellStart), ("_SleepCellCursor", b.SleepCellCursor), ("_SleepCellEntries", b.SleepCellEntries),
+                    ("_Counters", b.Counters), ("_DispatchArgs", b.DispatchArgs));
+            cb.SetComputeIntParam(k.SleepGrid, s_SleepCells, cfg.SleepCellCount);
+            cb.SetComputeIntParam(k.SleepGrid, s_MaxBodies, cfg.MaxBodies);
+            cb.SetComputeIntParam(k.SleepGrid, s_MaxSleepCellEntries, cfg.MaxSleepCellEntries);
+
+            cb.BeginSample("AVBD sleeping grid");
+            Direct(k.SleepGrid, k.RebuildGate, 1);
+            Indirect(k.SleepGrid, k.SleepFlag, ArgSleepFlag);
+            RecordScan(b.SleepFlags, b.SleepScan, cfg.MaxBodies, ArgSleepScan, ArgSleepScanTop);
+            Indirect(k.SleepGrid, k.SleepScatter, ArgSleepFlag);
+            Direct(k.SleepGrid, k.RebuildListArgs, 1);
+            Indirect(k.SleepGrid, k.SleepGridClear, ArgSleepCells);
+            Indirect(k.SleepGrid, k.SleepGridCount, ArgSleepList);
+            RecordScan(b.SleepCellCount, b.SleepCellStart, cfg.SleepCellCount, ArgSleepCellScan, ArgSleepCellScanTop);
+            Indirect(k.SleepGrid, k.SleepGridScatter, ArgSleepList);
+            Indirect(k.SleepGrid, k.SleepGridSortCell, ArgSleepCells);
+            Indirect(k.SleepGrid, k.SleepMark, ArgSleepList);
+            cb.EndSample("AVBD sleeping grid");
+            m_Rec = m_Cb;
         }
     }
 }

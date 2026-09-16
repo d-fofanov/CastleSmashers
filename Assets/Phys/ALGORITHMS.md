@@ -33,23 +33,38 @@ buffer.
 
 0. **CPU wakes** (`WakeList`): the bodies the application changed since the last step (spawned, re-driven, re-flagged,
    jointed, or the neighbours of a retired body, found through last step's constraint lists) get their sleep words
-   cleared, so that their contacts are recomputed below. Then the **kinematic orientations** (`DriveKinematic`): bodies
-   with a heading take `RotateY(yaw)` from their drive, bodies that align to their velocity take `LookRotation(v⁻, up)`
-   (the previous step's velocity, while faster than 1 m/s). This runs before collision detection so that the step's
-   contacts see the orientation the body will keep.
-1. **World AABBs** (`BodyAabb`) at `x⁻`, expanded by the collision margin. Bodies spanning more than 64 grid cells
-   (the 100 m grounds) go to a small *large-body list* that every body tests brute force instead of the grid. Retired
-   slots get an empty AABB and enter neither the grid nor the list.
-2. **Hashed uniform grid** (`GridCount` → scan → `GridScatter` → `GridSortCell`): every body is inserted into every
-   cell its AABB overlaps (counting sort with atomics and an exclusive scan); each bucket is then sorted by body index.
-   The cell size defaults to twice the mean extent of the dynamic bodies.
-3. **Pairs** (`PairGen`): an *active* body (dynamic, alive and awake) walks its cells and takes every pair with an
-   inactive body (static or asleep) and, with another active body, the pair in which it has the lower index; inactive
-   bodies stay in the grid to be found but walk nothing, and a pair without an active body is never emitted (the
-   manifolds of sleeping bodies are carried instead, below). A pair is emitted only from the cell that contains the
-   minimum corner of the two AABBs' intersection (*owner-cell rule*), so a pair overlapping many cells is emitted exactly
-   once and hash aliasing can only add candidates that the AABB test rejects. Pairs joined by a joint (unless broken), a
-   spring or an ignore-collision link are filtered through a sorted per-body link list.
+   cleared, so that their contacts are recomputed below. Then the **hot list** (`HotFlag` → scan → `HotScatter`): the
+   bodies every per-body pass of the step runs over — alive, not the terrain slot, and active (dynamic, alive and awake)
+   or not yet in the sleeping grid (a body that fell asleep after the last rebuild is still inserted into the hot grid,
+   and simply skipped by the passes that only concern the awake). A flag per body and an exclusive scan give the list in
+   index order; the bodies in the sleeping grid have no thread anywhere until a wake appends them. The **active joint
+   and spring lists** (`JointList`) follow: every active hot body walks its link list and appends each joint or spring
+   once (from body B when B is active, else from A; world-anchored joints hang on B through a sentinel link), so the
+   constraint index space of the step is the manifolds, then these joints, then these springs, and no pass ever visits
+   the joints of a sleeping structure. Then the **kinematic orientations** (`DriveKinematic`): bodies with a heading take
+   `RotateY(yaw)` from their drive, bodies that align to their velocity take `LookRotation(v⁻, up)` (the previous step's
+   velocity, while faster than 1 m/s). This runs before collision detection so that the step's contacts see the
+   orientation the body will keep.
+1. **World AABBs** (`BodyAabb`) of the hot bodies at `x⁻`, expanded by the collision margin. Bodies spanning more than
+   64 grid cells (the 100 m grounds) go to a small *large-body list* that every hot body tests brute force instead of
+   the grid. Retired slots and the terrain slot are never hot: they enter neither a grid nor the list.
+2. **Hot grid** (`GridCount` → scan → `GridScatter` → `GridSortCell`): every hot body is inserted into every cell its
+   AABB overlaps (counting sort with atomics and an exclusive scan); each bucket is then sorted by body index. The cell
+   size defaults to twice the mean extent of the dynamic bodies. The **sleeping grid** is the same structure over the
+   inactive bodies (asleep, or static and small), rebuilt by its own command buffer (`AvbdSleepGrid.compute`) every
+   `SleepGridRebuildSteps` steps when `SleepGridRebuildMin` bodies (or a 64th of the grid) fell asleep or woke since the
+   last rebuild — a gate kernel decides and writes zero dispatch arguments otherwise. Its bodies carry bit 29 of their
+   sleep word; every wake overwrites the word, so a woken body's entries are skipped (stale) and it is found in the hot
+   grid instead, while a body that fell asleep since the rebuild (pending) is still in the hot grid. A sleeper never
+   moves, so its entries stay current between rebuilds.
+3. **Pairs** (`PairGen`): an *active* body walks its cells in both grids and takes every pair with an inactive body
+   (static or asleep) and, with another active body, the pair in which it has the lower index; inactive bodies stay in
+   the grids to be found but walk nothing, and a pair without an active body is never emitted (the manifolds of sleeping
+   bodies are carried instead, below). A pair is emitted only from the cell that contains the minimum corner of the two
+   AABBs' intersection (*owner-cell rule*), so a pair overlapping many cells is emitted exactly once and hash aliasing
+   can only add candidates that the AABB test rejects. Pairs joined by a joint (unless broken), a spring or an
+   ignore-collision link are filtered through a sorted per-body link list. An active large body walks the sleeping grid
+   itself (up to 4096 cells; the flag 16 reports more).
 4. **Narrowphase** (`Collide`): the reference's OBB test — SAT over 15 axes with an edge preference tolerance, face
    clipping (incident face against the reference face's side planes, up to 8 points, feature keys from the reference
    axis, incident axis and vertex index) or closest points of the two support edges. The previous step's manifold of
@@ -79,20 +94,24 @@ buffer.
    **Touches** (`WakeTouch` → `WakeApply` → `WakeClear`): every constraint joining a sleeping body to an awake one that
    is not resting marks the sleeper (a bit at its index) or, when the awake body is faster than `WakeSpeed`, its whole
    island (a bit at the island's representative); every marked body and every body whose island is marked has its
-   asleep bit cleared before anything is solved (see *Sleeping* below).
-5. **Joints** (`PrepareJoints`): `C0` of the ball-socket and the angular lock at `x⁻`, decay, penalty capped at the
-   material stiffness; a joint without an active body is left as it is, frozen with its bodies.
+   asleep bit cleared before anything is solved (see *Sleeping* below). The two passes over every body run only in steps
+   that set a mark; a woken sleeper of the sleeping grid is appended to the hot list, and its joints and springs to the
+   active lists (`JointListWoken`: the ones no body that was active at the start of the step brought already).
+5. **Joints** (`PrepareJoints`, over the active joint list): `C0` of the ball-socket and the angular lock at `x⁻`, decay,
+   penalty capped at the material stiffness; a joint without an active body is not in the list and stays frozen with its
+   bodies.
 6. **Constraint lists** (`ConsCount` → scan → `ConsFill` → `ConsSort`): a CSR list per dynamic body of the manifolds,
-   joints and springs touching it (sleeping bodies included: the islands, the rest propagation and the wakes walk these
-   lists). Each list of an active body is sorted by a canonical key (the neighbour index for manifolds, the CPU-assigned
-   index for joints and springs), so the accumulation order of the local system is deterministic; the lists of sleeping
-   bodies stay unsorted.
-   **Islands** (`LabelRound` × R): every dynamic body carries a label, the index of a representative body of its
-   island; a round replaces it by the minimum of its own label, the label of its label (pointer jumping) and its dynamic
-   neighbours' labels (Jacobi, ping-pong buffers), so a component converges to the least index in it in about
+   joints and springs of the step touching it (the carried manifolds give the sleeping bodies theirs: the wakes of a
+   retired body walk them). Each list of an active body is sorted by a canonical key (the neighbour index for manifolds,
+   the CPU-assigned index for joints and springs), so the accumulation order of the local system is deterministic; the
+   lists of sleeping bodies stay unsorted.
+   **Islands** (`LabelRound` × R, over the hot list): every dynamic body carries a label, the index of a representative
+   body of its island; a round replaces it by the minimum of its own label, the label of its label (pointer jumping) and
+   its dynamic neighbours' labels (Jacobi, ping-pong buffers), so a component converges to the least index in it in about
    log₂(diameter) rounds — four rounds per step converge a 100-hop wall within two steps. Labels only merge, so every
-   `SleepRelabelSteps` the awake bodies restart from their own index (sleeping bodies keep theirs: their connectivity is
-   frozen) and bodies that came apart become separate islands again.
+   `SleepRelabelSteps` the awake bodies restart from their own index and bodies that came apart become separate islands
+   again. A sleeping body keeps the label it fell asleep with (its connectivity is frozen, and it runs no round; a
+   neighbour reads its label from the authoritative buffer whichever side of the ping-pong the round is on).
 7. **Colouring** (`ColorInvalidate` → `ColorRound` × R → `ColorFinalize` → `ColorScan` → `ColorScatter`): bodies that
    share a constraint must not be updated in the same parallel pass; sleeping bodies are coloured like static ones (they
    are not solved and constrain no colour). Last step's colours are kept unless a
@@ -110,11 +129,13 @@ buffer.
    post-stabilisation on, the main iterations use α = 1 and one extra position-only iteration uses α = 0. A body with
    locked rotation solves only the 3 × 3 linear block of its system (infinite angular inertia: the angular update and the
    cross terms vanish) and keeps `ω = 0`.
-10. **Rest and sleep** (`SleepTimer` → `RestSpread` × `SleepHops` → `RestSleep`): every awake body compares its pose
-    with its rest anchor and either restarts its rest counter and the anchor (moved further than `SleepDistance` or
-    `SleepAngle`) or counts the step; the counters are then propagated as a minimum over each body's dynamic neighbours,
-    one round per hop, and a body whose neighbourhood minimum reached `SleepTime` falls asleep (asleep bit, velocities
-    zeroed) unless it was woken by a touch this very step.
+10. **Rest and sleep** (`SleepTimer` → `RestSpread` × `SleepHops` → `RestSleep`, over the hot list): every awake body
+    compares its pose with its rest anchor and either restarts its rest counter and the anchor (moved further than
+    `SleepDistance` or `SleepAngle`) or counts the step; the counters are then propagated as a minimum over each body's
+    awake dynamic neighbours (a sleeping neighbour counts as rested: it slept because its neighbourhood rested, and
+    anything moving against it wakes it first), one round per hop, and a body whose neighbourhood minimum reached
+    `SleepTime` falls asleep (asleep bit, velocities zeroed, counted as pending for the sleeping grid) unless it was
+    woken by a touch this very step.
 11. The manifold, contact and hash buffers are copied to their "previous" twins (`CopyBuffer`) and the counters are
     copied to a stats buffer for the asynchronous readback.
 
