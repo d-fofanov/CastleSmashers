@@ -94,11 +94,13 @@ namespace Phys.Demo
         // Player-build verification: -avbd-scene <n> -avbd-screenshot <file> [-avbd-frames <n>] captures a screenshot after n frames and quits;
         // -avbd-bench [-avbd-frames <n>] logs the average frame time of the second half of the run and quits;
         // -avbd-yaw <deg> -avbd-pitch <deg> -avbd-distance <m> override the camera; -avbd-shoot <n> fires a box at frame n;
-        // -avbd-nosleep runs without sleeping; -avbd-colormode <n> starts in that colour mode (3 = sleep).
+        // -avbd-nosleep runs without sleeping; -avbd-colormode <n> starts in that colour mode (3 = sleep); -avbd-norangeculling draws
+        // every range with world-sized bounds (no frustum or cascade culling).
         string m_ScreenshotPath;
         int m_ScreenshotFrame = 150;
         int m_ShootFrame = -1;
         bool m_Bench;
+        bool m_RangeCulling = true;
         double m_BenchMs; int m_BenchFrames;
         float? m_Yaw, m_Pitch, m_Distance;
 
@@ -164,11 +166,12 @@ namespace Phys.Demo
                 if (args[i] == "-avbd-bench") m_Bench = true;
                 if (args[i] == "-avbd-nosleep") sleep = false;
                 if (args[i] == "-avbd-colormode" && i + 1 < args.Length && int.TryParse(args[i + 1], out int cm)) colorMode = cm;
+                if (args[i] == "-avbd-norangeculling") m_RangeCulling = false;
             }
             if (!AvbdGpuKernels.Supported) { Debug.LogError("Compute shaders are not supported on this device"); enabled = false; return; }
             m_World = new AvbdGpuWorld(CreateConfig()) { ReadbackPoses = true };
             m_World.Params.Sleep = sleep;
-            m_Renderer = new AvbdGpuRenderer(m_World);
+            m_Renderer = new AvbdGpuRenderer(m_World) { RangeCulling = m_RangeCulling };
             if (colorMode >= 0) m_Renderer.ColorMode = (AvbdGpuRenderer.ColorModes)(colorMode % AvbdGpuRenderer.ColorModeCount);
             m_TerrainView = new TerrainView();
             Configure();
@@ -192,7 +195,7 @@ namespace Phys.Demo
             m_Renderer.Dispose();
             m_World.Dispose();
             m_World = new AvbdGpuWorld(CreateConfig()) { ReadbackPoses = true, Params = p };
-            m_Renderer = new AvbdGpuRenderer(m_World) { ColorMode = mode };
+            m_Renderer = new AvbdGpuRenderer(m_World) { ColorMode = mode, RangeCulling = m_RangeCulling };
             Configure();
             Load(m_Scene);
         }
@@ -205,6 +208,7 @@ namespace Phys.Demo
             m_World.Clear();
             m_Renderer.ClearTints();
             m_Renderer.MeshRanges.Clear();
+            m_Renderer.ClearRangeBounds();
             BuildScene(index, out float3 target, out float distance);
             ApplyTerrainStyle();
             m_TerrainView.Show(m_World.Terrain, SceneTerrain);   // hides the terrain when the scene has none
@@ -258,7 +262,7 @@ namespace Phys.Demo
                 {
                     var st = m_World.Stats;
                     Debug.Log($"AVBD bench: scene {m_Scene} '{SceneName(m_Scene)}' bodies {m_World.BodyCount} iterations {m_World.Params.Iterations} substeps {m_World.Params.Substeps}: " +
-                        $"frame {m_BenchMs / math.max(m_BenchFrames, 1):F2} ms ({m_BenchFrames / (m_BenchMs / 1000.0):F0} fps), submit {st.AvgStepMs:F2} ms, gpu render {(FrameTimingManager.IsFeatureEnabled() ? $"{m_GpuMs:F2} ms" : "n/a")}, draws {m_Renderer.LastDraws}, " +
+                        $"frame {m_BenchMs / math.max(m_BenchFrames, 1):F2} ms ({m_BenchFrames / (m_BenchMs / 1000.0):F0} fps), submit {st.AvgStepMs:F2} ms, gpu render {(FrameTimingManager.IsFeatureEnabled() ? $"{m_GpuMs:F2} ms" : "n/a")}, draws {m_Renderer.LastDraws} ({m_Renderer.BoundedDraws} with own bounds), " +
                         $"pairs {st.Pairs} manifolds {st.Manifolds} ({st.ColdManifolds} cold) contacts {st.Contacts} colours {st.ColorsUsed}/{st.ActiveColors} overflow bodies {st.OverflowBodies} flags {st.OverflowFlags} " +
                         $"sleep {(m_World.Params.Sleep ? "on" : "off")} asleep {st.Sleeping} hot {st.Hot} active {st.Active} grid {st.SleepGrid} rebuilds {st.Rebuilds}");
                 }

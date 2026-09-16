@@ -61,6 +61,13 @@ namespace Phys.AvbdGpu.Tests
             Assert.IsNotNull(m_Demo.BrickMesh, "brick mesh");
             Assert.AreEqual(3, m_Demo.Renderer.MeshRanges.Count, "the bricks are drawn with the brick model, the siege pools with the figure and arrow models");
             Assert.AreEqual(m_Demo.BrickCount, m_Demo.Renderer.MeshRanges[0].Count);
+            for (int f = 0; f < 8; f++) yield return null;   // the range bounds read back
+            Assert.AreEqual(1, m_Demo.Renderer.BoundedDraws, "the castle is drawn with its own bounds, the pools with the world's");
+            Assert.IsTrue(m_Demo.Renderer.TryGetRangeBounds(m_Demo.FirstBrick, m_Demo.BrickCount, out var castleBounds));
+            float side = CastlePlan.Presets[0].Side * Brick.Pitch * m_Demo.BrickScale, margin = m_Demo.Renderer.BoundsMargin;
+            Assert.Less(castleBounds.size.x, side + 2f * margin + 4f, "the castle's bounds are its footprint plus the margin and a brick's radius");
+            Assert.Less(castleBounds.size.z, side + 2f * margin + 4f);
+            Assert.Less(math.abs(castleBounds.center.x), 2f); Assert.Less(math.abs(castleBounds.center.z), 2f);
             m_Demo.World.GetPosesSync(out var start, out _);
             float maxMove = 0f;
             int worst = m_Demo.FirstBrick;   // stays the first brick when the sleeping castle does not move at all
@@ -262,7 +269,9 @@ namespace Phys.AvbdGpu.Tests
             Assert.AreEqual(7, m_Demo.OutlyingCount, "seven copies fit the reserved bodies");
             int n = m_Demo.BrickCount;
             Assert.Greater(n * 8, m_Demo.World.Config.MaxActive, "more bricks than the world simulates at once");
-            Assert.AreEqual(n * 8, m_Demo.Renderer.MeshRanges[0].Count, "the copies are drawn with the brick model too");
+            int drawnBricks = 0;
+            for (int k = 0; k < 8; k++) { Assert.AreEqual(n, m_Demo.Renderer.MeshRanges[k].Count, "one range per castle, culled on its own bounds"); drawnBricks += m_Demo.Renderer.MeshRanges[k].Count; }
+            Assert.AreEqual(n * 8, drawnBricks, "the copies are drawn with the brick model too");
             var stats = m_Demo.World.GetStatsSync();
             {
                 var words = m_Demo.World.GetSleepSync();
@@ -373,6 +382,28 @@ namespace Phys.AvbdGpu.Tests
             stats = m_Demo.World.GetStatsSync();
             Debug.Log($"trees: {m_Demo.TreeCount} trees, {pieces} pieces, {m_Demo.World.BodyCount} bodies, {stats.Sleeping} asleep, {stats.Hot} hot, {stats.Active} active, grid {stats.SleepGrid}, cold {stats.ColdManifolds}, step {stats.AvgStepMs:F2} ms");
             Assert.AreEqual(0, stats.OverflowFlags);
+
+            // every range but the pools is drawn with bounds read back from the GPU; a tree's ranges lie within its placement
+            var renderer = m_Demo.Renderer;
+            int culled = 0;
+            foreach (var r in renderer.MeshRanges) if (!r.NoCulling) culled++;
+            Assert.AreEqual(culled, renderer.BoundedDraws, "every range but the siege pools is drawn with its own bounds");
+            var tree0 = placements[0];
+            float3 tree0Extent = m_Demo.TreeKinds[tree0.Kind].Extent * PieceCatalog.GridToUnity * m_Demo.Spec.Scale;
+            float tree0Reach = tree0.Radius + renderer.BoundsMargin + 1f;
+            int treeRanges = 0;
+            foreach (var r in renderer.MeshRanges)
+            {
+                if (r.Start < tree0.First || r.Start >= tree0.First + tree0.Count) continue;
+                treeRanges++;
+                Assert.IsTrue(renderer.TryGetRangeBounds(r.Start, r.Count, out var rb), "the range's bounds are in");
+                Assert.Less(math.abs(rb.center.x - tree0.Centre.x), tree0Reach, "bounds around the tree");
+                Assert.Less(math.abs(rb.center.z - tree0.Centre.y), tree0Reach);
+                Assert.Less(math.max(rb.size.x, rb.size.z), 2f * tree0Reach + 4f, "bounds no wider than the crown plus the margin and a piece's radius");
+                Assert.Greater(rb.min.y, tree0.Ground - renderer.BoundsMargin - 2f);
+                Assert.Less(rb.max.y, tree0.Ground + tree0Extent.y + renderer.BoundsMargin + 2f);
+            }
+            Assert.Greater(treeRanges, 0);
 
             // a cannonball into the crown of the first tree wakes it (and it alone)
             var hit = placements[0];

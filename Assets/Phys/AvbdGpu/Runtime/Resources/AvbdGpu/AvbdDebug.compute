@@ -1,8 +1,10 @@
-// Debug geometry written on the GPU: contact crosses (per manifold, from the previous step's manifold list), joint and
-// spring lines. Drawn by AvbdGpuRenderer with Phys/AvbdLines; nothing is read back.
+// The renderer's kernels: debug geometry written on the GPU (contact crosses per manifold, from the previous step's manifold
+// list; joint and spring lines), drawn with Phys/AvbdLines and never read back, and the bounds of the body ranges the
+// renderer draws, read back asynchronously for Unity's culling.
 #pragma kernel DebugArgs
 #pragma kernel DebugContacts
 #pragma kernel DebugJoints
+#pragma kernel RangeBounds
 
 #include "AvbdCommon.hlsl"
 
@@ -21,6 +23,11 @@ RWStructuredBuffer<DebugVertex> _DebugJointVerts;
 RWByteAddressBuffer _DrawArgs;
 uint _DebugContactCap;
 float _CrossSize;
+StructuredBuffer<BodyDef> _BodyDef;
+StructuredBuffer<uint2> _Ranges;              // start, count of every range drawn
+RWStructuredBuffer<float4> _RangeBounds;      // per range: min, max (xyz) of position +- bounding radius; min > max when empty
+groupshared float3 gs_Min[AVBD_THREADS];
+groupshared float3 gs_Max[AVBD_THREADS];
 
 [numthreads(1, 1, 1)]
 void DebugArgs(uint3 id : SV_DispatchThreadID)
@@ -89,5 +96,42 @@ void DebugJoints(uint3 id : SV_DispatchThreadID)
         uint o = (_JointCount + i) * 2;
         v.position = float4(pA, 1); _DebugJointVerts[o] = v;
         v.position = float4(pB, 1); _DebugJointVerts[o + 1] = v;
+    }
+}
+
+// One thread group per range: the world AABB of its bodies (position +- the bounding radius of the box, dead slots and the
+// terrain slot skipped), reduced through group shared memory. The renderer reads the result back a few frames later and
+// draws the range with it, inflated by a margin, so that Unity culls what is out of the camera's frustum and of the shadow
+// cascades' volumes.
+[numthreads(AVBD_THREADS, 1, 1)]
+void RangeBounds(uint3 gid : SV_GroupID, uint3 tid : SV_GroupThreadID)
+{
+    uint2 range = _Ranges[gid.x];
+    float3 lo = 1e30, hi = -1e30;
+    for (uint i = tid.x; i < range.y; i += AVBD_THREADS)
+    {
+        uint b = range.x + i;
+        BodyDef d = _BodyDef[b];
+        if (d.flags & (FLAG_DEAD | FLAG_TERRAIN)) continue;
+        float3 p = _BodyPos[b].xyz;
+        lo = min(lo, p - d.radius);
+        hi = max(hi, p + d.radius);
+    }
+    gs_Min[tid.x] = lo;
+    gs_Max[tid.x] = hi;
+    GroupMemoryBarrierWithGroupSync();
+    for (uint s = AVBD_THREADS / 2; s > 0; s >>= 1)
+    {
+        if (tid.x < s)
+        {
+            gs_Min[tid.x] = min(gs_Min[tid.x], gs_Min[tid.x + s]);
+            gs_Max[tid.x] = max(gs_Max[tid.x], gs_Max[tid.x + s]);
+        }
+        GroupMemoryBarrierWithGroupSync();
+    }
+    if (tid.x == 0)
+    {
+        _RangeBounds[gid.x * 2] = float4(gs_Min[0], 0);
+        _RangeBounds[gid.x * 2 + 1] = float4(gs_Max[0], 0);
     }
 }

@@ -82,7 +82,14 @@ world.GetPosesSync(out var pos, out var rot);   // synchronous readback (tests, 
 box (`Mesh`, `Scale`, `Offset` of the model pivot in body space), `renderer.SetTints(rgba, start, count)` colours bodies
 (RGBA8, alpha 0 = hash palette), `renderer.Shadows` casts and receives the main light's shadows; with `renderer.BoxShadows`
 (default) a mesh range casts them from the bodies' collision boxes (a second, shadows-only draw of the cube per range)
-instead of the mesh: a shadow map draws every body once per cascade, and a brick's studs do not show in its shadow.
+instead of the mesh: a shadow map draws every body once per cascade, and a brick's studs do not show in its shadow. With
+`renderer.RangeCulling` (default) every mesh range is drawn with its own bounds, so that Unity culls it against the camera's
+frustum and against each shadow cascade: the `RangeBounds` kernel reduces the min / max of position ± bounding radius over
+each range's bodies every frame (dead slots skipped) and the result is read back asynchronously; a range is drawn with the
+bounds of a few frames ago inflated by `BoundsMargin` (5 m, what its bodies can move meanwhile), with world-sized bounds
+until its first result is in or when it has no live body, and a range whose start or count changed (a scene reset:
+`ClearRangeBounds`) waits for its new one. A pool whose spawns can appear anywhere sets `MeshRange.NoCulling`. The debug
+lines keep the world bounds.
 
 ### Terrain
 
@@ -318,8 +325,8 @@ stud grid (`CastlePlan.Presets`):
 Keys as the main demo plus `J` snap on/off, `T` terrain (hills, valley, ridge, flat), `Y` terrain style (tiled / smooth), `O`
 outlying copies (0 / 4 / 8), `F` trees (0 / 10 / 20 / 30), `F6` collision boxes, `F7` shadows; `B` / `Enter` fires a 30 kg
 cannonball at 24 model m/s (× √5 in the solver). Flags: `-avbd-scene 0..9`, `-avbd-snap`, `-avbd-siege`, `-avbd-outlying n`,
-`-avbd-trees n`, `-avbd-noshadows`, `-avbd-meshshadows`, `-avbd-terrain hills|valley|ridge|none`, `-avbd-terrain-seed n`,
-`-avbd-terrain-style tiled|smooth`, and the screenshot / bench / camera flags above (a demo's own flags are read by
+`-avbd-trees n`, `-avbd-noshadows`, `-avbd-meshshadows`, `-avbd-norangeculling`, `-avbd-terrain hills|valley|ridge|none`,
+`-avbd-terrain-seed n`, `-avbd-terrain-style tiled|smooth`, and the screenshot / bench / camera flags above (a demo's own flags are read by
 `ParseArgs` before the world is created, so that the outlying and tree reserves follow them). The bench log reports the GPU
 render time and the draw count next to the frame and step times. What twenty trees cost is their shadows: they are 13 M
 triangles per pass (23 000 pieces with all their studs, three times the castle) and the PC pipeline draws every piece once
@@ -327,7 +334,10 @@ more per shadow cascade, so with the meshes casting (`-avbd-meshshadows`) the Ca
 6.1 while the physics step is 0.14 ms either way (everything asleep) and the trees' own draw costs 0.7 ms. `BoxShadows`
 (the default) casts the shadows of every brick and piece from its collision box instead — twelve triangles, the studs
 missing from a shadow are invisible at this scale — and the frame is 5.9 ms with twenty trees, 6.6 with thirty and 4.3 for
-the castle alone (1600 x 900, 4 cascades to 400 m).
+the castle alone (1600 x 900, 4 cascades to 400 m). The range culling on top (`-avbd-norangeculling` turns it off; each
+castle copy is its own range, the siege pools are not culled) takes the twenty trees from 5.4 to 5.0 ms in the wide view
+and to 4.4 with the camera down at the castle and most trees behind it, and the eight outlying castles with the trees
+from 9.1 to 6.3 ms: what is out of the frustum or out of a cascade's volume is not drawn.
 
 **Outlying copies** (`Outlying`, key `O`, `-avbd-outlying n`): up to eight copies of the castle built asleep on the cells of a
 3 x 3 grid around it, each on its own plateau, spaced so that no plateau, skirt or army reaches the next — a world with

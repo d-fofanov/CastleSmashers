@@ -23,6 +23,16 @@ namespace Phys.AvbdGpu.Presentation
             public float Scale;
             public float3 Offset;
             public int Start, Count;
+            /// <summary>Draw with the world-sized bounds instead of the range's own (<see cref="RangeCulling"/>): for a pool whose spawns
+            /// may appear anywhere before the bounds read back catch up with them.</summary>
+            public bool NoCulling;
+        }
+
+        struct BoundsRequest
+        {
+            public AsyncGPUReadbackRequest Request;
+            public (int start, int count)[] Ranges;
+            public int Generation;
         }
 
         readonly AvbdGpuWorld m_World;
@@ -30,8 +40,14 @@ namespace Phys.AvbdGpu.Presentation
         readonly Material m_BoxMaterial;
         readonly Material m_LineMaterial;
         readonly ComputeShader m_Debug;
-        readonly int m_DebugArgs, m_DebugContacts, m_DebugJoints;
+        readonly int m_DebugArgs, m_DebugContacts, m_DebugJoints, m_RangeBoundsKernel;
         readonly GraphicsBuffer m_DebugVerts, m_DebugJointVerts, m_DrawArgs, m_Tints;
+        GraphicsBuffer m_RangeList, m_RangeBounds;
+        uint2[] m_RangeArray = new uint2[64];
+        readonly List<(int start, int count)> m_BoundsRanges = new List<(int, int)>();
+        readonly Queue<BoundsRequest> m_BoundsRequests = new Queue<BoundsRequest>();
+        readonly Dictionary<(int start, int count), Bounds> m_KnownBounds = new Dictionary<(int, int), Bounds>();
+        int m_BoundsGeneration;
         readonly MaterialPropertyBlock m_ContactProps = new MaterialPropertyBlock();
         readonly MaterialPropertyBlock m_JointProps = new MaterialPropertyBlock();
         readonly List<MaterialPropertyBlock> m_DrawProps = new List<MaterialPropertyBlock>();
@@ -51,6 +67,15 @@ namespace Phys.AvbdGpu.Presentation
         public bool BoxShadows = true;
         /// <summary>Draw calls issued by the last <see cref="Render"/> for the bodies (box ranges, mesh ranges and their shadow proxies).</summary>
         public int LastDraws { get; private set; }
+        /// <summary>Draw each mesh range with its own bounds, computed on the GPU from the bodies' poses every frame and read back a few
+        /// frames later (<see cref="BoundsMargin"/> covers what moved meanwhile), so that Unity culls the ranges outside the camera's
+        /// frustum and outside each shadow cascade; until a range's bounds are known it is drawn with world-sized bounds.</summary>
+        public bool RangeCulling = true;
+        /// <summary>Metres added around a range's bounds on every side: what its bodies can move in the frames the read back takes.</summary>
+        public float BoundsMargin = 5f;
+        /// <summary>Mesh-range draws of the last <see cref="Render"/> that used their own bounds (of <see cref="LastDraws"/>).</summary>
+        public int BoundedDraws { get; private set; }
+        const int MaxBoundsRequests = 4;
         public float ContactCrossSize = 0.06f;
         public int Layer;
         /// <summary>Body ranges drawn with a mesh instead of the collision box. Ranges must not overlap.</summary>
@@ -82,6 +107,7 @@ namespace Phys.AvbdGpu.Presentation
             m_DebugArgs = m_Debug.FindKernel("DebugArgs");
             m_DebugContacts = m_Debug.FindKernel("DebugContacts");
             m_DebugJoints = m_Debug.FindKernel("DebugJoints");
+            m_RangeBoundsKernel = m_Debug.FindKernel("RangeBounds");
             m_ContactCap = math.min(debugContactCap, world.Config.MaxContacts);
             m_DebugVerts = new GraphicsBuffer(GraphicsBuffer.Target.Structured, m_ContactCap * 6, 32);
             m_DebugJointVerts = new GraphicsBuffer(GraphicsBuffer.Target.Structured, math.max(1, (world.Config.MaxJoints + world.Config.MaxSprings) * 2), 32);
@@ -93,6 +119,9 @@ namespace Phys.AvbdGpu.Presentation
 
         public void Dispose()
         {
+            m_BoundsRequests.Clear();
+            m_RangeList?.Dispose();
+            m_RangeBounds?.Dispose();
             m_DebugVerts?.Dispose();
             m_DebugJointVerts?.Dispose();
             m_DrawArgs?.Dispose();
@@ -114,12 +143,75 @@ namespace Phys.AvbdGpu.Presentation
         /// <summary>Clears every tint (scene reset).</summary>
         public void ClearTints() => m_Tints.SetData(new uint[m_Tints.count]);
 
+        /// <summary>The bounds a mesh range [start, start + count) was last drawn with, if its read back has arrived (tests, HUD).</summary>
+        public bool TryGetRangeBounds(int start, int count, out Bounds bounds) => m_KnownBounds.TryGetValue((start, count), out bounds);
+
+        /// <summary>Forgets every range's bounds and the read backs in flight (a scene reset: the same start and count may now be
+        /// other bodies); the ranges are drawn with world-sized bounds until their new bounds are in.</summary>
+        public void ClearRangeBounds()
+        {
+            m_KnownBounds.Clear();
+            m_BoundsGeneration++;
+        }
+
+        /// <summary>Takes the range bounds that have arrived, then dispatches this frame's reduction over the mesh ranges and asks for
+        /// its read back (a few requests may be in flight; a range is looked up by its start and count, so a range that changed gets
+        /// the world bounds until its new result is in).</summary>
+        void UpdateRangeBounds(int bodies)
+        {
+            while (m_BoundsRequests.Count > 0 && m_BoundsRequests.Peek().Request.done)
+            {
+                var r = m_BoundsRequests.Dequeue();
+                if (r.Request.hasError || r.Generation != m_BoundsGeneration) continue;
+                var data = r.Request.GetData<float4>();
+                for (int i = 0; i < r.Ranges.Length; i++)
+                {
+                    float3 lo = data[2 * i].xyz, hi = data[2 * i + 1].xyz;
+                    if (math.any(lo > hi)) { m_KnownBounds.Remove(r.Ranges[i]); continue; }   // every body of the range is dead
+                    var b = new Bounds((lo + hi) * 0.5f, hi - lo);
+                    b.Expand(2f * BoundsMargin);
+                    m_KnownBounds[r.Ranges[i]] = b;
+                }
+            }
+            if (m_BoundsRequests.Count >= MaxBoundsRequests) return;
+            m_BoundsRanges.Clear();
+            foreach (var r in MeshRanges)
+            {
+                int start = math.max(r.Start, 0), count = math.min(r.Start + r.Count, bodies) - start;
+                if (r.Mesh == null || count <= 0 || r.NoCulling) continue;
+                m_BoundsRanges.Add((start, count));
+            }
+            int n = m_BoundsRanges.Count;
+            if (n == 0) return;
+            if (m_RangeList == null || m_RangeList.count < n)
+            {
+                int cap = math.max(64, math.ceilpow2(n));
+                m_RangeList?.Dispose();
+                m_RangeBounds?.Dispose();
+                m_RangeList = new GraphicsBuffer(GraphicsBuffer.Target.Structured, cap, 8);
+                m_RangeBounds = new GraphicsBuffer(GraphicsBuffer.Target.Structured, cap * 2, 16);
+                m_RangeArray = new uint2[cap];
+            }
+            for (int i = 0; i < n; i++) m_RangeArray[i] = new uint2((uint)m_BoundsRanges[i].start, (uint)m_BoundsRanges[i].count);
+            m_RangeList.SetData(m_RangeArray, 0, 0, n);
+            var b2 = m_World.Buffers;
+            m_Debug.SetBuffer(m_RangeBoundsKernel, "_Ranges", m_RangeList);
+            m_Debug.SetBuffer(m_RangeBoundsKernel, "_RangeBounds", m_RangeBounds);
+            m_Debug.SetBuffer(m_RangeBoundsKernel, "_BodyPos", b2.BodyPos);
+            m_Debug.SetBuffer(m_RangeBoundsKernel, "_BodyDef", b2.BodyDef);
+            m_Debug.Dispatch(m_RangeBoundsKernel, n, 1, 1);
+            m_BoundsRequests.Enqueue(new BoundsRequest { Request = AsyncGPUReadback.Request(m_RangeBounds, n * 2 * 16, 0), Ranges = m_BoundsRanges.ToArray(), Generation = m_BoundsGeneration });
+        }
+
         /// <summary>Issues this frame's draws. Call once per frame (Update / LateUpdate).</summary>
         public void Render(Camera camera = null)
         {
             var b = m_World.Buffers;
             int bodies = m_World.BodyCount;
             var bounds = new Bounds(Vector3.zero, Vector3.one * 100000f);
+            if (RangeCulling && bodies > 0) UpdateRangeBounds(bodies);
+            else m_KnownBounds.Clear();
+            BoundedDraws = 0;
 
             if (bodies > 0)
             {
@@ -159,6 +251,8 @@ namespace Phys.AvbdGpu.Presentation
                     props.SetVector(s_MeshOffset, new Vector4(r.Offset.x, r.Offset.y, r.Offset.z, 0f));
                     rp.matProps = props;
                     rp.shadowCastingMode = proxies ? ShadowCastingMode.Off : Shadows ? ShadowCastingMode.On : ShadowCastingMode.Off;
+                    rp.worldBounds = bounds;
+                    if (RangeCulling && !r.NoCulling && m_KnownBounds.TryGetValue((start, count), out var known)) { rp.worldBounds = known; BoundedDraws++; }
                     Graphics.RenderMeshPrimitives(rp, r.Mesh, 0, count);
                     if (!proxies) continue;
                     // the same bodies as their collision boxes, into the shadow maps only

@@ -239,8 +239,9 @@ namespace Phys.Demo
             var rng = new Unity.Mathematics.Random(0x9E3779B9u);
             for (int i = 0; i < n; i++) m_Tints[m_FirstBrick + i] = AvbdGpuRenderer.Tint(ToneColor(m_Layout.Bricks[i].Tone, rng.NextFloat()));
             for (int k = 1; k <= m_OutlyingCount; k++) System.Array.Copy(m_Tints, m_FirstBrick, m_Tints, m_FirstBrick + k * n, n);
-            if (BrickMesh != null)
-                m_Renderer.MeshRanges.Add(new AvbdGpuRenderer.MeshRange { Mesh = BrickMesh, Scale = BrickScale, Offset = m_Spec.MeshOffset, Start = m_FirstBrick, Count = bricks });
+            if (BrickMesh != null)   // one range per castle, so that each copy is culled on its own bounds
+                for (int k = 0; k <= m_OutlyingCount; k++)
+                    m_Renderer.MeshRanges.Add(new AvbdGpuRenderer.MeshRange { Mesh = BrickMesh, Scale = BrickScale, Offset = m_Spec.MeshOffset, Start = m_FirstBrick + k * n, Count = n });
 
             // the trees, on the ground around the castle (their plateaus are cut after the castle's, so that those on the level
             // ground stand on it and those on the hills get a terrace of their own), each built asleep as one island
@@ -253,10 +254,10 @@ namespace Phys.Demo
             siegeSpec.UnitMass = UnitMass; siegeSpec.ArrowMass = ArrowMass; siegeSpec.BallCube = ShotCube;
             m_Siege = new SiegeSystem(m_World, siegeSpec, UnitCapacity, ArrowCapacity, ShotCapacity, SiegeParams) { OnSpawned = OnSiegeSpawn, OnRetiring = OnSiegeRetire, Terrain = m_World.Terrain };
             m_SiegeActive = false;
-            if (FigureMesh != null)
-                m_Renderer.MeshRanges.Add(new AvbdGpuRenderer.MeshRange { Mesh = FigureMesh, Scale = BrickScale, Offset = siegeSpec.UnitMeshOffset, Start = m_Siege.Units.Start, Count = m_Siege.Units.Capacity });
+            if (FigureMesh != null)   // the pools spawn anywhere: world-sized bounds
+                m_Renderer.MeshRanges.Add(new AvbdGpuRenderer.MeshRange { Mesh = FigureMesh, Scale = BrickScale, Offset = siegeSpec.UnitMeshOffset, Start = m_Siege.Units.Start, Count = m_Siege.Units.Capacity, NoCulling = true });
             if (ArrowMesh != null)
-                m_Renderer.MeshRanges.Add(new AvbdGpuRenderer.MeshRange { Mesh = ArrowMesh, Scale = BrickScale, Offset = siegeSpec.ArrowMeshOffset, Start = m_Siege.Arrows.Start, Count = m_Siege.Arrows.Capacity });
+                m_Renderer.MeshRanges.Add(new AvbdGpuRenderer.MeshRange { Mesh = ArrowMesh, Scale = BrickScale, Offset = siegeSpec.ArrowMeshOffset, Start = m_Siege.Arrows.Start, Count = m_Siege.Arrows.Capacity, NoCulling = true });
             if (SiegeOnLoad) ToggleSiege();
 
             // fewer substeps for the big castles: their cannonball crosses a fraction of the wall thickness per step even at one
