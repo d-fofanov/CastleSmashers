@@ -12,8 +12,8 @@ namespace Phys.AvbdGpu
         readonly AvbdGpuBuffers m_B;
         readonly CommandBuffer m_Cb = new CommandBuffer { name = "AVBD step" };
 
-        int m_Iterations = -1, m_ActiveColors = -1, m_ColorRounds = -1, m_TerrainVersion = -1;
-        bool m_PostStabilize, m_Terrain;
+        int m_Iterations = -1, m_ActiveColors = -1, m_ColorRounds = -1, m_TerrainVersion = -1, m_LabelRounds = -1, m_SleepHops = -1;
+        bool m_PostStabilize, m_Terrain, m_Sleep;
 
         public CommandBuffer CommandBuffer => m_Cb;
 
@@ -27,8 +27,14 @@ namespace Phys.AvbdGpu
         static readonly int s_ColorOut = Shader.PropertyToID("_ColorOut");
         static readonly int s_ScanIn = Shader.PropertyToID("_ScanIn");
         static readonly int s_ScanOut = Shader.PropertyToID("_ScanOut");
+        static readonly int s_LabelIn = Shader.PropertyToID("_LabelIn");
+        static readonly int s_LabelOut = Shader.PropertyToID("_LabelOut");
+        static readonly int s_LabelRound = Shader.PropertyToID("_LabelRound");
+        static readonly int s_RestIn = Shader.PropertyToID("_RestIn");
+        static readonly int s_RestOut = Shader.PropertyToID("_RestOut");
+        static readonly int s_RestFirst = Shader.PropertyToID("_RestFirst");
 
-        const int ArgBodies = 0, ArgPairs = 1, ArgManifolds = 2, ArgConstraints = 3, ArgJoints = 4, ArgColor0 = 8;
+        const int ArgBodies = 0, ArgPairs = 1, ArgManifolds = 2, ArgConstraints = 3, ArgJoints = 4, ArgPrevManifolds = 5, ArgWakeList = 6, ArgColor0 = 8;
         const int Threads = AvbdGpuConstants.ThreadGroupSize;
         const int ScanBlock = 1024;
 
@@ -43,14 +49,15 @@ namespace Phys.AvbdGpu
         static int Groups(int n, int per = Threads) => math.max(1, (n + per - 1) / per);
 
         /// <summary>Re-records the step when the configuration changed (<paramref name="terrain"/>: the world has a terrain, so the
-        /// CollideTerrain pass is recorded and bound to the current terrain buffers).</summary>
-        public void Ensure(int iterations, int activeColors, bool postStabilize, int colorRounds, float alpha, bool terrain)
+        /// CollideTerrain pass is recorded and bound to the current terrain buffers; <paramref name="sleep"/>: the sleeping passes
+        /// are recorded, with <paramref name="labelRounds"/> island label rounds and <paramref name="sleepHops"/> rest rounds per step).</summary>
+        public void Ensure(int iterations, int activeColors, bool postStabilize, int colorRounds, float alpha, bool terrain, bool sleep, int labelRounds, int sleepHops)
         {
             int terrainVersion = terrain ? m_B.TerrainVersion : -1;
             if (iterations == m_Iterations && activeColors == m_ActiveColors && postStabilize == m_PostStabilize && colorRounds == m_ColorRounds && alpha == m_Alpha
-                && terrain == m_Terrain && terrainVersion == m_TerrainVersion) return;
+                && terrain == m_Terrain && terrainVersion == m_TerrainVersion && sleep == m_Sleep && labelRounds == m_LabelRounds && sleepHops == m_SleepHops) return;
             m_Iterations = iterations; m_ActiveColors = activeColors; m_PostStabilize = postStabilize; m_ColorRounds = colorRounds; m_Alpha = alpha;
-            m_Terrain = terrain; m_TerrainVersion = terrainVersion;
+            m_Terrain = terrain; m_TerrainVersion = terrainVersion; m_Sleep = sleep; m_LabelRounds = labelRounds; m_SleepHops = sleepHops;
             Record();
         }
 
@@ -90,7 +97,7 @@ namespace Phys.AvbdGpu
             var cfg = b.Config;
             cb.Clear();
 
-            foreach (var cs in new[] { k.Util, k.Scan, k.Broadphase, k.Narrowphase, k.Constraints, k.Coloring, k.Solver })
+            foreach (var cs in new[] { k.Util, k.Scan, k.Broadphase, k.Narrowphase, k.Constraints, k.Coloring, k.Solver, k.Sleep })
                 cb.SetComputeConstantBufferParam(cs, s_Params, b.Params, 0, GpuParams.Stride);
 
             // ---------------------------------------------------------------- util bindings
@@ -104,15 +111,16 @@ namespace Phys.AvbdGpu
                     ("_BodyAabbMin", b.BodyAabbMin), ("_BodyAabbMax", b.BodyAabbMax),
                     ("_CellCount", b.CellCount), ("_CellStart", b.CellStart), ("_CellCursor", b.CellCursor), ("_CellEntries", b.CellEntries),
                     ("_LargeBodies", b.LargeBodies), ("_Counters", b.Counters), ("_Pairs", b.Pairs),
-                    ("_LinkStart", b.LinkStart), ("_LinkList", b.LinkList), ("_JointState", b.JointState));
+                    ("_LinkStart", b.LinkStart), ("_LinkList", b.LinkList), ("_JointState", b.JointState), ("_BodySleep", b.BodySleep));
 
             // ---------------------------------------------------------------- narrowphase bindings
-            foreach (int kk in new[] { k.Collide, k.CollideTerrain })
+            foreach (int kk in new[] { k.Collide, k.CollideTerrain, k.CarrySleeping })
                 BindAll(k.Narrowphase, kk,
                     ("_BodyDef", b.BodyDef), ("_BodyPos", b.BodyPos), ("_BodyRot", b.BodyRot), ("_BodyVelLin", b.BodyVelLin), ("_Pairs", b.Pairs), ("_Counters", b.Counters),
                     ("_ManifoldPrev", b.ManifoldPrev), ("_ContactsPrev", b.ContactsPrev), ("_HashPrev", b.HashPrev),
                     ("_ManifoldCur", b.ManifoldCur), ("_ContactsCur", b.ContactsCur), ("_HashCur", b.HashCur), ("_BodyEvents", b.BodyEvents),
-                    ("_BodyAabbMin", b.BodyAabbMin), ("_BodyAabbMax", b.BodyAabbMax), ("_TerrainHeights", b.TerrainHeights), ("_TerrainMaxMip", b.TerrainMaxMip));
+                    ("_BodyAabbMin", b.BodyAabbMin), ("_BodyAabbMax", b.BodyAabbMax), ("_TerrainHeights", b.TerrainHeights), ("_TerrainMaxMip", b.TerrainMaxMip),
+                    ("_BodySleep", b.BodySleep));
 
             // ---------------------------------------------------------------- constraint bindings
             foreach (int kk in new[] { k.PrepareJoints, k.ConsClear, k.ConsCount, k.ConsFill, k.ConsSort })
@@ -120,7 +128,8 @@ namespace Phys.AvbdGpu
                     ("_BodyDef", b.BodyDef), ("_BodyPos", b.BodyPos), ("_BodyRot", b.BodyRot),
                     ("_JointDef", b.JointDef), ("_JointState", b.JointState), ("_SpringDef", b.SpringDef),
                     ("_ManifoldCur", b.ManifoldCur), ("_Counters", b.Counters),
-                    ("_BodyConsCount", b.BodyConsCount), ("_BodyConsCursor", b.BodyConsCursor), ("_BodyConsStart", b.BodyConsStart), ("_BodyConsList", b.BodyConsList));
+                    ("_BodyConsCount", b.BodyConsCount), ("_BodyConsCursor", b.BodyConsCursor), ("_BodyConsStart", b.BodyConsStart), ("_BodyConsList", b.BodyConsList),
+                    ("_BodySleep", b.BodySleep));
 
             // ---------------------------------------------------------------- colouring bindings
             foreach (int kk in new[] { k.ColorInvalidate, k.ColorRound, k.ColorFinalize, k.ColorScan, k.ColorScatter })
@@ -128,7 +137,16 @@ namespace Phys.AvbdGpu
                     ("_BodyDef", b.BodyDef), ("_BodyConsStart", b.BodyConsStart), ("_BodyConsList", b.BodyConsList),
                     ("_ManifoldCur", b.ManifoldCur), ("_JointDef", b.JointDef), ("_SpringDef", b.SpringDef),
                     ("_ColorCount", b.ColorCount), ("_ColorStart", b.ColorStart), ("_ColorCursor", b.ColorCursor), ("_ColorList", b.ColorList),
-                    ("_Counters", b.Counters), ("_DispatchArgs", b.DispatchArgs));
+                    ("_Counters", b.Counters), ("_DispatchArgs", b.DispatchArgs), ("_BodySleep", b.BodySleep));
+
+            // ---------------------------------------------------------------- sleeping bindings
+            foreach (int kk in new[] { k.WakeList, k.WakeTouch, k.WakeApply, k.WakeClear, k.LabelRound, k.SleepTimer, k.RestSpread, k.RestSleep })
+                BindAll(k.Sleep, kk,
+                    ("_BodyDef", b.BodyDef), ("_BodyPos", b.BodyPos), ("_BodyRot", b.BodyRot), ("_BodyVelLinIn", b.BodyVelLin), ("_WakeList", b.WakeList),
+                    ("_BodyConsStart", b.BodyConsStart), ("_BodyConsList", b.BodyConsList), ("_ManifoldPrev", b.ManifoldPrev), ("_ManifoldCur", b.ManifoldCur),
+                    ("_JointDef", b.JointDef), ("_JointState", b.JointState), ("_SpringDef", b.SpringDef),
+                    ("_BodySleep", b.BodySleep), ("_BodyLabel", b.BodyLabel), ("_WakeMark", b.WakeMark), ("_BodyRestPose", b.BodyRestPose),
+                    ("_BodyVelLin", b.BodyVelLin), ("_BodyVelAng", b.BodyVelAng), ("_BodyPrevVelLin", b.BodyPrevVelLin), ("_Counters", b.Counters));
 
             // ---------------------------------------------------------------- solver bindings
             foreach (int kk in new[] { k.DriveKinematic, k.Predict, k.Primal, k.CommitOverflow, k.Dual, k.Velocity })
@@ -144,13 +162,14 @@ namespace Phys.AvbdGpu
                     ("_ColorStart", b.ColorStart), ("_ColorList", b.ColorList),
                     ("_ManifoldCur", b.ManifoldCur), ("_ContactsCur", b.ContactsCur), ("_ContactsCurRW", b.ContactsCur),
                     ("_JointDef", b.JointDef), ("_JointState", b.JointState), ("_JointStateRW", b.JointState), ("_SpringDef", b.SpringDef), ("_Counters", b.Counters),
-                    ("_BodyDrive", b.BodyDrive));
+                    ("_BodyDrive", b.BodyDrive), ("_BodySleep", b.BodySleep));
 
             // ================================================================ step
             cb.BeginSample("AVBD broadphase");
             cb.SetComputeIntParam(k.Util, s_Phase, 0);
             Direct(k.Util, k.BuildArgs, 1);
             Direct(k.Util, k.HashClear, Groups(cfg.HashSize));
+            if (m_Sleep) Indirect(k.Sleep, k.WakeList, ArgWakeList);   // CPU wakes, before the pairs: a woken body gets fresh contacts
 
             Indirect(k.Solver, k.DriveKinematic, ArgBodies);   // heading / velocity-aligned orientations before the contacts are found
             Indirect(k.Broadphase, k.BodyAabb, ArgBodies);
@@ -168,9 +187,20 @@ namespace Phys.AvbdGpu
             cb.BeginSample("AVBD narrowphase");
             Indirect(k.Narrowphase, k.Collide, ArgPairs);
             if (m_Terrain) Indirect(k.Narrowphase, k.CollideTerrain, ArgBodies);   // appends to the same manifold pool
+            if (m_Sleep) Indirect(k.Narrowphase, k.CarrySleeping, ArgPrevManifolds);   // the manifolds of sleeping bodies, unchanged
             cb.SetComputeIntParam(k.Util, s_Phase, 2);
             Direct(k.Util, k.BuildArgs, 1);
             cb.EndSample("AVBD narrowphase");
+
+            if (m_Sleep)
+            {
+                // a touch by an awake body wakes the whole island of the touched body before anything is solved
+                cb.BeginSample("AVBD wake");
+                Indirect(k.Sleep, k.WakeTouch, ArgConstraints);
+                Indirect(k.Sleep, k.WakeApply, ArgBodies);
+                Indirect(k.Sleep, k.WakeClear, ArgBodies);
+                cb.EndSample("AVBD wake");
+            }
 
             cb.BeginSample("AVBD constraints");
             Indirect(k.Constraints, k.PrepareJoints, ArgJoints);
@@ -180,6 +210,21 @@ namespace Phys.AvbdGpu
             Indirect(k.Constraints, k.ConsFill, ArgConstraints);
             Indirect(k.Constraints, k.ConsSort, ArgBodies);
             cb.EndSample("AVBD constraints");
+
+            if (m_Sleep)
+            {
+                // island labels: an even number of ping-pong rounds so that the result lands back in BodyLabel
+                cb.BeginSample("AVBD islands");
+                int labelRounds = math.max(2, m_LabelRounds + (m_LabelRounds & 1));
+                for (int r = 0; r < labelRounds; r++)
+                {
+                    cb.SetComputeBufferParam(k.Sleep, k.LabelRound, s_LabelIn, (r & 1) == 0 ? b.BodyLabel : b.BodyLabelTmp);
+                    cb.SetComputeBufferParam(k.Sleep, k.LabelRound, s_LabelOut, (r & 1) == 0 ? b.BodyLabelTmp : b.BodyLabel);
+                    cb.SetComputeIntParam(k.Sleep, s_LabelRound, r);
+                    Indirect(k.Sleep, k.LabelRound, ArgBodies);
+                }
+                cb.EndSample("AVBD islands");
+            }
 
             cb.BeginSample("AVBD coloring");
             // Invalidate: Color -> Tmp; rounds alternate; the last round must land in Tmp so Finalize writes Color.
@@ -228,6 +273,27 @@ namespace Phys.AvbdGpu
                 if (it == m_Iterations - 1) Indirect(k.Solver, k.Velocity, ArgBodies);
             }
             cb.EndSample("AVBD solve");
+
+            if (m_Sleep)
+            {
+                // rest counters, their minimum over each body's neighbourhood (one round per hop), and the bodies whose
+                // neighbourhood has rested long enough fall asleep
+                cb.BeginSample("AVBD sleep");
+                Indirect(k.Sleep, k.SleepTimer, ArgBodies);
+                int hops = math.max(1, m_SleepHops);
+                var restIn = b.RestMin; var restOut = b.RestMinTmp;
+                for (int r = 0; r < hops; r++)
+                {
+                    cb.SetComputeIntParam(k.Sleep, s_RestFirst, r == 0 ? 1 : 0);
+                    cb.SetComputeBufferParam(k.Sleep, k.RestSpread, s_RestIn, restIn);
+                    cb.SetComputeBufferParam(k.Sleep, k.RestSpread, s_RestOut, restOut);
+                    Indirect(k.Sleep, k.RestSpread, ArgBodies);
+                    (restIn, restOut) = (restOut, restIn);
+                }
+                cb.SetComputeBufferParam(k.Sleep, k.RestSleep, s_RestIn, restIn);   // the last round wrote here
+                Indirect(k.Sleep, k.RestSleep, ArgBodies);
+                cb.EndSample("AVBD sleep");
+            }
 
             cb.BeginSample("AVBD end");
             cb.CopyBuffer(b.ManifoldCur, b.ManifoldPrev);

@@ -29,12 +29,33 @@ namespace Phys.AvbdGpu
         public float CellSize;
         /// <summary>Jones-Plassmann colouring rounds per step (rounded up to even).</summary>
         public int ColorRounds;
+        /// <summary>Sleeping: a body that has stayed within <see cref="SleepDistance"/> / <see cref="SleepAngle"/> of its rest pose for
+        /// <see cref="SleepTime"/> seconds, with every body within <see cref="SleepHops"/> contacts or joints of it resting as well, is
+        /// frozen until something touches or changes it. Off: every body is simulated every step (the reference behaviour).</summary>
+        public bool Sleep;
+        public float SleepTime;
+        public float SleepDistance;
+        public float SleepAngle;
+        /// <summary>How far (in contacts / joints) the neighbourhood must rest before a body sleeps.</summary>
+        public int SleepHops;
+        /// <summary>A touch by an awake body faster than this wakes the whole island of the touched body (an impact, a projectile, a
+        /// walking unit) for at least <see cref="WakeHold"/> seconds; a slower one wakes the touched body alone (it sleeps again as
+        /// soon as it and its neighbourhood rest), and a resting one wakes nothing.</summary>
+        public float WakeSpeed;
+        public float WakeHold;
+        /// <summary>Island label propagation rounds per step (each doubles the reach; rounded up to even).</summary>
+        public int SleepLabelRounds;
+        /// <summary>Every this many steps the awake bodies restart their island labels, so that bodies which came apart stop
+        /// sharing an island.</summary>
+        public int SleepRelabelSteps;
 
         public static AvbdGpuParams Default => new AvbdGpuParams
         {
             Dt = 1f / 60f, Gravity = new float3(0, -10f, 0), Iterations = 10, Substeps = 1,
             Alpha = 0.99f, BetaLin = 10000f, BetaAng = 100f, Gamma = 0.999f,
             PostStabilize = false, RotatedInertia = false, CellSize = 0f, ColorRounds = 8,
+            Sleep = true, SleepTime = 0.5f, SleepDistance = 0.02f, SleepAngle = 0.02f, SleepHops = 2, WakeSpeed = 0.25f, WakeHold = 0.15f,
+            SleepLabelRounds = 4, SleepRelabelSteps = 60,
         };
     }
 
@@ -53,7 +74,7 @@ namespace Phys.AvbdGpu
         readonly GpuBodyDef[] m_BodyDefs;
         readonly GpuBodyDrive[] m_Drives;
         readonly float4[] m_Pos, m_Rot, m_Vel;
-        readonly uint[] m_Uncolored, m_ZeroUints;
+        readonly uint[] m_Uncolored, m_ZeroUints, m_Identity;
         int m_BodyCount, m_UploadedBodies;
         double m_ExtentSum; int m_ExtentCount;
         // definitions and drives are CPU-owned: changes to uploaded bodies are re-sent as one range each
@@ -61,6 +82,11 @@ namespace Phys.AvbdGpu
         readonly List<GpuSpawnRecord> m_SpawnQueue = new List<GpuSpawnRecord>();
         readonly GpuSpawnRecord[] m_SpawnChunk;
         static readonly int s_SpawnCount = Shader.PropertyToID("_SpawnCount");
+        // sleeping: the wake requests of this step (applied by the WakeList kernel), or everything at once
+        readonly List<uint2> m_WakeList = new List<uint2>();
+        readonly uint2[] m_WakeArray;
+        bool m_WakeAll, m_SleepWasOn;
+        float3 m_LastGravity;
 
         readonly GpuJointDef[] m_JointDefs;
         readonly GpuJointState[] m_ZeroJointStates;
@@ -125,6 +151,9 @@ namespace Phys.AvbdGpu
             m_Uncolored = new uint[config.MaxBodies];
             m_ZeroUints = new uint[config.MaxBodies];
             for (int i = 0; i < m_Uncolored.Length; i++) m_Uncolored[i] = 0xFFFFFFFFu;
+            m_Identity = new uint[config.MaxBodies];
+            for (int i = 0; i < m_Identity.Length; i++) m_Identity[i] = (uint)i;
+            m_WakeArray = new uint2[math.max(config.MaxWakes, 1)];
             m_SpawnChunk = new GpuSpawnRecord[math.max(config.MaxSpawns, 1)];
             m_EventsRead = new uint[config.MaxBodies];
             m_JointDefs = new GpuJointDef[config.MaxJoints];
@@ -196,6 +225,7 @@ namespace Phys.AvbdGpu
             }
             m_Terrain = field;
             UpdateTerrain();
+            WakeAll();
             return m_TerrainBody;
         }
 
@@ -207,6 +237,7 @@ namespace Phys.AvbdGpu
             Buffers.EnsureTerrain(m_Terrain.SampleCount, m_Terrain.MaxMip.Length);
             Buffers.TerrainHeights.SetData(m_Terrain.Heights);
             Buffers.TerrainMaxMip.SetData(m_Terrain.MaxMip);
+            WakeAll();   // sleeping bodies may now hang above (or sit below) the new surface
         }
 
         // ------------------------------------------------------------------------------------------------ body pools
@@ -246,6 +277,7 @@ namespace Phys.AvbdGpu
             MarkDrive(slot);
             if (slot < m_UploadedBodies)
                 m_SpawnQueue.Add(new GpuSpawnRecord { Slot = (uint)slot, Pos = m_Pos[slot], Rot = m_Rot[slot], Vel = m_Vel[slot] });
+            Wake(slot, WakeMode.Spawn);
         }
 
         /// <summary>Retires a body: it stops colliding, moving and drawing, and its slot can be spawned into after the next step.
@@ -258,6 +290,7 @@ namespace Phys.AvbdGpu
             m_BodyDefs[slot].Flags |= GpuBodyDef.FlagDead;
             m_SpawnQueue.RemoveAll(r => r.Slot == (uint)slot);
             MarkDef(slot);
+            Wake(slot, WakeMode.Neighbours);   // whatever rested on or against it must react
         }
 
         public bool IsAlive(int slot) => !m_BodyDefs[slot].IsDead;
@@ -269,15 +302,54 @@ namespace Phys.AvbdGpu
             const uint keep = GpuBodyDef.FlagStatic | GpuBodyDef.FlagDead;
             m_BodyDefs[slot].Flags = (m_BodyDefs[slot].Flags & keep) | (flags & ~keep);
             MarkDef(slot);
+            Wake(slot, WakeMode.Self);
         }
 
         public GpuBodyDrive GetBodyDrive(int slot) => m_Drives[slot];
 
-        /// <summary>Sets the drive of a body; the body needs <see cref="GpuBodyDef.FlagDriven"/> for it to act.</summary>
+        /// <summary>Sets the drive of a body; the body needs <see cref="GpuBodyDef.FlagDriven"/> for it to act. A changed drive
+        /// wakes the body (an identical one does not, so a unit holding its position may sleep).</summary>
         public void SetBodyDrive(int slot, in GpuBodyDrive drive)
         {
+            if (SameDrive(m_Drives[slot], drive)) return;
             m_Drives[slot] = drive;
             MarkDrive(slot);
+            Wake(slot, WakeMode.Self);
+        }
+
+        static bool SameDrive(in GpuBodyDrive a, in GpuBodyDrive b) =>
+            a.Mode == b.Mode && math.all(a.Target == b.Target) && math.all(a.Mask == b.Mask) && a.Limit == b.Limit && a.Yaw == b.Yaw;
+
+        // ------------------------------------------------------------------------------------------------ sleeping
+
+        /// <summary>Wakes a body and, through its contacts, the island it belongs to (applied at the start of the next step).
+        /// Gameplay changes made through the world (drives, flags, joints, spawns, retirements, the terrain) wake by themselves.</summary>
+        public void WakeBody(int slot) => Wake(slot, WakeMode.Self);
+
+        /// <summary>Wakes every body (applied at the start of the next step).</summary>
+        public void WakeAll() { m_WakeAll = true; m_WakeList.Clear(); }
+
+        void Wake(int slot, uint mode)
+        {
+            if (m_WakeAll || slot < 0 || slot >= m_UploadedBodies) return;   // a body not uploaded yet starts awake
+            if (m_WakeList.Count >= m_WakeArray.Length) { WakeAll(); return; }
+            m_WakeList.Add(new uint2((uint)slot, mode));
+        }
+
+        /// <summary>Synchronous readback of the sleep words (<see cref="GpuBodySleep"/>) of every body (tests).</summary>
+        public uint[] GetSleepSync()
+        {
+            var words = new uint[math.max(m_BodyCount, 1)];
+            if (m_BodyCount > 0) Buffers.BodySleep.GetData(words, 0, 0, m_BodyCount);
+            return words;
+        }
+
+        /// <summary>Synchronous readback of the island labels (the index of each island's representative body) of every body (tests).</summary>
+        public uint[] GetLabelsSync()
+        {
+            var labels = new uint[math.max(m_BodyCount, 1)];
+            if (m_BodyCount > 0) Buffers.BodyLabel.GetData(labels, 0, 0, m_BodyCount);
+            return labels;
         }
 
         void MarkDef(int slot)
@@ -337,6 +409,8 @@ namespace Phys.AvbdGpu
             }
             m_JointDefs[j] = def;
             if (bodyA >= 0) AddLink(bodyA, bodyB, ConsRef.Make(ConsRef.Joint, (uint)j));
+            Wake(bodyA, WakeMode.Self);
+            Wake(bodyB, WakeMode.Self);
             return j;
         }
 
@@ -345,6 +419,8 @@ namespace Phys.AvbdGpu
         {
             m_JointDefs[joint].RA = rA;
             if (joint < m_UploadedJoints) m_DirtyJoints.Add(joint);
+            Wake(m_JointDefs[joint].BodyA, WakeMode.Self);
+            Wake(m_JointDefs[joint].BodyB, WakeMode.Self);
         }
 
         /// <summary>Disables a joint (its slot is reused by the next AddJoint).</summary>
@@ -359,6 +435,8 @@ namespace Phys.AvbdGpu
             if (def.BodyA >= 0) RemoveLink(def.BodyA, def.BodyB, ConsRef.Make(ConsRef.Joint, (uint)joint));
             if (joint < m_UploadedJoints) m_DirtyJoints.Add(joint);
             m_FreeJoints.Add(joint);
+            Wake(def.BodyA, WakeMode.Self);
+            Wake(def.BodyB, WakeMode.Self);
         }
 
         public void AddSpring(int bodyA, int bodyB, float3 rA, float3 rB, float stiffness, float rest)
@@ -373,11 +451,15 @@ namespace Phys.AvbdGpu
             int s = m_SpringCount++;
             m_SpringDefs[s] = new GpuSpringDef { BodyA = bodyA, BodyB = bodyB, RA = rA, RB = rB, Stiffness = stiffness, Rest = rest };
             AddLink(bodyA, bodyB, ConsRef.Make(ConsRef.Spring, (uint)s));
+            Wake(bodyA, WakeMode.Self);
+            Wake(bodyB, WakeMode.Self);
         }
 
         public void AddIgnoreCollision(int bodyA, int bodyB)
         {
             AddLink(bodyA, bodyB, ConsRef.Make(ConsRef.Ignore, 0));
+            Wake(bodyA, WakeMode.Self);   // a carried manifold of the pair must go
+            Wake(bodyB, WakeMode.Self);
         }
 
         void AddLink(int a, int b, uint r)
@@ -411,12 +493,17 @@ namespace Phys.AvbdGpu
             m_DirtyDefMin = m_DirtyDriveMin = int.MaxValue; m_DirtyDefMax = m_DirtyDriveMax = -1;
             m_PosReadStep = -1;
             m_SpawnQueue.Clear();
+            m_WakeList.Clear(); m_WakeAll = false;
             EventRanges.Clear();
             Array.Clear(m_EventsRead, 0, m_EventsRead.Length);
             AvbdGpuBuffers.Clear(Buffers.HashPrev);
             AvbdGpuBuffers.Clear(Buffers.HashCur);
             AvbdGpuBuffers.Clear(Buffers.BodyConsCount);
             AvbdGpuBuffers.Clear(Buffers.LinkStart);
+            AvbdGpuBuffers.Clear(Buffers.BodySleep);
+            AvbdGpuBuffers.Clear(Buffers.WakeMark);
+            AvbdGpuBuffers.Clear(Buffers.Counters);   // CarrySleeping runs over last step's manifold count
+            AvbdGpuBuffers.Clear(Buffers.Stats);
         }
 
         public void BuildScene(int scene)
@@ -443,7 +530,20 @@ namespace Phys.AvbdGpu
                 b.BodyVelAng.SetData(new float4[count], 0, start, count);
                 b.BodyColor.SetData(m_Uncolored, start, start, count);
                 b.BodyEvents.SetData(m_ZeroUints, start, start, count);
+                b.BodySleep.SetData(m_ZeroUints, start, start, count);   // awake, and each its own island
+                b.BodyLabel.SetData(m_Identity, start, start, count);
                 m_UploadedBodies = m_BodyCount;
+            }
+            if (m_WakeAll)
+            {
+                if (m_BodyCount > 0) b.BodySleep.SetData(m_ZeroUints, 0, 0, m_BodyCount);
+                m_WakeAll = false;
+                m_WakeList.Clear();
+            }
+            if (m_WakeList.Count > 0 && Params.Sleep)
+            {
+                m_WakeList.CopyTo(m_WakeArray, 0);
+                b.WakeList.SetData(m_WakeArray, 0, 0, m_WakeList.Count);
             }
             if (m_DirtyDefMax >= 0)
             {
@@ -548,6 +648,11 @@ namespace Phys.AvbdGpu
                 MaxContacts = (uint)c.MaxContacts, MaxCellEntries = (uint)c.MaxCellEntries, MaxLargeBodies = (uint)c.MaxLargeBodies, LargeBodyCells = (uint)c.LargeBodyCells,
                 ColorRounds = (uint)p.ColorRounds, Substep = 0,
                 TerrainSlot = GpuParams.NoTerrain,
+                SleepSteps = p.Sleep ? (uint)math.max(1, (int)math.ceil(p.SleepTime / dt)) : 0u,
+                WakeCount = p.Sleep ? (uint)m_WakeList.Count : 0u,
+                SleepDistSq = p.SleepDistance * p.SleepDistance, SleepAngleSq = p.SleepAngle * p.SleepAngle, WakeSpeedSq = p.WakeSpeed * p.WakeSpeed,
+                Relabel = StepIndex % math.max(1, p.SleepRelabelSteps) == 0 ? 1u : 0u,
+                WakeHoldSteps = (uint)math.max(1, (int)math.ceil(p.WakeHold / dt)),
             };
             if (m_Terrain != null && m_TerrainBody >= 0)
             {
@@ -566,10 +671,14 @@ namespace Phys.AvbdGpu
         /// <summary>Advances the world by Params.Dt (Params.Substeps substeps). Nothing is read back synchronously.</summary>
         public void Step()
         {
+            // a change of gravity or switching sleeping off must reach the sleeping bodies
+            if (math.any(Params.Gravity != m_LastGravity) || (m_SleepWasOn && !Params.Sleep)) WakeAll();
+            m_LastGravity = Params.Gravity; m_SleepWasOn = Params.Sleep;
             Upload();
             int substeps = math.max(1, Params.Substeps);
             FillParams(Params.Dt / substeps);
-            m_Pipeline.Ensure(math.max(1, Params.Iterations), m_ActiveColors, Params.PostStabilize, math.max(2, Params.ColorRounds), Params.Alpha, m_Terrain != null);
+            m_Pipeline.Ensure(math.max(1, Params.Iterations), m_ActiveColors, Params.PostStabilize, math.max(2, Params.ColorRounds), Params.Alpha, m_Terrain != null,
+                Params.Sleep, math.max(2, Params.SleepLabelRounds), math.max(1, Params.SleepHops));
 
             m_Watch.Restart();
             for (int s = 0; s < substeps; s++)
@@ -581,6 +690,7 @@ namespace Phys.AvbdGpu
             m_Stats.AvgStepMs = (float)(m_StepMsSum / m_StepCount);
             m_Stats.MaxStepMs = math.max(m_Stats.MaxStepMs, (float)ms);
             StepIndex++;
+            m_WakeList.Clear();
 
             if (!m_StatsRequestPending)
             {
@@ -649,6 +759,9 @@ namespace Phys.AvbdGpu
             m_Stats.ColorsUsed = (int)data[(int)StatSlot.ColorsUsed];
             m_Stats.Constraints = (int)data[(int)StatSlot.Constraints];
             m_Stats.TerrainManifolds = (int)data[(int)StatSlot.TerrainManifolds];
+            m_Stats.Sleeping = (int)data[(int)StatSlot.Sleeping];
+            m_Stats.CarriedManifolds = (int)data[(int)StatSlot.CarriedManifolds];
+            m_Stats.Woken = (int)data[(int)StatSlot.Woken];
             m_Stats.ActiveColors = m_ActiveColors;
             m_Stats.Frame++;
             AdaptColors();
@@ -729,6 +842,9 @@ namespace Phys.AvbdGpu
             s.ColorsUsed = (int)data[(int)StatSlot.ColorsUsed];
             s.Constraints = (int)data[(int)StatSlot.Constraints];
             s.TerrainManifolds = (int)data[(int)StatSlot.TerrainManifolds];
+            s.Sleeping = (int)data[(int)StatSlot.Sleeping];
+            s.CarriedManifolds = (int)data[(int)StatSlot.CarriedManifolds];
+            s.Woken = (int)data[(int)StatSlot.Woken];
             s.ActiveColors = m_ActiveColors;
             m_Stats = s;
             AdaptColors();

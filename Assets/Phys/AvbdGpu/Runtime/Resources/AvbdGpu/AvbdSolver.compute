@@ -45,6 +45,7 @@ RWStructuredBuffer<JointState> _JointStateRW;   // written by Dual
 StructuredBuffer<SpringDef> _SpringDef;
 StructuredBuffer<uint> _Counters;
 StructuredBuffer<BodyDrive> _BodyDrive;         // read by DriveKinematic, Predict
+StructuredBuffer<uint> _BodySleep;              // sleep words: sleeping bodies are frozen (Predict, Dual, Velocity skip them)
 
 int _ColorSlot;       // colour group of this primal dispatch
 int _WriteToNew;      // 1: write positions to the double buffer (overflow group)
@@ -59,7 +60,7 @@ void DriveKinematic(uint3 id : SV_DispatchThreadID)
     uint i = id.x;
     if (i >= _BodyCount) return;
     BodyDef d = _BodyDef[i];
-    if (isStatic(d) || (d.flags & (FLAG_HEADING | FLAG_ALIGN_VELOCITY)) == 0) return;
+    if (!activeBody(d, _BodySleep[i]) || (d.flags & (FLAG_HEADING | FLAG_ALIGN_VELOCITY)) == 0) return;
     if (d.flags & FLAG_ALIGN_VELOCITY)
     {
         float3 v = _BodyVelLinIn[i].xyz;
@@ -106,7 +107,7 @@ void Predict(uint3 id : SV_DispatchThreadID)
     float3 vel = _BodyVelLinIn[i].xyz;
     float3 ang = _BodyVelAngIn[i].xyz;
     float3 prev = _BodyPrevVelLinIn[i].xyz;
-    bool dynamic = !isStatic(d);
+    bool dynamic = activeBody(d, _BodySleep[i]);   // a sleeping body keeps its pose: initial = inertial = pose, like a static one
 
     // Compute inertial position (Eq 2); external drives are accelerations of the inertial pose like gravity
     float3 accelDrive = dynamic ? driveAcceleration(i, d, pos, vel) : 0;
@@ -414,10 +415,13 @@ void CommitOverflow(uint3 id : SV_DispatchThreadID)
 
 // ------------------------------------------------------------------------------------------------ Dual
 
+bool active(int i) { return i >= 0 && activeBody(_BodyDef[i], _BodySleep[i]); }
+
 void dualManifold(uint mi)
 {
     Manifold m = _ManifoldCur[mi];
     uint a = m.bodyA, b = m.bodyB;
+    if (!active((int)a) && !active((int)b)) return;   // carried over from sleeping bodies: frozen
     float3 posA = _BodyPos[a].xyz, posB = _BodyPos[b].xyz;
     float4 rotA = _BodyRot[a], rotB = _BodyRot[b];
     float3 dqALin = posA - _BodyInitialLin[a].xyz;
@@ -469,6 +473,7 @@ void dualJoint(uint ji)
     JointDef d = _JointDef[ji];
     JointState s = _JointStateRW[ji];
     if (s.broken) return;
+    if (!active(d.bodyA) && !active(d.bodyB)) return;   // a joint of sleeping bodies is frozen with them
 
     float3 pA = d.rA;
     float4 qA = float4(0, 0, 0, 1);
@@ -546,7 +551,7 @@ void Velocity(uint3 id : SV_DispatchThreadID)
     if (i >= _BodyCount) return;
     _BodyPrevVelLin[i] = _BodyVelLin[i];
     BodyDef d = _BodyDef[i];
-    if (isStatic(d)) return;
+    if (!activeBody(d, _BodySleep[i])) return;   // a sleeping body keeps its zero velocities
     _BodyVelLin[i] = float4((_BodyPos[i].xyz - _BodyInitialLin[i].xyz) / _Dt, 0);
     _BodyVelAng[i] = lockedRotation(d) ? 0 : float4(qsub(_BodyRot[i], _BodyInitialAng[i]) / _Dt, 0);
 }

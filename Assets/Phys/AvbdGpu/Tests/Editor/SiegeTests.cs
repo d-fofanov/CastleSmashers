@@ -253,9 +253,10 @@ namespace Phys.AvbdGpu.Tests
         }
 
         /// <summary>The Outpost, dry-stacked and settled for 60 steps, with the test armies around it.</summary>
-        static Arena Outpost()
+        static Arena Outpost(bool sleep = false)
         {
             var a = new Arena(8192);
+            a.World.Params.Sleep = sleep;
             var plan = CastlePlan.Presets[0];
             var layout = BrickCastle.Generate(plan);
             float scale = 5f;
@@ -289,15 +290,41 @@ namespace Phys.AvbdGpu.Tests
             GpuTestUtil.AssertFinite(a.World);
         }
 
-        /// <summary>With synchronous readbacks the whole siege is scripted by the step index: two runs are bitwise identical
-        /// (spawns are ordered on the CPU, the event atomics are order-independent).</summary>
+        /// <summary>The same siege with sleeping on: the castle and the holding units sleep between the volleys, the projectiles
+        /// wake what they hit, units still die and retire.</summary>
         [Test]
-        public void ScriptedSiegeIsBitwiseDeterministic()
+        public void SiegeOfTheOutpostRunsWithSleeping()
+        {
+            using var a = Outpost(sleep: true);
+            int sleepingMax = 0, woken = 0;
+            for (int i = 0; i < 600; i += 60)
+            {
+                a.Run(60);
+                var st = a.World.GetStatsSync();
+                sleepingMax = math.max(sleepingMax, st.Sleeping);
+                woken += st.Woken;
+            }
+            Debug.Log($"outpost siege with sleeping: {a.Siege.Summary()}; at most {sleepingMax} bodies asleep, {woken} woken in the sampled steps");
+            Assert.Greater(sleepingMax, 500, "most of the castle slept at some point between the volleys");
+            Assert.Greater(a.Siege.Volleys, 5);
+            Assert.Greater(a.Siege.ShotsFired, 20);
+            Assert.Greater(a.Siege.Dead[SiegeSystem.Attackers] + a.Siege.Dead[SiegeSystem.Defenders], 0, "arrows still kill sleeping units");
+            Assert.Greater(a.Siege.Retired, 0, "spent projectiles were retired after their cooldown");
+            foreach (var u in a.Siege.UnitList) if (u.Team == SiegeSystem.Attackers && u.State != UnitState.Dead) Assert.AreEqual(UnitState.Holding, u.State, "attackers arrived at their firing line");
+            Assert.AreEqual(0, a.World.GetStatsSync().OverflowFlags);
+            GpuTestUtil.AssertFinite(a.World);
+        }
+
+        /// <summary>With synchronous readbacks the whole siege is scripted by the step index: two runs are bitwise identical
+        /// (spawns are ordered on the CPU, the event atomics are order-independent), with or without sleeping.</summary>
+        [TestCase(false)]
+        [TestCase(true)]
+        public void ScriptedSiegeIsBitwiseDeterministic(bool sleep)
         {
             float4[] posA, rotA, posB, rotB;
             int shotsA, shotsB;
-            using (var a = Outpost()) { a.Run(300); a.World.GetPosesSync(out posA, out rotA); shotsA = a.Siege.ShotsFired; }
-            using (var b = Outpost()) { b.Run(300); b.World.GetPosesSync(out posB, out rotB); shotsB = b.Siege.ShotsFired; }
+            using (var a = Outpost(sleep)) { a.Run(300); a.World.GetPosesSync(out posA, out rotA); shotsA = a.Siege.ShotsFired; }
+            using (var b = Outpost(sleep)) { b.Run(300); b.World.GetPosesSync(out posB, out rotB); shotsB = b.Siege.ShotsFired; }
             Assert.AreEqual(shotsA, shotsB);
             Assert.Greater(shotsA, 20);
             Assert.AreEqual(posA.Length, posB.Length);

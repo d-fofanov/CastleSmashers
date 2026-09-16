@@ -38,18 +38,24 @@ void BuildArgs(uint3 id : SV_DispatchThreadID)
 {
     if (_Phase == 0)
     {
+        // last step's manifold count drives CarrySleeping: kept in its own slot across the reset
+        uint prevManifolds = _Counters[CNT_MANIFOLDS];
         for (int i = 0; i < CNT_COUNT; i++) _Counters[i] = 0;
+        _Counters[CNT_PREV_MANIFOLDS] = prevManifolds;
         writeArgs(ARG_BODIES, _BodyCount);
         writeArgs(ARG_JOINTS, _JointCount);
         writeArgs(ARG_PAIRS, 0);
         writeArgs(ARG_MANIFOLDS, 0);
         writeArgs(ARG_CONSTRAINTS, 0);
+        writeArgs(ARG_WAKE_LIST, _WakeCount);
     }
     else if (_Phase == 1)
     {
         uint pairs = min(_Counters[CNT_PAIRS], _MaxPairs);
         _Counters[CNT_PAIRS] = pairs;
         writeArgs(ARG_PAIRS, pairs);
+        // (written here rather than in phase 0: a run of stores over the contiguous slots 0..6 broke the kernel on D3D12)
+        writeArgs(ARG_PREV_MANIFOLDS, _Counters[CNT_PREV_MANIFOLDS]);
     }
     else
     {

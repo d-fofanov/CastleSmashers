@@ -9,10 +9,13 @@ namespace Phys.AvbdGpu.Tests
     /// <summary>Helpers shared by the GPU tests: paired reference / GPU scene runs and error metrics.</summary>
     public static class GpuTestUtil
     {
+        /// <summary>A test world with sleeping off (the reference has none; SleepTests switch it on themselves).</summary>
         public static AvbdGpuWorld NewWorld(int bodies = 4096)
         {
             if (!AvbdGpuKernels.Supported) Assert.Ignore("Compute shaders are not supported on this device");
-            return new AvbdGpuWorld(AvbdGpuConfig.ForBodies(bodies));
+            var world = new AvbdGpuWorld(AvbdGpuConfig.ForBodies(bodies));
+            world.Params.Sleep = false;
+            return world;
         }
 
         public struct Comparison

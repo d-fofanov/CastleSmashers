@@ -23,6 +23,7 @@ RWStructuredBuffer<uint> _ColorCursor;
 RWStructuredBuffer<uint> _ColorList;
 RWStructuredBuffer<uint> _Counters;
 RWByteAddressBuffer _DispatchArgs;
+StructuredBuffer<uint> _BodySleep;         // sleep words: sleeping bodies are coloured like static ones (not solved)
 
 // The other body of constraint r as seen from body; -1 for world anchors.
 int neighbour(uint r, uint body)
@@ -43,7 +44,7 @@ int neighbour(uint r, uint body)
     return s.bodyA == (int)body ? s.bodyB : s.bodyA;
 }
 
-bool dynamicNeighbour(int n) { return n >= 0 && !isStatic(_BodyDef[n]); }
+bool dynamicNeighbour(int n) { return n >= 0 && activeBody(_BodyDef[n], _BodySleep[n]); }
 
 // Keeps last step's colour unless a higher-priority dynamic neighbour has the same one (or the colour is out of range).
 [numthreads(AVBD_THREADS, 1, 1)]
@@ -51,7 +52,7 @@ void ColorInvalidate(uint3 id : SV_DispatchThreadID)
 {
     uint body = id.x;
     if (body >= _BodyCount) return;
-    if (isStatic(_BodyDef[body])) { _ColorOut[body] = STATIC_COLOR; return; }
+    if (!activeBody(_BodyDef[body], _BodySleep[body])) { _ColorOut[body] = STATIC_COLOR; return; }
     uint c = _ColorIn[body];
     if (c >= _ActiveColors) { _ColorOut[body] = UNCOLORED; return; }
     uint start = _BodyConsStart[body], end = _BodyConsStart[body + 1];

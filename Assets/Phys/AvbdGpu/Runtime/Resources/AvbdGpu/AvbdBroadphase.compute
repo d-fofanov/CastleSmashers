@@ -34,6 +34,7 @@ RWStructuredBuffer<uint2> _Pairs;
 StructuredBuffer<uint> _LinkStart;
 StructuredBuffer<uint2> _LinkList;         // (other body, constraint ref) sorted by other body
 StructuredBuffer<JointState> _JointState;
+StructuredBuffer<uint> _BodySleep;         // sleep words: pairs need an active body (sleeping bodies keep their old manifolds)
 
 void setOverflow(uint bit) { uint dummy; InterlockedOr(_Counters[CNT_OVERFLOW], bit, dummy); }
 
@@ -190,9 +191,14 @@ bool aabbOverlap(uint i, uint j)
     return all(mnI <= mxJ) && all(mnJ <= mxI);
 }
 
+// Dynamic, alive and awake: only such bodies get new contacts.
+bool active(uint i) { return activeBody(_BodyDef[i], _BodySleep[i]); }
+
+// Pairs need an active body: two static bodies never pair, and neither do sleeping bodies among themselves or against
+// static ones (their manifolds are carried over by the narrowphase).
 void emitPair(uint a, uint b)
 {
-    if (isStatic(_BodyDef[a]) && isStatic(_BodyDef[b])) return;
+    if (!active(a) && !active(b)) return;
     if (linked(a, b)) return;
     uint idx;
     InterlockedAdd(_Counters[CNT_PAIRS], 1, idx);
@@ -220,32 +226,39 @@ void PairGen(uint3 id : SV_DispatchThreadID)
 
     float4 mn4 = _BodyAabbMin[i];
     if (mn4.w != 0) return;   // large bodies are handled from the small bodies' side
+    bool activeI = active(i);
     float3 mnI = mn4.xyz;
     int3 cmin = cellCoord(mnI), cmax = cellCoord(_BodyAabbMax[i].xyz);
 
-    for (int z = cmin.z; z <= cmax.z; z++)
-        for (int y = cmin.y; y <= cmax.y; y++)
-            for (int x = cmin.x; x <= cmax.x; x++)
-            {
-                int3 c = int3(x, y, z);
-                uint h = cellHash(c);
-                uint start = _CellStart[h];
-                uint end = min(_CellStart[h + 1], _MaxCellEntries);
-                for (uint e = start; e < end; e++)
+    // Only an active body walks its cells: it takes every pair with an inactive (static / sleeping) body and, with
+    // another active body, the pair where it has the lower index; inactive bodies stay in the grid to be found.
+    if (activeI)
+        for (int z = cmin.z; z <= cmax.z; z++)
+            for (int y = cmin.y; y <= cmax.y; y++)
+                for (int x = cmin.x; x <= cmax.x; x++)
                 {
-                    uint j = _CellEntries[e];
-                    if (j <= i) continue;
-                    if (!aabbOverlap(i, j)) continue;
-                    // owner cell of the pair: the cell holding the min corner of the AABB intersection
-                    int3 o = cellCoord(max(mnI, _BodyAabbMin[j].xyz));
-                    if (any(o != c)) continue;
-                    emitPair(i, j);
+                    int3 c = int3(x, y, z);
+                    uint h = cellHash(c);
+                    uint start = _CellStart[h];
+                    uint end = min(_CellStart[h + 1], _MaxCellEntries);
+                    for (uint e = start; e < end; e++)
+                    {
+                        uint j = _CellEntries[e];
+                        if (j == i) continue;
+                        if (j < i && active(j)) continue;
+                        if (!aabbOverlap(i, j)) continue;
+                        // owner cell of the pair: the cell holding the min corner of the AABB intersection
+                        int3 o = cellCoord(max(mnI, _BodyAabbMin[j].xyz));
+                        if (any(o != c)) continue;
+                        emitPair(min(i, j), max(i, j));
+                    }
                 }
-            }
 
+    // The large bodies are tested from every small body, so that an active large body still finds sleeping ones
     for (uint l = 0; l < numLarge; l++)
     {
         uint L = _LargeBodies[l];
+        if (!activeI && !active(L)) continue;
         if (!aabbOverlap(i, L)) continue;
         emitPair(min(i, L), max(i, L));
     }

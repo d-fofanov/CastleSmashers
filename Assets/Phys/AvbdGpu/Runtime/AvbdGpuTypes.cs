@@ -140,7 +140,7 @@ namespace Phys.AvbdGpu
         public const int Stride = 48;
     }
 
-    /// <summary>Mirror of cbuffer AvbdParams (HLSL packing: 11 float4 registers).</summary>
+    /// <summary>Mirror of cbuffer AvbdParams (HLSL packing: 13 float4 registers).</summary>
     [StructLayout(LayoutKind.Sequential)]
     public struct GpuParams
     {
@@ -151,13 +151,37 @@ namespace Phys.AvbdGpu
         public uint JointCount, SpringCount, ActiveColors, RotatedInertia;
         public uint HashMask, CellMask, MaxPairs, MaxManifolds;
         public uint MaxContacts, MaxCellEntries, MaxLargeBodies, LargeBodyCells;
-        public uint ColorRounds, Substep, Pad0, Pad1;
+        /// <summary>SleepSteps: steps at rest before an island sleeps (0 = sleeping off); WakeCount: entries of the wake list.</summary>
+        public uint ColorRounds, Substep, SleepSteps, WakeCount;
         // the terrain (AvbdTerrain.hlsl): sample (0, 0), spacing, resolution, max-mip size, body slot (NoTerrain: none)
         public float2 TerrainOrigin, TerrainCell, TerrainInvCell;
         public uint TerrainResX, TerrainResZ, TerrainMipX, TerrainMipZ, TerrainSlot;
         public float TerrainMaxHeight;
-        public const int Stride = 176;
+        // sleeping: the rest thresholds squared, the relabel flag of this step, the squared speed above which a touch wakes an island
+        public float SleepDistSq, SleepAngleSq;
+        public uint Relabel;
+        public float WakeSpeedSq;
+        /// <summary>Steps an island woken by a fast touch stays awake at least.</summary>
+        public uint WakeHoldSteps, Pad2, Pad3, Pad4;
+        public const int Stride = 208;
         public const uint NoTerrain = 0xFFFFFFFFu;
+    }
+
+    /// <summary>Decoding of a body's sleep word (<see cref="AvbdGpuWorld.GetSleepSync"/>): bit 31 = asleep, bit 30 = woken by a
+    /// touch this step, below them the steps the body has rested within its rest anchor.</summary>
+    public static class GpuBodySleep
+    {
+        public const uint Asleep = 0x80000000u;
+        public const uint Woken = 0x40000000u;
+        public const uint CounterMask = 0x3FFFFFFFu;
+        public static bool IsAsleep(uint w) => (w & Asleep) != 0;
+        public static int RestSteps(uint w) => (int)(w & CounterMask);
+    }
+
+    /// <summary>Wake list entry modes (AvbdSleep.compute WAKE_*).</summary>
+    public static class WakeMode
+    {
+        public const uint Self = 0, Neighbours = 1, Spawn = 2;
     }
 
     /// <summary>Constraint reference packing shared with the shaders.</summary>
@@ -173,7 +197,7 @@ namespace Phys.AvbdGpu
     public enum StatSlot
     {
         Pairs = 0, Manifolds = 1, Contacts = 2, LargeBodies = 3, Overflow = 4, OverflowBodies = 5, ColorsUsed = 6, Constraints = 7, ActiveJoints = 8,
-        TerrainManifolds = 9, Count = 16
+        TerrainManifolds = 9, Sleeping = 10, CarriedManifolds = 11, Woken = 12, PrevManifolds = 13, Count = 16
     }
 
     /// <summary>Per-step statistics read back asynchronously (one or two frames old).</summary>
@@ -182,6 +206,9 @@ namespace Phys.AvbdGpu
         public int Pairs, Manifolds, Contacts, LargeBodies, OverflowBodies, ColorsUsed, Constraints;
         /// <summary>Manifolds against the terrain (counted in <see cref="Manifolds"/> as well).</summary>
         public int TerrainManifolds;
+        /// <summary>Bodies asleep at the end of the step, manifolds of sleeping bodies carried over unchanged (counted in
+        /// <see cref="Manifolds"/> as well) and sleeping bodies woken by a touch during the step.</summary>
+        public int Sleeping, CarriedManifolds, Woken;
         /// <summary>Capacity overflow bits: 1 pairs, 2 manifolds, 4 contacts, 8 cell entries, 16 large bodies, 32 unsorted cells.</summary>
         public int OverflowFlags;
         public int ActiveColors;

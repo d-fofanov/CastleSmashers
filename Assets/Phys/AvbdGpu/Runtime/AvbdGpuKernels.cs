@@ -6,15 +6,16 @@ namespace Phys.AvbdGpu
     /// <summary>The compute shaders (loaded from Resources/AvbdGpu) and their kernel indices.</summary>
     public sealed class AvbdGpuKernels
     {
-        public readonly ComputeShader Util, Scan, Broadphase, Narrowphase, Constraints, Coloring, Solver;
+        public readonly ComputeShader Util, Scan, Broadphase, Narrowphase, Constraints, Coloring, Solver, Sleep;
 
         public readonly int BuildArgs, HashClear, CopyStats, ClearUints, SpawnBodies;
         public readonly int ScanBlock, ScanTop, ScanAdd;
         public readonly int BodyAabb, GridClear, GridCount, GridScatter, GridSortCell, LargeSort, PairGen;
-        public readonly int Collide, CollideTerrain;
+        public readonly int Collide, CollideTerrain, CarrySleeping;
         public readonly int PrepareJoints, ConsClear, ConsCount, ConsFill, ConsSort;
         public readonly int ColorInvalidate, ColorRound, ColorFinalize, ColorScan, ColorScatter;
         public readonly int DriveKinematic, Predict, Primal, CommitOverflow, Dual, Velocity;
+        public readonly int WakeList, WakeTouch, WakeApply, WakeClear, LabelRound, SleepTimer, RestSpread, RestSleep;
 
         public static bool Supported => SystemInfo.supportsComputeShaders;
 
@@ -27,6 +28,7 @@ namespace Phys.AvbdGpu
             Constraints = Load("AvbdConstraints");
             Coloring = Load("AvbdColoring");
             Solver = Load("AvbdSolver");
+            Sleep = Load("AvbdSleep");
 
             BuildArgs = Util.FindKernel("BuildArgs");
             HashClear = Util.FindKernel("HashClear");
@@ -45,6 +47,7 @@ namespace Phys.AvbdGpu
             PairGen = Broadphase.FindKernel("PairGen");
             Collide = Narrowphase.FindKernel("Collide");
             CollideTerrain = Narrowphase.FindKernel("CollideTerrain");
+            CarrySleeping = Narrowphase.FindKernel("CarrySleeping");
             PrepareJoints = Constraints.FindKernel("PrepareJoints");
             ConsClear = Constraints.FindKernel("ConsClear");
             ConsCount = Constraints.FindKernel("ConsCount");
@@ -61,6 +64,14 @@ namespace Phys.AvbdGpu
             CommitOverflow = Solver.FindKernel("CommitOverflow");
             Dual = Solver.FindKernel("Dual");
             Velocity = Solver.FindKernel("Velocity");
+            WakeList = Sleep.FindKernel("WakeList");
+            WakeTouch = Sleep.FindKernel("WakeTouch");
+            WakeApply = Sleep.FindKernel("WakeApply");
+            WakeClear = Sleep.FindKernel("WakeClear");
+            LabelRound = Sleep.FindKernel("LabelRound");
+            SleepTimer = Sleep.FindKernel("SleepTimer");
+            RestSpread = Sleep.FindKernel("RestSpread");
+            RestSleep = Sleep.FindKernel("RestSleep");
         }
 
         static ComputeShader Load(string name)

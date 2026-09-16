@@ -176,9 +176,9 @@ namespace Phys.AvbdGpu.Tests
         {
             var result = new Moves();
             m_Demo.World.GetPosesSync(out var start, out _);
-            int worst = -1;
-            var log = new System.Text.StringBuilder();
             int first = m_Demo.Bodies.First, count = m_Demo.Bodies.Count;
+            int worst = first;   // stays the first piece when the sleeping castle does not move at all
+            var log = new System.Text.StringBuilder();
             var byPrefix = new System.Collections.Generic.Dictionary<string, (float sum, int n)>();
             for (int f = 1; f <= frames; f++)
             {

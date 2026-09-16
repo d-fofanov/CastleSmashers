@@ -1,9 +1,11 @@
 // Narrowphase: OBB vs OBB contact generation (port of collide.cpp of avbd-demo3d), OBB vs heightfield contact generation
 // (CollideTerrain: the box's lattice points against the terrain, mirrored by RefCollide.CollideTerrain) and manifold
 // persistence (Manifold::initialize): the previous step's manifold of the same pair is found through a hash table and its
-// per-feature penalty / lambda / stick state is carried over before the warm-start decay.
+// per-feature penalty / lambda / stick state is carried over before the warm-start decay. The manifolds of sleeping
+// bodies (CarrySleeping) are copied from the previous step unchanged: nothing they touch has moved.
 #pragma kernel Collide
 #pragma kernel CollideTerrain
+#pragma kernel CarrySleeping
 
 #include "AvbdCommon.hlsl"
 #include "AvbdTerrain.hlsl"
@@ -34,6 +36,7 @@ RWStructuredBuffer<Manifold> _ManifoldCur;
 RWStructuredBuffer<Contact> _ContactsCur;
 RWStructuredBuffer<uint> _HashCur;
 RWStructuredBuffer<uint> _BodyEvents;      // FLAG_REPORT_EVENTS bodies: kinds touched, count of new projectile manifolds
+StructuredBuffer<uint> _BodySleep;         // sleep words: sleeping bodies get no new contacts, their old ones are carried
 
 // Per-thread scratch in group shared memory: FXC cannot dynamically index register arrays with data-dependent
 // trip counts, group shared memory can be indexed freely. Two clip polygons and the contact set per thread.
@@ -458,6 +461,20 @@ bool reserveManifold(int n, out uint midx, out uint cstart)
     return ok;
 }
 
+// Inserts manifold midx of pair (a, b) into this step's hash table (open addressing; slot value = index + 1).
+void insertHash(uint a, uint b, uint midx)
+{
+    uint h = pairHash(a, b);
+    [loop]
+    for (int probe = 0; probe < MAX_PROBES; probe++)
+    {
+        uint old;
+        InterlockedCompareExchange(_HashCur[h], 0, midx + 1, old);
+        if (old == 0) break;
+        h = (h + 1) & _HashMask;
+    }
+}
+
 // Writes manifold midx of pair (a, b) from the n contact points in thread t's scratch (gs_xA / gs_xB / gs_feature, world
 // points on A and B) into contacts cstart ..: warm start from the previous step's manifold by feature key, C0 at x-, the
 // events, the manifold record and its hash entry.
@@ -512,17 +529,7 @@ void emitManifold(uint t, int n, uint midx, uint cstart, uint a, uint b, BodyDef
     m.normal = basis[0]; m.tangent1 = basis[1]; m.tangent2 = basis[2];
     m.pad = 0;
     _ManifoldCur[midx] = m;
-
-    // Insert into this step's hash table (open addressing; slot value = index + 1)
-    uint h = pairHash(a, b);
-    [loop]
-    for (int probe = 0; probe < MAX_PROBES; probe++)
-    {
-        uint old;
-        InterlockedCompareExchange(_HashCur[h], 0, midx + 1, old);
-        if (old == 0) break;
-        h = (h + 1) & _HashMask;
-    }
+    insertHash(a, b, midx);
 }
 
 [numthreads(AVBD_THREADS, 1, 1)]
@@ -559,7 +566,7 @@ void CollideTerrain(uint3 id : SV_DispatchThreadID, uint3 gtid : SV_GroupThreadI
     if (i >= _BodyCount || _TerrainSlot == NO_TERRAIN) return;
     uint t = gtid.x;
     BodyDef d = _BodyDef[i];
-    if (isStatic(d)) return;
+    if (!activeBody(d, _BodySleep[i])) return;   // a sleeping body keeps last step's terrain manifold (CarrySleeping)
     float3 mn = _BodyAabbMin[i].xyz, mx = _BodyAabbMax[i].xyz;
     if (mn.y > terrainMaxOver(mn.xz, mx.xz)) return;
 
@@ -618,4 +625,31 @@ void CollideTerrain(uint3 id : SV_DispatchThreadID, uint3 gtid : SV_GroupThreadI
     emitManifold(t, count, midx, cstart, i, b, d, _BodyDef[b], pos, rot, _BodyPos[b].xyz, _BodyRot[b], basis);
     uint dummy;
     InterlockedAdd(_Counters[CNT_TERRAIN], 1, dummy);
+}
+
+// ------------------------------------------------------------------------------------------------ sleeping
+
+// One thread per manifold of the previous step: a manifold none of whose bodies is active (both asleep, or asleep against
+// a static body or the terrain) is copied into this step unchanged - no warm-start decay, no new C0: nothing moved. Pairs
+// with an active body are recomputed by Collide / CollideTerrain instead, and a retired body takes its manifolds with it.
+[numthreads(AVBD_THREADS, 1, 1)]
+void CarrySleeping(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Counters[CNT_PREV_MANIFOLDS]) return;
+    Manifold m = _ManifoldPrev[id.x];
+    uint a = m.bodyA, b = m.bodyB;
+    BodyDef dA = _BodyDef[a], dB = _BodyDef[b];
+    if (isDead(dA) || isDead(dB)) return;
+    if (activeBody(dA, _BodySleep[a]) || activeBody(dB, _BodySleep[b])) return;
+    uint midx, cstart;
+    if (!reserveManifold((int)m.numContacts, midx, cstart)) return;
+    [loop]
+    for (uint i = 0; i < m.numContacts; i++)
+        _ContactsCur[cstart + i] = _ContactsPrev[m.contactStart + i];
+    m.contactStart = cstart;
+    _ManifoldCur[midx] = m;
+    insertHash(a, b, midx);
+    uint dummy;
+    InterlockedAdd(_Counters[CNT_CARRIED], 1, dummy);
+    if (b == _TerrainSlot) InterlockedAdd(_Counters[CNT_TERRAIN], 1, dummy);
 }

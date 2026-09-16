@@ -54,7 +54,7 @@ namespace Phys.AvbdGpu.Tests
             Assert.AreEqual(m_Demo.BrickCount, m_Demo.Renderer.MeshRanges[0].Count);
             m_Demo.World.GetPosesSync(out var start, out _);
             float maxMove = 0f;
-            int worst = -1;
+            int worst = m_Demo.FirstBrick;   // stays the first brick when the sleeping castle does not move at all
             var log = new System.Text.StringBuilder();
             for (int f = 1; f <= 180; f++)   // three seconds; the displacement is logged along the way to tell settling from creep
             {
@@ -87,7 +87,7 @@ namespace Phys.AvbdGpu.Tests
             Assert.Greater(m_Demo.BrickCount, 30000, "the largest preset");
             m_Demo.World.GetPosesSync(out var start, out _);
             float maxMove = 0f, maxDown = 0f, maxSide = 0f;
-            int worst = -1;
+            int worst = m_Demo.FirstBrick;
             var log = new System.Text.StringBuilder();
             AvbdGpuStats stats = default;
             for (int f = 1; f <= 240; f++)

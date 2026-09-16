@@ -19,6 +19,19 @@
 #define ALIGN_MIN_SPEED 1.0     // below this speed an align-to-velocity body keeps its orientation (a stuck arrow)
 #define HIT_MIN_SPEED 2.0       // a projectile slower than this does not count as a hit in the event words
 
+// Sleep word (_BodySleep, GPU-owned): bit 31 = asleep, bit 30 = woken by a touch this step (its manifolds were carried, not
+// recomputed, so it may not fall asleep again before the next step), bits 0..29 = steps at rest within the rest anchor.
+#define SLEEP_ASLEEP 0x80000000u
+#define SLEEP_WOKEN 0x40000000u
+#define SLEEP_COUNTER_MASK 0x3FFFFFFFu
+#define SLEEP_COUNTER_MAX 0x20000000u
+
+// Wake list entries (_WakeList.y, uploaded by the CPU): wake the body; wake the bodies of its previous constraint list
+// (a retired support); a spawn (sleep word and island label reset).
+#define WAKE_SELF 0u
+#define WAKE_NEIGHBOURS 1u
+#define WAKE_SPAWN 2u
+
 // Body flags (BodyDef.flags, mirrored by GpuBodyDef).
 #define FLAG_STATIC 1u
 #define FLAG_LOCK_ROTATION 2u   // the angular degrees of freedom are frozen (3x3 primal solve, no angular velocity)
@@ -67,6 +80,10 @@
 #define CNT_CONSTRAINTS 7       // manifolds + joints + springs (dual / CSR index space)
 #define CNT_ACTIVE_JOINTS 8
 #define CNT_TERRAIN 9           // manifolds against the terrain (a subset of CNT_MANIFOLDS)
+#define CNT_SLEEPING 10         // bodies asleep at the end of the step
+#define CNT_CARRIED 11          // manifolds of sleeping bodies carried over unchanged (a subset of CNT_MANIFOLDS)
+#define CNT_WOKEN 12            // sleeping bodies woken by a touch this step
+#define CNT_PREV_MANIFOLDS 13   // last step's manifold count (CarrySleeping runs over last step's list)
 #define CNT_COUNT 16
 
 // Indirect dispatch argument slots (uint3 each, byte offset = slot * 12).
@@ -75,6 +92,8 @@
 #define ARG_MANIFOLDS 2
 #define ARG_CONSTRAINTS 3
 #define ARG_JOINTS 4
+#define ARG_PREV_MANIFOLDS 5    // last step's manifold count (CarrySleeping)
+#define ARG_WAKE_LIST 6         // the CPU wake list
 #define ARG_COLOR0 8            // 33 slots: colours 0..31 and the overflow group at _ActiveColors
 #define ARG_COUNT (ARG_COLOR0 + MAX_COLORS + 1)
 
@@ -189,7 +208,8 @@ cbuffer AvbdParams
     uint _LargeBodyCells;       // bodies spanning more cells than this go to the large-body list
     uint _ColorRounds;
     uint _Substep;
-    uint _Pad0, _Pad1;
+    uint _SleepSteps;           // steps at rest before an island sleeps; 0: sleeping off
+    uint _WakeCount;            // entries of the CPU wake list this step
     // the terrain (AvbdTerrain.hlsl): the heightfield's sample (0, 0), spacing, resolution, max-mip size, body slot
     float2 _TerrainOrigin;
     float2 _TerrainCell;
@@ -200,6 +220,13 @@ cbuffer AvbdParams
     uint _TerrainMipZ;
     uint _TerrainSlot;          // 0xFFFFFFFF: no terrain
     float _TerrainMaxHeight;
+    // sleeping: rest thresholds (squared), the relabel step flag, the speed above which a touch wakes a whole island
+    float _SleepDistSq;
+    float _SleepAngleSq;
+    uint _Relabel;              // 1: awake bodies restart their island labels from their own index this step
+    float _WakeSpeedSq;
+    uint _WakeHoldSteps;        // an island woken by a fast touch stays awake at least this long
+    uint _Pad2, _Pad3, _Pad4;
 };
 
 // ------------------------------------------------------------------------------------------------ quaternions
@@ -429,5 +456,10 @@ bool isStatic(BodyDef d) { return d.mass <= 0.0 || (d.flags & FLAG_DEAD) != 0; }
 bool isDead(BodyDef d) { return (d.flags & FLAG_DEAD) != 0; }
 bool isTerrain(BodyDef d) { return (d.flags & FLAG_TERRAIN) != 0; }
 bool lockedRotation(BodyDef d) { return (d.flags & (FLAG_LOCK_ROTATION | FLAG_HEADING | FLAG_ALIGN_VELOCITY)) != 0; }
+
+// Sleeping (the sleep word of _BodySleep): an asleep body is frozen and, like a static one, takes no part in the solve;
+// an active body is dynamic, alive and awake. With sleeping off no word counts as asleep.
+bool asleepWord(uint w) { return _SleepSteps != 0 && (w & SLEEP_ASLEEP) != 0; }
+bool activeBody(BodyDef d, uint sleepWord) { return !isStatic(d) && !asleepWord(sleepWord); }
 
 #endif
