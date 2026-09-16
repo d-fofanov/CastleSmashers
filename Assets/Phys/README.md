@@ -3,15 +3,17 @@
 3D rigid-box physics in compute shaders: frictional contacts, ball-socket joints with angular locks and fracture
 (torque, or directional snap limits), springs, ignore-collision links, driven bodies (external forces, velocity motors,
 locked or kinematic orientation), body pools with contact events for units and projectiles, a heightfield terrain
-(imported from a Unity Terrain, a heightmap texture or generated). The algorithm is Augmented
+(imported from a Unity Terrain, a heightmap texture or generated), sleeping (resting bodies and their neighbourhoods
+freeze until touched, whole islands waking on an impact). The algorithm is Augmented
 Vertex Block Descent (Giles, Diaz, Yuksel, SIGGRAPH 2025) exactly as in the author's reference implementation
 `avbd-demo3d`; the whole step — broadphase, narrowphase with persisted manifolds, graph colouring, colour-batched primal
 sweeps, dual updates, velocities — runs on the GPU and nothing is read back for rendering. See
 [ALGORITHMS.md](ALGORITHMS.md) for the pipeline and [BRICK_ASSEMBLY.md](BRICK_ASSEMBLY.md) for the JSON format in which
 models built from the construction-piece pack are exchanged with other agents.
 
-* **Runtime** (`Phys.AvbdGpu`) — `AvbdGpuWorld` (bodies, joints, springs, links, drives, terrain, `Step()`), `BodyPool`
-  (retired slots reused by later spawns), buffers, command-buffer recording, seven `.compute` files (`Resources/AvbdGpu`).
+* **Runtime** (`Phys.AvbdGpu`) — `AvbdGpuWorld` (bodies, joints, springs, links, drives, terrain, sleeping, `Step()`),
+  `BodyPool` (retired slots reused by later spawns), buffers, command-buffer recording, eight `.compute` files
+  (`Resources/AvbdGpu`).
 * **Reference** (`Phys.AvbdRef`) — line-for-line C# port of `avbd-demo3d` (the test oracle), plus the terrain extension.
 * **Scenes** (`Phys.AvbdGpu.Scenes`) — the 14 reference scenes, 3 GPU benchmark scenes and a terrain scene behind an
   `ISceneBuilder` interface that both solvers implement; `Heightfield`, the terrain data type (sampling, generation,
@@ -34,7 +36,7 @@ models built from the construction-piece pack are exchanged with other agents.
 ```
 Assets/Phys/AvbdGpu/Runtime            AvbdGpuWorld, BodyPool, AvbdGpuPipeline, AvbdGpuBuffers, AvbdGpuKernels, AvbdGpuTypes, AvbdGpuConstants
 Assets/Phys/AvbdGpu/Runtime/Resources  AvbdCommon.hlsl, AvbdTerrain.hlsl, AvbdUtil, AvbdScan, AvbdBroadphase, AvbdNarrowphase, AvbdConstraints,
-                                       AvbdColoring, AvbdSolver, AvbdDebug (.compute)
+                                       AvbdColoring, AvbdSolver, AvbdSleep, AvbdDebug (.compute)
 Assets/Phys/AvbdGpu/Reference          RefMath, RefBodies, RefJoint (+Spring), RefManifold, RefCollide (boxes, terrain), RefSolver, RefSceneBuilder
 Assets/Phys/AvbdGpu/Scenes             AvbdScenes (catalog + ISceneBuilder), Heightfield (terrain samples, normals, max mip, presets, plateau),
                                        BrickCastle (brick, layout, castle plans, snap joints),
@@ -43,7 +45,7 @@ Assets/Phys/AvbdGpu/Siege              SiegeSpec (figure and arrow models as box
 Assets/Phys/AvbdGpu/Presentation       AvbdGpuRenderer, TerrainView, TerrainTiles, Resources/AvbdGpu/AvbdBox.shader (+ AvbdBodyInstancing.hlsl),
                                        AvbdTiles.shader (+ AvbdTileInstancing.hlsl), AvbdLines.shader, AvbdTerrainLit.mat
 Assets/Phys/AvbdGpu/Tests/Editor       ReferenceTests, GpuKernelTests, GpuVsReferenceTests, InvariantTests, DriveTests, BodyPoolTests, SiegeTests,
-                                       SnapFractureTests, BrickCastleTests, BrickAssemblyTests, TerrainTests, PerformanceTests, DiagnosticTests
+                                       SnapFractureTests, BrickCastleTests, BrickAssemblyTests, TerrainTests, SleepTests, PerformanceTests, DiagnosticTests
 Assets/Phys/AvbdGpu/Tests/Runtime      DemoSmokeTests, CastleSmokeTests, SiegeSmokeTests, PreviewSmokeTests
 Assets/Phys/Demo                       Demo.unity, Castle.unity, Preview.unity, DemoBase, DemoBootstrap, CastleDemo, PreviewDemo, DemoCamera,
                                        Editor/BuildDemo (player builds, mesh assignment, the Outpost export)
@@ -147,7 +149,33 @@ faster than 2 m/s (a spent arrow lying about hurts nobody). Slot rules: a retire
 its retirement (`BodyPool` keeps it back until then), and joints, springs and links on a body must be removed before it is
 retired (the world checks the links; a world-anchored joint, like the demo's drag, is the caller's to release).
 
-## Parameters (`AvbdGpuParams`, defaults = reference)
+### Sleeping
+
+```csharp
+world.Params.Sleep = true;             // the default; off = every body is simulated every step, as in the reference
+world.WakeBody(box);                   // wakes a body (and, through its contacts, what it then sets in motion)
+world.WakeAll();                       // after changing something the solver cannot see (all bodies, next step)
+bool asleep = GpuBodySleep.IsAsleep(world.GetSleepSync()[box]);   // sync readback (tests); the stats count the sleepers
+```
+
+A body that has stayed within `SleepDistance` / `SleepAngle` of its rest pose for `SleepTime`, with every body within
+`SleepHops` contacts or joints of it resting as well, falls asleep: it is frozen with zero velocities, its manifolds and
+joint states are carried from step to step unchanged (no warm-start decay: a sleeping castle stops creeping), it produces no
+pairs, is not coloured and takes no part in the solve, so a resting scene costs the broadphase and the fixed dispatch
+overhead only. Sleeping bodies stay in the grid, so awake bodies find them: a contact with an awake body that is not
+resting wakes the sleeper **in the same step**, before anything is solved — the touched body alone when the toucher is
+slow, the sleeper's whole **island** (every body connected to it through contacts and joints, tracked on the GPU) when the
+toucher is faster than `WakeSpeed`, so a cannonball into a wall moves the wall and never bounces off a frozen one. A
+resting toucher wakes nothing: a pile creeping below the thresholds leans on its frozen neighbours instead of keeping
+them awake. Islands woken by an impact stay awake for `WakeHold`, long enough for whatever lost its support to start
+falling; a body woken by a slow touch that does not move goes back to sleep as soon as its neighbourhood allows.
+
+Changes made through the world wake by themselves: spawns, a changed drive (an identical one does not, so holding units
+sleep), flags, joints and springs added, removed or re-anchored, ignore links, a retired body (what rested on it wakes),
+the terrain and gravity (everything). A body drawn in the `Sleep` colour mode (`F2`) shows its island in a dim hashed
+colour while asleep.
+
+## Parameters (`AvbdGpuParams`, defaults = reference, sleeping on)
 
 | Parameter | Default | Meaning |
 |---|---|---|
@@ -160,6 +188,11 @@ retired (the world checks the links; a world-anchored joint, like the demo's dra
 | `RotatedInertia` | off | `R I Rᵀ` (paper Eq. 8) instead of the reference's body-frame diagonal |
 | `CellSize` | 0 = auto | grid cell size (auto: 2 × mean extent of the dynamic bodies) |
 | `ColorRounds` | 8 | Jones–Plassmann rounds per step |
+| `Sleep` | on | freeze resting neighbourhoods (below); off reproduces the reference step for step |
+| `SleepTime`, `SleepDistance`, `SleepAngle` | 0.5 s, 2 cm, 0.02 rad | a body rests once it stayed this close to its rest pose this long |
+| `SleepHops` | 2 | how far (contacts / joints) the neighbourhood must rest before a body sleeps |
+| `WakeSpeed`, `WakeHold` | 0.25 m/s, 0.15 s | a faster touch wakes the whole island, which then stays awake this long |
+| `SleepLabelRounds`, `SleepRelabelSteps` | 4, 60 | island label rounds per step; awake bodies restart their labels this often |
 
 Constants (`AvbdGpuConstants` / `AvbdCommon.hlsl`): penalty bounds 1 .. 1e10, collision margin 0.01, stick
 threshold 1e-5, hard stiffness ≥ 1e30 (`float.PositiveInfinity` accepted), 8 contacts per manifold, 32 colours,
@@ -186,13 +219,15 @@ Open `Assets/Phys/Demo/Demo.unity` and press Play, or build with `Phys / Build D
 Keys: `1-0` scene, `,` `.` previous / next scene (18 scenes: the 14 reference scenes, then pyramid 22k, pile 50k,
 pyramid 74k, and Terrain: a hundred boxes dropped on hills), `R` reset, `Space` pause, `N` step, `F1` contact crosses
 (red sliding, green sticking), `F2` colour mode
-(palette / graph colour / uniform), `F3` post-stabilise, `F4` rotated inertia, `F5` joint lines, `+/-` iterations,
+(palette / graph colour / uniform / sleep: sleeping bodies dimmed in the colour of their island), `F3` post-stabilise,
+`F4` rotated inertia, `F5` joint lines, `F8` sleeping on/off, `+/-` iterations,
 `[ ]` substeps, `B` / `Enter` shoot a box, `G` gravity on/off, `H` hide HUD. Left drag pulls a body with a soft world
-joint (5000 N/m), right drag orbits, middle drag pans, wheel / `Q` `E` zoom, `W A S D` orbit.
+joint (5000 N/m), right drag orbits, middle drag pans, wheel / `Q` `E` zoom, `W A S D` orbit. The HUD counts the
+sleeping bodies, the bodies woken in the step and the carried manifolds.
 
 Player flags: `-avbd-scene n`, `-avbd-screenshot file [-avbd-frames n]` (screenshot then quit),
 `-avbd-bench [-avbd-frames n]` (average frame time of the second half of the run logged, then quit),
-`-avbd-yaw deg -avbd-pitch deg -avbd-distance m` (camera), `-avbd-shoot n` (fire a box at frame n).
+`-avbd-yaw deg -avbd-pitch deg -avbd-distance m` (camera), `-avbd-shoot n` (fire a box at frame n), `-avbd-nosleep`.
 
 ## Castle demo
 
@@ -366,19 +401,34 @@ Step times (solver only, `PerformanceTests`, GPU synchronised once after 60-120 
 | Pyramid 74k | 73 811 | 305 k / 1.19 M | | 17.4 ms | 37 ms (27 fps) |
 | Pyramid 22k on a heightfield | 22 141 | 85 k / 345 k (1 600 terrain manifolds) | 6.5 ms | | |
 | Terrain (100 boxes on hills) | 101 | 109 / 396 | 0.8 ms | | |
+| Pyramid (16 rows), asleep | 137 | 287 carried | 0.76 ms | | |
+| Pyramid 22k, asleep | 22 141 | 85 k carried | 1.8 ms | | |
+| Stronghold (17k bricks, castle scale, 1 substep), awake / asleep | 17 130 | 38 k / 157 k | 4.7 ms / 1.8 ms | | |
 
 Small scenes are bound by the ~130 indirect dispatches of a step (about 1.5 ms); large piles by the contact traffic
 of the primal sweeps (every iteration re-reads every contact from both bodies), so the iteration count is the main
 knob — the paper uses 4 for its large piles. CPU time per step is 0.1-1 ms (parameter upload, command buffer
 submission). The terrain pass costs what the ground box did: the 22k pyramid on a flat heightfield instead of the box
 steps in 6.5 ms against 6.4 (its 1 600 base cubes carry 8 terrain contacts each instead of 4 box contacts); bodies
-above the surface leave the pass at the mip test.
+above the surface leave the pass at the mip test. Asleep, a scene costs its broadphase (the sleepers stay in the grid but
+walk no cells), the copy of its carried manifolds and the fixed overhead: the 22k pyramid sleeps whole 3 s after it is
+built (the small pyramid 6 s, its top creeps longer) and the 17k castle 4 s, and both step in 1.8 ms from then on; the
+Outpost under siege sleeps between the volleys with its holding units, and its arrows wake what they hit.
 
 ## Known limits
 
-* Boxes only (the narrowphase is `collide.cpp`); no sleeping; discrete contacts at `x⁻`, so very fast small bodies
-  can tunnel (the reference behaves the same); bodies are retired into pools rather than removed (a retired slot keeps
-  its thread in the per-body kernels and its instance in the draw, both idle).
+* Boxes only (the narrowphase is `collide.cpp`); discrete contacts at `x⁻`, so very fast small bodies can tunnel (the
+  reference behaves the same); bodies are retired into pools rather than removed (a retired slot keeps its thread in the
+  per-body kernels and its instance in the draw, both idle).
+* Sleeping freezes what moves slower than `SleepDistance / SleepTime` (4 cm/s): a tower toppling that slowly stops
+  mid-lean, and a pile whose creep stays below it stops creeping (a feature for a castle). A body woken by an impact keeps
+  the contact multipliers it fell asleep with (no decay while asleep), and the woken bodies are coloured afresh, so at
+  10 iterations an impact on a sleeping pile ends a little differently from the same impact on an awake one — as much as
+  the Gauss–Seidel order already changes an impact (`SleepTests`: the same boxes fly, the momentum of the hit box within
+  a third at 10 iterations, within 5 % at 40). A fast body in sustained contact with an island keeps the whole island
+  awake (a unit rubbing along the castle wall); a scene that never rests never sleeps (the 50k pile at 10 iterations
+  keeps popping cubes out of its depths for a minute). Island labels only merge between relabels, so debris stays in its
+  old island for up to `SleepRelabelSteps` after coming apart (a touch on it wakes the old island meanwhile).
 * One terrain per world, with one friction value, touched by dynamic bodies only; it is sampled at a box's 26 lattice
   points, so terrain features smaller than about half a box extent can poke into a face between them, and a body more
   than its size below the surface is pushed out along the local normal (a heightfield has no other side). Unity terrains
@@ -406,6 +456,7 @@ above the surface leave the pass at the mip test.
 .\RunTests.ps1 -Platform EditMode -Filter Phys.AvbdGpu.Tests.BrickAssemblyTests  # the brick-assembly format: catalog, parsing, rejection, boxes, snaps
 .\RunTests.ps1 -Platform PlayMode -Filter Phys.AvbdGpu.Tests.PreviewSmokeTests  # the JSON castles: the Outpost and the re-bonded citadel stand dry and snapped
 .\RunTests.ps1 -Platform EditMode -Filter Phys.AvbdGpu.Tests.TerrainTests        # the heightfield, the reference terrain contacts, the GPU against them
+.\RunTests.ps1 -Platform EditMode -Filter Phys.AvbdGpu.Tests.SleepTests          # sleeping: freezing, islands, same-step wakes, gameplay wakes, determinism
 ```
 
 `DriveTests` check the drives against the implicit Euler parabola and the reference mirror (constant force 1e-5, motor
@@ -420,7 +471,17 @@ reference's terrain contacts (eight sticking points under a resting box carrying
 the reference on those scenes, the early-out (hovering boxes get no terrain manifold) and the bitwise determinism of the
 Terrain scene, and the tile layout of the tiled style (tiles of three sizes covering the field once, tops on the step grid,
 risers closed); the PlayMode smoke tests put the Outpost on hills with its siege, the Outpost document on a ridge and the
-Terrain scene through the demo with the terrain drawn smooth and tiled and imported back. `BrickAssemblyTests` check the piece catalog against the pack's manifest,
+Terrain scene through the demo with the terrain drawn smooth and tiled and imported back. `SleepTests` check that the settled
+pyramid sleeps whole (no pairs, every manifold carried, one island label, poses bitwise constant and velocities zero
+afterwards), that two stacks are two islands, that a box sliding into a sleeping stack wakes the whole stack in the impact
+step and leaves the other stack asleep (the hit box takes its momentum at once), that a resting box beside a moving one stays
+awake and both sleep once it stops, that a retired support drops what rested on it, that drives, joints, flags and a dropped
+box wake, that debris knocked off a stack becomes its own island after a relabel, that an impact on the sleeping pyramid
+matches the awake run (the same boxes displaced; the momentum of the hit box within a third at 10 iterations and 5 % at
+40), that a hanging chain and a snapped pair sleep with their joint states frozen and wake as islands, and that two runs
+with sleeping are bitwise identical; `SiegeTests` run the Outpost siege with sleeping (the castle sleeps between the
+volleys, arrows still kill, the run is still bitwise reproducible). All other GPU tests run with sleeping off
+(`GpuTestUtil.NewWorld`): the reference has none. `BrickAssemblyTests` check the piece catalog against the pack's manifest,
 the rotation convention against `Quaternion.Euler`, the format's examples and error cases, the boxes of upright and lying
 pieces, the snapped bridge on the reference solver, the expansion and diagnostics of the citadel as designed and as
 re-bonded, and the Outpost round trip (planner to document to bodies: the same pivots and the same snap joints as

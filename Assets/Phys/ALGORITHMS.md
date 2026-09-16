@@ -27,23 +27,29 @@ the tangents and the contact points are computed once per step, and the constrai
 ## Pipeline
 
 Every kernel is recorded once into a `CommandBuffer`; every count-dependent dispatch is indirect, so the buffer is
-re-recorded only when the iteration count, the post-stabilisation flag or the active colour count changes. Per-step
-constants (dt, gravity, α, β, γ, counts) live in one constant buffer.
+re-recorded only when the iteration count, the post-stabilisation flag, the active colour count, the terrain or the
+sleeping settings change. Per-step constants (dt, gravity, α, β, γ, counts, the sleep thresholds) live in one constant
+buffer.
 
-0. **Kinematic orientations** (`DriveKinematic`): bodies with a heading take `RotateY(yaw)` from their drive, bodies that
-   align to their velocity take `LookRotation(v⁻, up)` (the previous step's velocity, while faster than 1 m/s). This runs
-   before collision detection so that the step's contacts see the orientation the body will keep.
+0. **CPU wakes** (`WakeList`): the bodies the application changed since the last step (spawned, re-driven, re-flagged,
+   jointed, or the neighbours of a retired body, found through last step's constraint lists) get their sleep words
+   cleared, so that their contacts are recomputed below. Then the **kinematic orientations** (`DriveKinematic`): bodies
+   with a heading take `RotateY(yaw)` from their drive, bodies that align to their velocity take `LookRotation(v⁻, up)`
+   (the previous step's velocity, while faster than 1 m/s). This runs before collision detection so that the step's
+   contacts see the orientation the body will keep.
 1. **World AABBs** (`BodyAabb`) at `x⁻`, expanded by the collision margin. Bodies spanning more than 64 grid cells
    (the 100 m grounds) go to a small *large-body list* that every body tests brute force instead of the grid. Retired
    slots get an empty AABB and enter neither the grid nor the list.
 2. **Hashed uniform grid** (`GridCount` → scan → `GridScatter` → `GridSortCell`): every body is inserted into every
    cell its AABB overlaps (counting sort with atomics and an exclusive scan); each bucket is then sorted by body index.
    The cell size defaults to twice the mean extent of the dynamic bodies.
-3. **Pairs** (`PairGen`): a body walks its cells and considers bucket entries with a higher index. A pair is emitted
-   only from the cell that contains the minimum corner of the two AABBs' intersection (*owner-cell rule*), so a pair
-   overlapping many cells is emitted exactly once and hash aliasing can only add candidates that the AABB test
-   rejects. Static–static pairs are skipped, and pairs joined by a joint (unless broken), a spring or an
-   ignore-collision link are filtered through a sorted per-body link list.
+3. **Pairs** (`PairGen`): an *active* body (dynamic, alive and awake) walks its cells and takes every pair with an
+   inactive body (static or asleep) and, with another active body, the pair in which it has the lower index; inactive
+   bodies stay in the grid to be found but walk nothing, and a pair without an active body is never emitted (the
+   manifolds of sleeping bodies are carried instead, below). A pair is emitted only from the cell that contains the
+   minimum corner of the two AABBs' intersection (*owner-cell rule*), so a pair overlapping many cells is emitted exactly
+   once and hash aliasing can only add candidates that the AABB test rejects. Pairs joined by a joint (unless broken), a
+   spring or an ignore-collision link are filtered through a sorted per-body link list.
 4. **Narrowphase** (`Collide`): the reference's OBB test — SAT over 15 axes with an edge preference tolerance, face
    clipping (incident face against the reference face's side planes, up to 8 points, feature keys from the reference
    axis, incident axis and vertex index) or closest points of the two support edges. The previous step's manifold of
@@ -66,13 +72,30 @@ constants (dt, gravity, α, β, γ, counts) live in one constant buffer.
    unrolled loops over a register array of distances and re-samples the chosen points, FXC having no data-dependent
    indexing of local arrays. `AvbdTerrain.hlsl` mirrors `Heightfield.cs` and `RefCollide.CollideTerrain` operation for
    operation; the GPU and the CPU reference agree to rounding.
+   **Carried manifolds** (`CarrySleeping`, one thread per manifold of the previous step): a manifold none of whose
+   bodies is active — both asleep, or asleep against a static body or the terrain — is copied into this step's pools
+   unchanged (contacts, penalties, multipliers, stick anchors; no decay, no new `C0`: nothing moved) and hashed like a new
+   one. A retired body takes its manifolds with it.
+   **Touches** (`WakeTouch` → `WakeApply` → `WakeClear`): every constraint joining a sleeping body to an awake one that
+   is not resting marks the sleeper (a bit at its index) or, when the awake body is faster than `WakeSpeed`, its whole
+   island (a bit at the island's representative); every marked body and every body whose island is marked has its
+   asleep bit cleared before anything is solved (see *Sleeping* below).
 5. **Joints** (`PrepareJoints`): `C0` of the ball-socket and the angular lock at `x⁻`, decay, penalty capped at the
-   material stiffness.
+   material stiffness; a joint without an active body is left as it is, frozen with its bodies.
 6. **Constraint lists** (`ConsCount` → scan → `ConsFill` → `ConsSort`): a CSR list per dynamic body of the manifolds,
-   joints and springs touching it. Each list is sorted by a canonical key (the neighbour index for manifolds, the
-   CPU-assigned index for joints and springs), so the accumulation order of the local system is deterministic.
+   joints and springs touching it (sleeping bodies included: the islands, the rest propagation and the wakes walk these
+   lists). Each list of an active body is sorted by a canonical key (the neighbour index for manifolds, the CPU-assigned
+   index for joints and springs), so the accumulation order of the local system is deterministic; the lists of sleeping
+   bodies stay unsorted.
+   **Islands** (`LabelRound` × R): every dynamic body carries a label, the index of a representative body of its
+   island; a round replaces it by the minimum of its own label, the label of its label (pointer jumping) and its dynamic
+   neighbours' labels (Jacobi, ping-pong buffers), so a component converges to the least index in it in about
+   log₂(diameter) rounds — four rounds per step converge a 100-hop wall within two steps. Labels only merge, so every
+   `SleepRelabelSteps` the awake bodies restart from their own index (sleeping bodies keep theirs: their connectivity is
+   frozen) and bodies that came apart become separate islands again.
 7. **Colouring** (`ColorInvalidate` → `ColorRound` × R → `ColorFinalize` → `ColorScan` → `ColorScatter`): bodies that
-   share a constraint must not be updated in the same parallel pass. Last step's colours are kept unless a
+   share a constraint must not be updated in the same parallel pass; sleeping bodies are coloured like static ones (they
+   are not solved and constrain no colour). Last step's colours are kept unless a
    higher-priority neighbour (hashed index) has the same one; uncoloured bodies then take the smallest colour that is
    free among coloured neighbours whenever every uncoloured neighbour has lower priority (Jones–Plassmann greedy, a
    few rounds). Whatever is still uncoloured joins the *overflow group*, which is updated Jacobi style with double
@@ -82,11 +105,17 @@ constants (dt, gravity, α, β, γ, counts) live in one constant buffer.
    adaptive initial guess (gravity weighted by the measured acceleration, the drive added whole), `x⁻`.
 9. **Iterations**: for every colour a `Primal` dispatch updates its bodies in place (they never read each other), the
    overflow group writes to a second buffer and is committed; then `Dual` updates every manifold and joint in
-   parallel; the last iteration ends with `Velocity` (`v = (x − x⁻)/h`, `ω = 2 (q q⁻⁻¹)ₓᵧᵤ/h`). With
+   parallel (a carried manifold or a frozen joint, without an active body, is skipped); the last iteration ends with
+   `Velocity` (`v = (x − x⁻)/h`, `ω = 2 (q q⁻⁻¹)ₓᵧᵤ/h`; sleeping bodies keep their zero velocities). With
    post-stabilisation on, the main iterations use α = 1 and one extra position-only iteration uses α = 0. A body with
    locked rotation solves only the 3 × 3 linear block of its system (infinite angular inertia: the angular update and the
    cross terms vanish) and keeps `ω = 0`.
-10. The manifold, contact and hash buffers are copied to their "previous" twins (`CopyBuffer`) and the counters are
+10. **Rest and sleep** (`SleepTimer` → `RestSpread` × `SleepHops` → `RestSleep`): every awake body compares its pose
+    with its rest anchor and either restarts its rest counter and the anchor (moved further than `SleepDistance` or
+    `SleepAngle`) or counts the step; the counters are then propagated as a minimum over each body's dynamic neighbours,
+    one round per hop, and a body whose neighbourhood minimum reached `SleepTime` falls asleep (asleep bit, velocities
+    zeroed) unless it was woken by a touch this very step.
+11. The manifold, contact and hash buffers are copied to their "previous" twins (`CopyBuffer`) and the counters are
     copied to a stats buffer for the asynchronous readback.
 
 Rendering never touches the CPU: one `RenderMeshPrimitives` cube draw reads the pose and definition buffers by
@@ -126,11 +155,62 @@ The terrain (above) is a fourth: a world without one records no terrain pass and
   h² n (n + 1) / 2`), so the launch velocity of a projectile gets `+ g h / 2` upward and the discrete trajectory passes
   through the aim point exactly (`SiegeTests`: closest approach 2e-3 m).
 
+A D3D12 note from the sleeping work: `BuildArgs` writing the indirect argument slots 0..6 as one contiguous run of
+`Store3`s made the kernel do nothing at all (no error, no output — presumably the stores were coalesced into something
+the driver rejected); the slot of the carried-manifold dispatch is therefore written in phase 1, next to the pair
+count, where the stores are not contiguous.
+
+## Sleeping
+
+A sleeping body is frozen: it keeps its pose, its zero velocities and — through the carried manifolds and the skipped
+joint preparation — the exact penalties, multipliers and sticking anchors it fell asleep with, so no warm-start decay
+happens while it sleeps and a sleeping castle stops creeping. Everything downstream of the narrowphase treats it as
+static (`activeBody`: dynamic, alive and awake): it produces no pairs, is coloured `STATIC_COLOR`, is skipped by
+`Predict` (its initial and inertial pose are its pose), `Primal` (it is in no colour list), `Dual` and `Velocity`, and its
+manifolds, once carried, are only read by the awake bodies at the boundary of a sleeping region. Such a boundary body is
+solved against a frozen neighbour exactly as against a static body, with a manifold whose `C0` is still the true error at
+`x⁻` (neither body moved since it was computed) and whose multiplier carries the resting load.
+
+Bodies rest independently — a body rests when it has stayed within the thresholds of a *rest anchor* for `SleepTime`, a
+criterion that tolerates the sub-millimetre jitter of a resting pile but catches creep and a slow topple — but sleep
+by neighbourhood: a body falls asleep only when every body within `SleepHops` contacts or joints of it rests as well.
+This is deliberately not the island (the whole connected component): a 22 000-body pyramid always has a few bodies
+creeping somewhere, and an island rule would keep all of them awake, while the neighbourhood rule keeps a two-hop ring
+around each creeper awake and lets the rest sleep. The island is used for waking instead, where it matters:
+
+* A constraint between a sleeping body and an awake one that is *not resting* wakes the sleeper in the same step,
+  before the constraint lists and the solve. When the awake body is faster than `WakeSpeed` (an impact, a projectile, a
+  walking unit) the whole island of the touched body wakes at once — a cannonball meets a wall that gives way, not a
+  frozen one, and the shock propagates through the entire structure within the step as it does in an awake scene — and
+  the island is held awake for `WakeHold` (its rest counters are set back), long enough for whatever lost its support
+  to start falling and stay awake on its own motion. A slow toucher wakes the touched body alone, with its rest counter
+  intact: if the touch does not move it, it goes back to sleep as soon as its neighbourhood allows; if it does, its
+  motion resets the counter and, next step, wakes its own sleeping neighbours, so a slow push travels through a sleeping
+  pile one body per step. A resting toucher wakes nothing: a pile creeping below the thresholds leans on its frozen
+  neighbours instead of keeping them awake.
+* A body woken by a touch was asleep at pair generation, so it was solved on its carried manifolds; it may not fall
+  asleep again before the next step has recomputed them (bit 30 of the sleep word), otherwise a body nudged every step
+  would drift away from manifolds that are never refreshed.
+* The application wakes what it changes: spawns (sleep word and label reset), changed drives, flags, joints and
+  springs added, removed or re-anchored, ignore links, the neighbours of a retired body (found through its constraint
+  list of the previous step), and everything when the terrain or gravity changes (`WakeAll`, a zero upload). A body woken
+  this way is awake at pair generation, so its contacts are recomputed with the normal warm-start decay from the
+  carried manifolds, and `WakeTouch` then wakes what it touches.
+
+Islands are maintained incrementally by the label rounds above and only ever merge between relabels, so debris that
+left an island shares its label for up to `SleepRelabelSteps` (a touch on it wakes the old island meanwhile). Labels
+that have not converged when a group falls asleep, or during the steps after a relabel, split an island into label
+groups: a touch wakes the touched group, and the neighbouring groups act as static for that one step (their `C0` is
+still exact) before `WakeTouch` wakes them through the now awake boundary. Sleeping is off in the reference, and off in
+every GPU test that compares against it: with it on, resting bodies stop where the reference keeps creeping.
+
 ## Determinism
 
-Atomics are only used where order does not matter (counts, slot allocation); buckets and per-body constraint lists
-are sorted afterwards, the colouring uses hashed priorities, and same-colour bodies never read each other. Two runs
-of the same scene on the same GPU and driver are bitwise identical (`GpuKernelTests.RunsAreBitwiseDeterministic`).
+Atomics are only used where order does not matter (counts, slot allocation, or-ing wake bits, minima); buckets and
+per-body constraint lists are sorted afterwards, the colouring uses hashed priorities, same-colour bodies never read
+each other, and the island and rest propagations are Jacobi rounds over ping-pong buffers (every body writes its own
+entry from last round's values). Two runs of the same scene on the same GPU and driver are bitwise identical
+(`GpuKernelTests.RunsAreBitwiseDeterministic`, `SleepTests.SleepingIsBitwiseDeterministic`).
 
 ## Differences from the reference
 
