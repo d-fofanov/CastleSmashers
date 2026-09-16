@@ -26,13 +26,28 @@ namespace Phys.Demo
         public float Skirt;
         [Tooltip("Level ground kept around the castle (m) on top of the few studs the demo adds around the footprint: the hills start beyond it and the skirt.")]
         public float Margin;
+        [Tooltip("Smooth: Unity's terrain renderer. Tiled: as if built from flat tiles - tops rounded to TileStep, grooves between the tiles, " +
+                 "risers where the level changes (the collision surface stays the smooth field either way; Y switches).")]
+        public TerrainStyle Style;
+        [Tooltip("Tiled style: tile edge (m; 0 = the field's cell) and height step (m; 0 = a plate at the demo's brick scale).")]
+        public float TileSize, TileStep;
+        [Tooltip("Tiled style: tiles keep their size within this distance (m) of the field's centre and are four times larger beyond.")]
+        public float DetailRadius;
 
-        public static TerrainSettings Default => new TerrainSettings { Preset = TerrainPreset.None, Seed = 1, Resolution = 513, Cell = 1f, Amplitude = 12f, FeatureSize = 80f, Skirt = 8f, Margin = 0f };
+        public static TerrainSettings Default => new TerrainSettings
+        {
+            Preset = TerrainPreset.None, Seed = 1, Resolution = 513, Cell = 1f, Amplitude = 12f, FeatureSize = 80f, Skirt = 8f, Margin = 0f,
+            Style = TerrainStyle.Smooth, TileSize = 0f, TileStep = 0f, DetailRadius = 200f,
+        };
 
         /// <summary>What Castle.unity and Preview.unity carry: 513 samples 3 m apart (1.5 km), hills of some 30 m every 140 m or so,
-        /// level ground for 60 m around the castle (the armies march on the flat) blending into the hills over 40 m; the castle scene
-        /// opens on the hills, the preview scene on the flat ground (T switches either).</summary>
-        public static TerrainSettings CastleScene => new TerrainSettings { Preset = TerrainPreset.Hills, Seed = 11, Resolution = 513, Cell = 3f, Amplitude = 30f, FeatureSize = 140f, Skirt = 40f, Margin = 60f };
+        /// level ground for 60 m around the castle (the armies march on the flat) blending into the hills over 40 m, drawn as tiles
+        /// (3 m pieces, plate-high steps); the castle scene opens on the hills, the preview scene on the flat ground (T switches either).</summary>
+        public static TerrainSettings CastleScene => new TerrainSettings
+        {
+            Preset = TerrainPreset.Hills, Seed = 11, Resolution = 513, Cell = 3f, Amplitude = 30f, FeatureSize = 140f, Skirt = 40f, Margin = 60f,
+            Style = TerrainStyle.Tiled, TileSize = 0f, TileStep = 0f, DetailRadius = 200f,
+        };
 
         /// <summary>Fields a scene was serialised without come out as zero.</summary>
         public TerrainSettings WithDefaults()
@@ -45,6 +60,7 @@ namespace Phys.Demo
             if (t.FeatureSize <= 0f) t.FeatureSize = d.FeatureSize;
             if (t.Skirt < 0f) t.Skirt = d.Skirt;
             if (t.Margin < 0f) t.Margin = d.Margin;
+            if (t.DetailRadius <= 0f) t.DetailRadius = d.DetailRadius;
             return t;
         }
     }
@@ -134,6 +150,7 @@ namespace Phys.Demo
                 if (args[i] == "-avbd-distance" && float.TryParse(args[i + 1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float dist)) m_Distance = dist;
                 if (args[i] == "-avbd-terrain" && TryParseTerrain(args[i + 1], out var preset)) TerrainParams.Preset = preset;
                 if (args[i] == "-avbd-terrain-seed" && uint.TryParse(args[i + 1], out uint seed)) TerrainParams.Seed = seed;
+                if (args[i] == "-avbd-terrain-style" && System.Enum.TryParse(args[i + 1], true, out TerrainStyle style)) TerrainParams.Style = style;
             }
             TerrainParams = TerrainParams.WithDefaults();
             for (int i = 0; i < args.Length; i++) if (args[i] == "-avbd-bench") m_Bench = true;
@@ -161,6 +178,7 @@ namespace Phys.Demo
             m_Renderer.ClearTints();
             m_Renderer.MeshRanges.Clear();
             BuildScene(index, out float3 target, out float distance);
+            ApplyTerrainStyle();
             m_TerrainView.Show(m_World.Terrain, SceneTerrain);   // hides the terrain when the scene has none
             m_World.Upload();
             if (SettleSteps > 0)
@@ -200,6 +218,7 @@ namespace Phys.Demo
         {
             if (m_World == null) return;
             m_Renderer.Render();
+            m_TerrainView.Render();
             m_Frames++;
             if (m_Frames == m_ShootFrame) Shoot();
             if (m_ScreenshotPath == null && !m_Bench) return;
@@ -245,8 +264,30 @@ namespace Phys.Demo
             if (kb.hKey.wasPressedThisFrame) ShowHud = !ShowHud;
             if (kb.bKey.wasPressedThisFrame || kb.enterKey.wasPressedThisFrame) Shoot();
             if (kb.gKey.wasPressedThisFrame) m_World.Params.Gravity = math.lengthsq(m_World.Params.Gravity) > 0f ? float3.zero : new float3(0, -10f, 0);
+            if (kb.yKey.wasPressedThisFrame) SetTerrainStyle(TerrainParams.Style == TerrainStyle.Smooth ? TerrainStyle.Tiled : TerrainStyle.Smooth);
             HandleSceneKeys();
 #endif
+        }
+
+        /// <summary>Height step of the tiled terrain when the settings leave it at 0 (a plate of the brick scale in the castle demos).</summary>
+        protected virtual float DefaultTileStep => 0.25f;
+
+        void ApplyTerrainStyle()
+        {
+            m_TerrainView.Style = TerrainParams.Style;
+            var ts = m_TerrainView.TileSettings;
+            ts.TileSize = TerrainParams.TileSize;
+            ts.Step = TerrainParams.TileStep > 0f ? TerrainParams.TileStep : DefaultTileStep;
+            ts.DetailRadius = TerrainParams.DetailRadius;
+            m_TerrainView.TileSettings = ts;
+        }
+
+        /// <summary>Redraws the terrain in the given style (Y key); the world is untouched.</summary>
+        public void SetTerrainStyle(TerrainStyle style)
+        {
+            TerrainParams.Style = style;
+            ApplyTerrainStyle();
+            m_TerrainView.Show(m_World.Terrain, SceneTerrain);
         }
 
         static bool TryParseTerrain(string s, out TerrainPreset preset)
@@ -297,7 +338,11 @@ namespace Phys.Demo
             var field = m_World.Terrain;
             if (field == null) return "flat ground (T: terrain)";
             string source = SceneTerrain != null ? $"scene terrain {SceneTerrain.name}" : $"{TerrainParams.Preset.ToString().ToLowerInvariant()} (seed {TerrainParams.Seed})";
-            return $"<color=#a8d878>terrain</color> {source}: {field.ResX} x {field.ResZ} samples {field.Cell.x:G3} m apart, heights {field.MinHeight:F1} .. {field.MaxHeight:F1} m, plateau at {plateau:F1} m";
+            var tiles = m_TerrainView.Tiles;
+            string style = TerrainParams.Style == TerrainStyle.Tiled && tiles != null
+                ? $"; tiled (Y): {tiles.Count} tiles, {m_TerrainView.TileSettings.Step * 100f:F0} cm steps"
+                : "; smooth (Y)";
+            return $"<color=#a8d878>terrain</color> {source}: {field.ResX} x {field.ResZ} samples {field.Cell.x:G3} m apart, heights {field.MinHeight:F1} .. {field.MaxHeight:F1} m, plateau at {plateau:F1} m{style}";
         }
 
         /// <summary>Next procedural preset (T key): None, Hills, Valley, Ridge, None ...; a scene terrain is left alone.</summary>

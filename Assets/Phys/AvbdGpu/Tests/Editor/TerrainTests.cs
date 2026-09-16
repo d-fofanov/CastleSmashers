@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using NUnit.Framework;
 using Phys.AvbdGpu.Scenes;
 using Phys.AvbdRef;
@@ -404,6 +405,61 @@ namespace Phys.AvbdGpu.Tests
                 Assert.IsTrue(math.all(ra[i] == rb[i]), $"body {i} rotation differs");
             }
             Assert.Greater(a.GetStatsSync().TerrainManifolds, 50, "most boxes are down on the hills after 1.5 s");
+        }
+
+        // ------------------------------------------------------------------------------------------------ tiled view layout
+
+        /// <summary>The tiled look: tiles of three sizes (2 m within 24 m of the centre, 4 m within 48 m, 8 m beyond) cover the
+        /// field exactly once, every top is the field's height at the tile centre rounded to the step, and wherever two tiles meet
+        /// the higher one's sides reach down to the lower one (plus the chamfer), so no level change shows a gap.</summary>
+        [Test]
+        public void TileLayoutCoversTheFieldWithRoundedTopsAndClosedRisers()
+        {
+            var field = Heightfield.Generate(TerrainPreset.Hills, 3u, 65, 2f, 8f, 30f);   // 128 x 128 m
+            var s = Phys.AvbdGpu.Presentation.TerrainTiles.Settings.Default;
+            s.TileSize = 2f; s.Step = 0.5f; s.DetailRadius = 24f; s.Bevel = 0.05f;
+            var tiles = Phys.AvbdGpu.Presentation.TerrainTiles.Layout(field, s);
+            int fine = 0, mid = 0, coarse = 0;
+            double area = 0;
+            var cover = new Dictionary<(int, int), int>();   // fine cell -> tile index
+            for (int i = 0; i < tiles.Length; i++)
+            {
+                var t = tiles[i];
+                if (t.Size == 2f) fine++; else if (t.Size == 4f) mid++; else { Assert.AreEqual(8f, t.Size); coarse++; }
+                area += t.Size * t.Size;
+                float expected = math.round(field.Height(t.Position.xz) / s.Step) * s.Step;
+                Assert.AreEqual(expected, t.Position.y, 1e-4f, $"tile {i} top is the rounded height at its centre");
+                Assert.LessOrEqual(math.abs(t.Position.y - field.Height(t.Position.xz)), s.Step * 0.5f + 1e-4f);
+                Assert.GreaterOrEqual(t.Depth, s.Bevel * t.Size - 1e-5f, $"tile {i} sides at least a chamfer deep");
+                int n = (int)math.round(t.Size / 2f);
+                int x0 = (int)math.round((t.Position.x - t.Size * 0.5f - field.Origin.x) / 2f), z0 = (int)math.round((t.Position.z - t.Size * 0.5f - field.Origin.y) / 2f);
+                for (int dz = 0; dz < n; dz++)
+                    for (int dx = 0; dx < n; dx++)
+                    {
+                        Assert.IsFalse(cover.ContainsKey((x0 + dx, z0 + dz)), $"fine cell ({x0 + dx}, {z0 + dz}) covered twice");
+                        cover[(x0 + dx, z0 + dz)] = i;
+                    }
+            }
+            Assert.AreEqual(64 * 64, cover.Count, "every fine cell covered once");
+            Assert.AreEqual(128.0 * 128.0, area, 1e-3, "the tiles cover the field exactly");
+            Assert.AreEqual(24 * 24, fine, "a 48 x 48 m detail square of 2 m tiles");
+            Assert.AreEqual(24 * 24 - 12 * 12, mid, "4 m tiles out to 96 x 96 m");
+            Assert.AreEqual(16 * 16 - 12 * 12, coarse, "8 m tiles everywhere else");
+            // risers: across every fine-cell edge the higher tile reaches down to the lower one
+            int risers = 0;
+            foreach (var kv in cover)
+            {
+                var (x, z) = kv.Key;
+                foreach (var (nx, nz) in new[] { (x + 1, z), (x, z + 1) })
+                {
+                    if (!cover.TryGetValue((nx, nz), out int j) || j == kv.Value) continue;
+                    var a = tiles[kv.Value]; var b = tiles[j];
+                    var hi = a.Position.y >= b.Position.y ? a : b; var lo = a.Position.y >= b.Position.y ? b : a;
+                    Assert.GreaterOrEqual(hi.Depth, hi.Position.y - lo.Position.y + s.Bevel * hi.Size - 1e-4f, $"tile at {hi.Position} reaches down to its neighbour at {lo.Position}");
+                    if (hi.Position.y > lo.Position.y) risers++;
+                }
+            }
+            Assert.Greater(risers, 100, "the hills have level changes");
         }
 
         [Test]

@@ -9,7 +9,8 @@
         "Phys.AvbdRef",
         "Phys.AvbdGpu.Scenes",
         "Phys.AvbdGpu.Siege",
-        "Phys.AvbdGpu"
+        "Phys.AvbdGpu",
+        "Phys.AvbdGpu.Presentation"
     ],
     "includePlatforms": [
         "Editor"

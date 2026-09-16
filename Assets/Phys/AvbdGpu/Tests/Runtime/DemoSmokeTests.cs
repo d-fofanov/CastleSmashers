@@ -86,6 +86,23 @@ namespace Phys.AvbdGpu.Tests
             demo.World.GetPosesSync(out var pos, out _);
             for (int i = 1; i < demo.World.BodyCount; i++)
                 Assert.Greater(pos[i].y, field.Height(pos[i].xz) - 0.5f, $"body {i} stays above the surface");
+            // the tiled style: tiles stand in for the Unity terrain, drawn every frame; the world is untouched
+            demo.Load(AvbdScenes.Terrain);
+            yield return null;
+            int bodies = demo.World.BodyCount;
+            demo.SetTerrainStyle(Phys.AvbdGpu.Presentation.TerrainStyle.Tiled);
+            var tiles = demo.TerrainView.Tiles;
+            Assert.IsNotNull(tiles);
+            Assert.Greater(tiles.Count, 1000, "tiles were laid out");
+            Assert.IsTrue(demo.TerrainView.Visible);
+            Assert.IsTrue(demo.TerrainView.Terrain == null || !demo.TerrainView.Terrain.gameObject.activeSelf, "the smooth terrain is hidden");
+            float step = demo.TerrainView.TileSettings.Step;
+            foreach (var t in tiles.Tiles) Assert.AreEqual(math.round(t.Position.y / step) * step, t.Position.y, 1e-4f, "tops on the step grid");
+            for (int f = 0; f < 10; f++) yield return null;
+            Assert.AreEqual(bodies, demo.World.BodyCount);
+            demo.SetTerrainStyle(Phys.AvbdGpu.Presentation.TerrainStyle.Smooth);
+            yield return null;
+            Assert.IsTrue(demo.TerrainView.Terrain != null && demo.TerrainView.Terrain.gameObject.activeSelf, "the smooth terrain is back");
             demo.Load(AvbdScenes.Ground);
             yield return null;
             Assert.IsFalse(demo.TerrainView.Visible, "a scene without terrain hides it");

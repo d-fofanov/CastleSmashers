@@ -464,6 +464,10 @@ MonoBehaviour:
     FeatureSize: 140
     Skirt: 40
     Margin: 60
+    Style: 1
+    TileSize: 0
+    TileStep: 0
+    DetailRadius: 200
   BrickMesh: {fileID: -7080205770756681836, guid: 2012e6235bc73a94ba974d678510bb2f, type: 3}
   FigureMesh: {fileID: -3360807449873858051, guid: a7e52bc360a64628831765394423acfe, type: 3}
   ArrowMesh: {fileID: 5581172060584242650, guid: 557c9b90f02f45bab8a06f79652bfc80, type: 3}

@@ -464,6 +464,10 @@ MonoBehaviour:
     FeatureSize: 140
     Skirt: 40
     Margin: 60
+    Style: 1
+    TileSize: 0
+    TileStep: 0
+    DetailRadius: 200
   PieceMeshes:
   - {fileID: 4700812003722704328, guid: 59eca6057343efe4f9157861f207fc24, type: 3}
   - {fileID: 2496516206567031715, guid: 8607b41bd4610e74da8ef07628c3932a, type: 3}

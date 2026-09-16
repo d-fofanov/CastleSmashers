@@ -82,6 +82,8 @@ namespace Phys.Demo
         protected override float ShotDistance => 0.5f * BrickScale;
         /// <summary>Same frequency as the reference's 5000 N/m on a 1 kg box.</summary>
         protected override float DragStiffness => 5000f * m_Spec.BrickMass;
+        /// <summary>Tiled terrain steps of one plate (a third of a brick) at the brick scale.</summary>
+        protected override float DefaultTileStep => Brick.BodyHeight / 3f * BrickScale;
         /// <summary>The contact penalties ramp up from their minimum over the first steps and the stacks sink a few centimetres
         /// meanwhile; settle that before showing the castle (single substeps: nothing moves fast yet).</summary>
         protected override int SettleSteps => 180;

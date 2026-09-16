@@ -19,7 +19,7 @@ models built from the construction-piece pack are exchanged with other agents.
   described as brick-assembly JSON documents (the 27-piece pack), expanded into boxes and snaps.
 * **Presentation** (`Phys.AvbdGpu.Presentation`) — `AvbdGpuRenderer`: instanced draws straight from the solver buffers
   (the collision boxes, or any mesh for a range of bodies), per-body tints, shadows, GPU-written contact / joint debug lines;
-  `TerrainView`: the heightfield drawn with Unity's terrain renderer, Unity Terrain / heightmap import.
+  `TerrainView`: the heightfield drawn with Unity's terrain renderer or as tiles (`TerrainTiles`), Unity Terrain / heightmap import.
 * **Siege** (`Phys.AvbdGpu.Siege`) — `SiegeSystem`: armies of toy figures (`Assets/Models/ConstructorFigure`) that march,
   hold a line and fire volleys of arrows (`Assets/Models/ConstructorArrow`), cannonballs, rockets and homing bolts at each
   other and at the castle; `Ballistics`, `SiegeSpec` (the models as boxes), `BodyPool`s for units and projectiles.
@@ -40,7 +40,8 @@ Assets/Phys/AvbdGpu/Scenes             AvbdScenes (catalog + ISceneBuilder), Hei
                                        BrickCastle (brick, layout, castle plans, snap joints),
                                        BrickAssembly (piece catalog, document parser + writer, AssemblyBuilder: boxes, snaps, diagnostics)
 Assets/Phys/AvbdGpu/Siege              SiegeSpec (figure and arrow models as boxes), Ballistics, SiegeSystem (armies, volleys, retirement)
-Assets/Phys/AvbdGpu/Presentation       AvbdGpuRenderer, TerrainView, Resources/AvbdGpu/AvbdBox.shader (+ AvbdBodyInstancing.hlsl), AvbdLines.shader
+Assets/Phys/AvbdGpu/Presentation       AvbdGpuRenderer, TerrainView, TerrainTiles, Resources/AvbdGpu/AvbdBox.shader (+ AvbdBodyInstancing.hlsl),
+                                       AvbdTiles.shader (+ AvbdTileInstancing.hlsl), AvbdLines.shader, AvbdTerrainLit.mat
 Assets/Phys/AvbdGpu/Tests/Editor       ReferenceTests, GpuKernelTests, GpuVsReferenceTests, InvariantTests, DriveTests, BodyPoolTests, SiegeTests,
                                        SnapFractureTests, BrickCastleTests, BrickAssemblyTests, TerrainTests, PerformanceTests, DiagnosticTests
 Assets/Phys/AvbdGpu/Tests/Runtime      DemoSmokeTests, CastleSmokeTests, SiegeSmokeTests, PreviewSmokeTests
@@ -86,6 +87,7 @@ int terrain = world.SetTerrain(field, friction: 0.6f);             // one per wo
 field.Sample(xz, out float height, out float3 normal);            // what the solver sees (gameplay: spawn heights)
 world.UpdateTerrain();                                            // after editing field.Heights in place (BuildMaxMip first)
 var view = new TerrainView(); view.Show(field);                   // Unity terrain renderer; view.Show(field, sceneTerrain) draws on a scene terrain
+view.Style = TerrainStyle.Tiled; view.Show(field); view.Render(); // as tiles instead (Render once per frame); view.TileSettings: size, step, colours
 ```
 
 A `Heightfield` is a grid of world-unit heights over xz (`Origin`, `Cell` per axis, `ResX x ResZ`); the surface between samples is
@@ -99,6 +101,14 @@ the local tangent plane. Bodies whose AABB stays above a max-height mip of 8 x 8
 does the same (`RefCollide.CollideTerrain`), and the GPU matches it to rounding (below). Static bodies never touch the
 terrain; a terrain has one friction value; features smaller than about half a box extent can poke into a face between
 the sample points, and a body buried deeper than its size is pushed out along the local normal.
+
+The tiled style (`TerrainTiles`) draws the same field as if built from flat pieces: every tile's top is the field's height at
+its centre rounded to a step (a plate at the brick scale in the castle demos), a chamfer runs around the top so two neighbours
+meet in a groove, and the sides reach down to the lowest neighbour, so a level change shows as a riser. It is one bevelled-box
+mesh drawn once per tile from an instance buffer (`AvbdTiles.shader`, flat shaded, casting and receiving shadows), with tiles of
+the set size (the cell) within `DetailRadius` of the field's centre, twice as large out to twice that radius and four times
+beyond — 42 k tiles for the castle scene's 1.5 km field, about 3 ms more GPU time than the smooth terrain. The collision
+surface stays the smooth field, so on close-ups a body can float or sink up to half a step where a tile differs from the slope.
 
 ### Driven bodies, pools and events
 
@@ -229,9 +239,10 @@ planned by `BrickCastle` on the stud grid (`CastlePlan.Presets`):
   and blows the hit section out; the rest stays snapped. Jointed bodies do not collide until a joint breaks (the reference's rule),
   and the angular lock assumes equal orientations, hence four points per overlap rather than one lock.
 
-Keys as the main demo plus `J` snap on/off, `T` terrain (hills, valley, ridge, flat), `F6` collision boxes, `F7` shadows;
-`B` / `Enter` fires a 30 kg cannonball at 24 model m/s (× √5 in the solver). Flags: `-avbd-scene 0..9`, `-avbd-snap`,
-`-avbd-siege`, `-avbd-terrain hills|valley|ridge|none`, `-avbd-terrain-seed n`, and the screenshot / bench / camera flags above.
+Keys as the main demo plus `J` snap on/off, `T` terrain (hills, valley, ridge, flat), `Y` terrain style (tiled / smooth), `F6`
+collision boxes, `F7` shadows; `B` / `Enter` fires a 30 kg cannonball at 24 model m/s (× √5 in the solver). Flags: `-avbd-scene
+0..9`, `-avbd-snap`, `-avbd-siege`, `-avbd-terrain hills|valley|ridge|none`, `-avbd-terrain-seed n`, `-avbd-terrain-style
+tiled|smooth`, and the screenshot / bench / camera flags above.
 
 Terrain (`TerrainParams` on the demo, shared with the preview demo through `DemoBase`): a procedural heightfield generated
 from the seed, or, when a scene `Terrain` is assigned to `SceneTerrain`, that terrain's heights (drawn on it; its data is
@@ -239,9 +250,10 @@ cloned, so the asset is never edited). A plateau is levelled under the castle's 
 at the mean terrain height there and blended into the hills over `Skirt`; the castle's `Origin.y` and the camera move up
 with it, the HUD reports the field and the plateau height. `Castle.unity` opens on `TerrainSettings.CastleScene` (written
 into the scene by `Phys / Set Demo Terrains`): 513 samples 3 m apart (1.5 km), hills of some 30 m every 140 m or so,
-60 m of level ground around the castle (the armies march on the flat) blending into the hills over 40 m; the runtime
-terrain is drawn with two flat-colour layers, grass and a dry hilltop tint blended in with the height, so the hills read
-under flat lighting. The armies spawn standing on the surface wherever it is (`SiegeSystem.Terrain`, `StandHeight`), walk
+60 m of level ground around the castle (the armies march on the flat) blending into the hills over 40 m, drawn in the
+tiled style (3 m tiles, 20 cm steps: a floor of smooth pieces around the castle, terraced hills beyond); the smooth style
+draws the runtime terrain with two flat-colour layers, grass and a dry hilltop tint blended in with the height, so the hills
+read under flat lighting. The armies spawn standing on the surface wherever it is (`SiegeSystem.Terrain`, `StandHeight`), walk
 in over the slopes on their xz motors and aim at the wall crest above the plateau; arrows that stick in the hillside are
 spent like those in the ground. `Preview.unity` carries the same settings with the preset off (flat ground until `T`);
 its plateau spans the document's footprint plus two studs plus the margin.
@@ -318,8 +330,8 @@ the roof deck, a post inside each side hall, two more beams under the bridge dec
 changes, with the gatehouse banner a fifth of a stud lower). Re-bonded, the citadel stands dry-stacked (33 mm of
 settling at most) and holds snapped with no joint breaking; the seven pieces still reported as resting on nothing — the
 portcullis teeth and the trees' outer foliage — hang from the bricks above them when snapped. Flags: `-avbd-castle name`
-(a file name), `-avbd-scene n`, `-avbd-snap`, `-avbd-terrain preset`, `-avbd-terrain-seed n`, and the screenshot / bench /
-camera flags above; `T` cycles the terrain like the castle demo.
+(a file name), `-avbd-scene n`, `-avbd-snap`, `-avbd-terrain preset`, `-avbd-terrain-seed n`, `-avbd-terrain-style tiled|smooth`,
+and the screenshot / bench / camera flags above; `T` cycles the terrain and `Y` its style like the castle demo.
 
 ## Measured behaviour
 
@@ -406,8 +418,9 @@ normal, the flat continuation past the border, the max mip as an upper bound, th
 reference's terrain contacts (eight sticking points under a resting box carrying its weight, cubes sticking or sliding on a
 30° slope by their friction, a long box resting on the crest of a ridge through its mid-face points) and the GPU against
 the reference on those scenes, the early-out (hovering boxes get no terrain manifold) and the bitwise determinism of the
-Terrain scene; the PlayMode smoke tests put the Outpost on hills with its siege, the Outpost document on a ridge and the
-Terrain scene through the demo with the terrain drawn and imported back. `BrickAssemblyTests` check the piece catalog against the pack's manifest,
+Terrain scene, and the tile layout of the tiled style (tiles of three sizes covering the field once, tops on the step grid,
+risers closed); the PlayMode smoke tests put the Outpost on hills with its siege, the Outpost document on a ridge and the
+Terrain scene through the demo with the terrain drawn smooth and tiled and imported back. `BrickAssemblyTests` check the piece catalog against the pack's manifest,
 the rotation convention against `Quaternion.Euler`, the format's examples and error cases, the boxes of upright and lying
 pieces, the snapped bridge on the reference solver, the expansion and diagnostics of the citadel as designed and as
 re-bonded, and the Outpost round trip (planner to document to bodies: the same pivots and the same snap joints as
