@@ -46,6 +46,11 @@ namespace Phys.AvbdGpu.Presentation
         public bool DrawCollisionBoxes;
         /// <summary>Cast and receive main-light shadows (the box and mesh draws).</summary>
         public bool Shadows;
+        /// <summary>Cast the shadows of the mesh ranges from the bodies' collision boxes (twelve triangles each) instead of the meshes:
+        /// a shadow map draws every body once per cascade, and a brick's studs do not show in its shadow. The meshes still receive.</summary>
+        public bool BoxShadows = true;
+        /// <summary>Draw calls issued by the last <see cref="Render"/> for the bodies (box ranges, mesh ranges and their shadow proxies).</summary>
+        public int LastDraws { get; private set; }
         public float ContactCrossSize = 0.06f;
         public int Layer;
         /// <summary>Body ranges drawn with a mesh instead of the collision box. Ranges must not overlap.</summary>
@@ -143,6 +148,7 @@ namespace Phys.AvbdGpu.Presentation
                     rp.matProps = props;
                     Graphics.RenderMeshPrimitives(rp, m_Cube, 0, count);
                 }
+                bool proxies = Shadows && BoxShadows;
                 foreach (var r in MeshRanges)
                 {
                     int start = math.max(r.Start, 0), count = math.min(r.Start + r.Count, bodies) - start;
@@ -152,8 +158,18 @@ namespace Phys.AvbdGpu.Presentation
                     props.SetFloat(s_MeshScale, math.max(r.Scale, 1e-6f));
                     props.SetVector(s_MeshOffset, new Vector4(r.Offset.x, r.Offset.y, r.Offset.z, 0f));
                     rp.matProps = props;
+                    rp.shadowCastingMode = proxies ? ShadowCastingMode.Off : Shadows ? ShadowCastingMode.On : ShadowCastingMode.Off;
                     Graphics.RenderMeshPrimitives(rp, r.Mesh, 0, count);
+                    if (!proxies) continue;
+                    // the same bodies as their collision boxes, into the shadow maps only
+                    var shadow = DrawProps(draw++);
+                    shadow.SetInteger(s_InstanceOffset, start);
+                    shadow.SetFloat(s_MeshScale, 0f);
+                    rp.matProps = shadow;
+                    rp.shadowCastingMode = ShadowCastingMode.ShadowsOnly;
+                    Graphics.RenderMeshPrimitives(rp, m_Cube, 0, count);
                 }
+                LastDraws = draw;
             }
 
             if (DrawContacts)

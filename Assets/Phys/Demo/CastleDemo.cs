@@ -39,6 +39,9 @@ namespace Phys.Demo
         [Tooltip("Upward pull (N) that breaks a snap connection; a snap also comes apart once the bricks separate by half the stud height.")]
         public float SnapFractureTension = 50f;
         public bool Shadows = true;
+        [Tooltip("Cast the shadows of the bricks and pieces from their collision boxes instead of the models (-avbd-meshshadows turns it off): a " +
+                 "shadow map draws every body once per cascade, and the studs do not show in a shadow.")]
+        public bool BoxShadows = true;
         [Tooltip("Cannonball: cube size (model metres), mass (kg) and speed (model metres per second).")]
         public float ShotCube = 0.12f;
         public float ShotMass = 30f;
@@ -167,6 +170,7 @@ namespace Phys.Demo
                 if (args[i] == "-avbd-outlying" && i + 1 < args.Length && int.TryParse(args[i + 1], out int outlying)) Outlying = outlying;
                 if (args[i] == "-avbd-trees" && i + 1 < args.Length && int.TryParse(args[i + 1], out int trees)) Trees = trees;
                 if (args[i] == "-avbd-noshadows") Shadows = false;
+                if (args[i] == "-avbd-meshshadows") BoxShadows = false;
             }
         }
 
@@ -175,6 +179,7 @@ namespace Phys.Demo
             SiegeParams = SiegeParams.WithDefaults();   // fields a scene was serialised without come out as zero
             LoadTreeDocuments();
             m_Renderer.Shadows = Shadows;
+            m_Renderer.BoxShadows = BoxShadows;
             m_Renderer.DrawJoints = false;
 #if UNITY_EDITOR
             if (BrickMesh == null) BrickMesh = UnityEditor.AssetDatabase.LoadAssetAtPath<Mesh>("Assets/Models/ConstructorBlock2x3/ConstructorBlock2x3.fbx");

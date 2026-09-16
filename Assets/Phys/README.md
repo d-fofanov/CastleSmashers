@@ -80,7 +80,9 @@ world.GetPosesSync(out var pos, out var rot);   // synchronous readback (tests, 
 `AvbdScenes.Build(world, AvbdScenes.Pyramid)` builds a catalog scene into any `ISceneBuilder`. Draw with
 `new AvbdGpuRenderer(world).Render()` once per frame; `renderer.MeshRanges` draws a body range with a mesh instead of its
 box (`Mesh`, `Scale`, `Offset` of the model pivot in body space), `renderer.SetTints(rgba, start, count)` colours bodies
-(RGBA8, alpha 0 = hash palette), `renderer.Shadows` casts and receives the main light's shadows.
+(RGBA8, alpha 0 = hash palette), `renderer.Shadows` casts and receives the main light's shadows; with `renderer.BoxShadows`
+(default) a mesh range casts them from the bodies' collision boxes (a second, shadows-only draw of the cube per range)
+instead of the mesh: a shadow map draws every body once per cascade, and a brick's studs do not show in its shadow.
 
 ### Terrain
 
@@ -316,12 +318,16 @@ stud grid (`CastlePlan.Presets`):
 Keys as the main demo plus `J` snap on/off, `T` terrain (hills, valley, ridge, flat), `Y` terrain style (tiled / smooth), `O`
 outlying copies (0 / 4 / 8), `F` trees (0 / 10 / 20 / 30), `F6` collision boxes, `F7` shadows; `B` / `Enter` fires a 30 kg
 cannonball at 24 model m/s (× √5 in the solver). Flags: `-avbd-scene 0..9`, `-avbd-snap`, `-avbd-siege`, `-avbd-outlying n`,
-`-avbd-trees n`, `-avbd-noshadows`, `-avbd-terrain hills|valley|ridge|none`, `-avbd-terrain-seed n`, `-avbd-terrain-style
-tiled|smooth`, and the screenshot / bench / camera flags above (a demo's own flags are read by `ParseArgs` before the world is
-created, so that the outlying and tree reserves follow them). The bench log reports the GPU render time and the draw count
-next to the frame and step times: with twenty trees the Castle preset renders in 12.4 ms instead of 5.9 (the physics step is
-0.14 ms either way, everything asleep), 4.7 instead of 4.0 with shadows off — the trees are 13 M triangles per pass (23 000
-pieces with all their studs), drawn once more per shadow cascade.
+`-avbd-trees n`, `-avbd-noshadows`, `-avbd-meshshadows`, `-avbd-terrain hills|valley|ridge|none`, `-avbd-terrain-seed n`,
+`-avbd-terrain-style tiled|smooth`, and the screenshot / bench / camera flags above (a demo's own flags are read by
+`ParseArgs` before the world is created, so that the outlying and tree reserves follow them). The bench log reports the GPU
+render time and the draw count next to the frame and step times. What twenty trees cost is their shadows: they are 13 M
+triangles per pass (23 000 pieces with all their studs, three times the castle) and the PC pipeline draws every piece once
+more per shadow cascade, so with the meshes casting (`-avbd-meshshadows`) the Castle preset renders in 12.7 ms instead of
+6.1 while the physics step is 0.14 ms either way (everything asleep) and the trees' own draw costs 0.7 ms. `BoxShadows`
+(the default) casts the shadows of every brick and piece from its collision box instead — twelve triangles, the studs
+missing from a shadow are invisible at this scale — and the frame is 5.9 ms with twenty trees, 6.6 with thirty and 4.3 for
+the castle alone (1600 x 900, 4 cascades to 400 m).
 
 **Outlying copies** (`Outlying`, key `O`, `-avbd-outlying n`): up to eight copies of the castle built asleep on the cells of a
 3 x 3 grid around it, each on its own plateau, spaced so that no plateau, skirt or army reaches the next — a world with
@@ -512,7 +518,8 @@ creeps longer) and the 17k castle 4 s, and they step in 0.77 ms from then on, th
 Outpost under siege sleeps between the volleys with its holding units, and its arrows wake what they hit. In the castle
 player (snapped castles on the tiled hills, 1280 x 720, `-avbd-bench` against `-avbd-nosleep`) the frame drops from
 9.9 to 6.6 ms for the Outpost, 25.0 to 19.1 ms for the Stronghold and 40.3 to 31.2 ms for the Royal citadel; what is
-left is the draw of the brick meshes with shadows and of the terrain tiles.
+left is the draw of the brick meshes with shadows and of the terrain tiles (measured before the box shadow proxies, which
+take a third off the castle's own frame as well).
 
 ## Known limits
 

@@ -42,6 +42,8 @@ namespace Phys.Demo
         [Tooltip("Snap the pieces on the ground to the world as well (a castle on its base plate); a tree stands on the ground by friction either way.")]
         public bool WorldSnaps = true;
         public bool Shadows = true;
+        [Tooltip("Cast the shadows of the pieces from their collision boxes instead of the models (-avbd-meshshadows turns it off), as in the castle demo.")]
+        public bool BoxShadows = true;
         [Tooltip("Cannonball: cube size (model metres), mass (kg) and speed (model metres per second).")]
         public float ShotCube = 0.12f;
         public float ShotMass = 30f;
@@ -121,12 +123,15 @@ namespace Phys.Demo
             {
                 if (args[i] == "-avbd-snap") Snap = true;
                 if (args[i] == "-avbd-castle" && i + 1 < args.Length) m_StartCastle = args[i + 1];
+                if (args[i] == "-avbd-noshadows") Shadows = false;
+                if (args[i] == "-avbd-meshshadows") BoxShadows = false;
             }
         }
 
         protected override void Configure()
         {
             m_Renderer.Shadows = Shadows;
+            m_Renderer.BoxShadows = BoxShadows;
             m_Renderer.DrawJoints = false;
             LoadDocuments();
             if (m_StartCastle != null)
