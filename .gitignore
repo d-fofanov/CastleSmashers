@@ -81,3 +81,6 @@ Thumbs.db
 
 # Player builds
 /Build/
+
+# Python
+__pycache__/

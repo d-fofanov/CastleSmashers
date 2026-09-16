@@ -191,3 +191,8 @@ and `PreviewSmokeTests` check it.
   cell and colour for colour, with a running bond, alternating corner and junction ownership and the best support the
   course below offers; the hidden supports a particular design needs (cross walls under a deck, a post, a bracket under
   a banner) are added as data at the top of the script. See the README's preview demo section for the citadel.
+  `Tools/generate_trees.py` goes the other way round: it designs the six trees of `Assets/Resources/Trees` as stud cells
+  course by course under a corbel rule (a course reaches at most one stud beyond the one below, and only next to a cell
+  resting on it; the overhanging cells get pieces that keep three quarters of their footprint on the course below) and
+  tiles them with the same course tiler, so that a crown of a thousand pieces holds on its trunk; the castle demo plants
+  them around the castle asleep.

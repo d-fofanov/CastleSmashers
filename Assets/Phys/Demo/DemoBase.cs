@@ -116,6 +116,8 @@ namespace Phys.Demo
         protected abstract string HudText();
         protected virtual float HudHeight => 190f;
         protected virtual AvbdGpuConfig CreateConfig() => AvbdGpuConfig.ForBodies(MaxBodies);
+        /// <summary>The derived demo's player flags, read once before the world is created (a capacity may depend on them).</summary>
+        protected virtual void ParseArgs(string[] args) { }
         /// <summary>Solver parameters and renderer options, applied once after the world is created.</summary>
         protected virtual void Configure() { }
         /// <summary>Extra keys of the derived demo.</summary>
@@ -154,6 +156,7 @@ namespace Phys.Demo
                 if (args[i] == "-avbd-terrain-style" && System.Enum.TryParse(args[i + 1], true, out TerrainStyle style)) TerrainParams.Style = style;
             }
             TerrainParams = TerrainParams.WithDefaults();
+            ParseArgs(args);
             bool sleep = true;
             int colorMode = -1;
             for (int i = 0; i < args.Length; i++)
@@ -338,12 +341,13 @@ namespace Phys.Demo
         /// returns the plateau height.</summary>
         protected float CutPlateau(Heightfield field, float2 halfExtent, float border) => CutPlateau(field, float2.zero, halfExtent, border, TerrainParams.Margin);
 
-        /// <summary>A plateau for a footprint centred on <paramref name="centre"/> with the given margin of level ground around it.</summary>
-        protected float CutPlateau(Heightfield field, float2 centre, float2 halfExtent, float border, float margin)
+        /// <summary>A plateau for a footprint centred on <paramref name="centre"/> with the given margin of level ground around it,
+        /// blending into the terrain over the settings' skirt unless <paramref name="skirt"/> says otherwise.</summary>
+        protected float CutPlateau(Heightfield field, float2 centre, float2 halfExtent, float border, float margin, float skirt = -1f)
         {
             float2 lo = centre - halfExtent - border - margin, hi = centre + halfExtent + border + margin;
             float plateau = field.MeanHeight(lo, hi);
-            field.Flatten(lo, hi, plateau, TerrainParams.Skirt);
+            field.Flatten(lo, hi, plateau, skirt < 0f ? TerrainParams.Skirt : skirt);
             return plateau;
         }
 
@@ -360,6 +364,23 @@ namespace Phys.Demo
             const float ground = 2000f;                             // out to the horizon
             groundBody = m_World.AddBody(new float3(ground, 1f, ground), 0f, friction, new float3(0f, -0.5f, 0f), quaternion.identity, float3.zero);
             return 0f;
+        }
+
+        /// <summary>The model of a construction piece (<see cref="PieceCatalog.Pieces"/> order) from a demo's array of the 27, loaded
+        /// by path and remembered in the editor when unset; null draws the collision box.</summary>
+        protected static Mesh PieceMesh(ref Mesh[] meshes, int piece)
+        {
+            if (meshes != null && piece < meshes.Length && meshes[piece] != null) return meshes[piece];
+#if UNITY_EDITOR
+            var mesh = UnityEditor.AssetDatabase.LoadAssetAtPath<Mesh>($"Assets/Models/construction_pieces/{PieceCatalog.Pieces[piece].Id}.fbx");
+            if (mesh != null)
+            {
+                if (meshes == null || meshes.Length < PieceCatalog.Pieces.Length) System.Array.Resize(ref meshes, PieceCatalog.Pieces.Length);
+                meshes[piece] = mesh;
+                return mesh;
+            }
+#endif
+            return null;
         }
 
         /// <summary>The terrain line of the HUD.</summary>

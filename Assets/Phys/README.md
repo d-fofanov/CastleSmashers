@@ -50,8 +50,11 @@ Assets/Phys/AvbdGpu/Tests/Runtime      DemoSmokeTests, CastleSmokeTests, SiegeSm
 Assets/Phys/Demo                       Demo.unity, Castle.unity, Preview.unity, DemoBase, DemoBootstrap, CastleDemo, PreviewDemo, DemoCamera,
                                        Editor/BuildDemo (player builds, mesh assignment, the Outpost export)
 Assets/Resources/Castles               the brick-assembly documents the preview demo offers (emerald_crown_citadel.json, outpost.json)
+Assets/Resources/Trees                 the six trees the castle demo plants and the preview demo lists after the castles (oak, pine,
+                                       cypress, elm, birch, maple .json; 1 100 - 1 250 pieces each)
 Tools/rebond_castle.py                 re-tiles the courses of a brick-assembly document for bond and adds hidden supports (castles/: the
                                        citadel as the agent designed it, the tool's input)
+Tools/generate_trees.py                designs the trees course by course under a corbel rule and tiles them with the re-bonding tool's tiler
 Assets/Models/ConstructorBlock2x3      the 2 x 3 construction brick (FBX, Tools/generate_constructor_block.py)
 Assets/Models/ConstructorFigure, ConstructorArrow   the toy figure and the arrow (Tools/generate_constructor_accessories.py)
 Assets/Models/construction_pieces      the 27-piece pack (bricks, plates, tiles, ramps, prisms; generate_models.py, Blender 5.2),
@@ -268,8 +271,9 @@ Player flags: `-avbd-scene n`, `-avbd-screenshot file [-avbd-frames n]` (screens
 
 `Assets/Phys/Demo/Castle.unity` (`Phys / Build Castle Player`, or `-executeMethod Phys.Demo.Editor.BuildDemo.Build
 -buildScene Castle`) builds a castle out of the construction brick `Assets/Models/ConstructorBlock2x3`: every brick is a box
-body of the solver, drawn with the brick model through `AvbdGpuRenderer.MeshRanges`. Ten castles on keys `1` .. `0`, all
-planned by `BrickCastle` on the stud grid (`CastlePlan.Presets`):
+body of the solver, drawn with the brick model through `AvbdGpuRenderer.MeshRanges`, with twenty trees of the
+construction-piece pack asleep on the ground around it. Ten castles on keys `1` .. `0`, all planned by `BrickCastle` on the
+stud grid (`CastlePlan.Presets`):
 
 | Key | Name | Bricks | Side (studs) | Towers | Walls | Gatehouse |
 |---|---|---|---|---|---|---|
@@ -310,9 +314,11 @@ planned by `BrickCastle` on the stud grid (`CastlePlan.Presets`):
   and the angular lock assumes equal orientations, hence four points per overlap rather than one lock.
 
 Keys as the main demo plus `J` snap on/off, `T` terrain (hills, valley, ridge, flat), `Y` terrain style (tiled / smooth), `O`
-outlying copies (0 / 4 / 8), `F6` collision boxes, `F7` shadows; `B` / `Enter` fires a 30 kg cannonball at 24 model m/s (× √5 in
-the solver). Flags: `-avbd-scene 0..9`, `-avbd-snap`, `-avbd-siege`, `-avbd-outlying n`, `-avbd-terrain hills|valley|ridge|none`,
-`-avbd-terrain-seed n`, `-avbd-terrain-style tiled|smooth`, and the screenshot / bench / camera flags above.
+outlying copies (0 / 4 / 8), `F` trees (0 / 10 / 20 / 30), `F6` collision boxes, `F7` shadows; `B` / `Enter` fires a 30 kg
+cannonball at 24 model m/s (× √5 in the solver). Flags: `-avbd-scene 0..9`, `-avbd-snap`, `-avbd-siege`, `-avbd-outlying n`,
+`-avbd-trees n`, `-avbd-terrain hills|valley|ridge|none`, `-avbd-terrain-seed n`, `-avbd-terrain-style tiled|smooth`, and the
+screenshot / bench / camera flags above (a demo's own flags are read by `ParseArgs` before the world is created, so that the
+outlying and tree reserves follow them).
 
 **Outlying copies** (`Outlying`, key `O`, `-avbd-outlying n`): up to eight copies of the castle built asleep on the cells of a
 3 x 3 grid around it, each on its own plateau, spaced so that no plateau, skirt or army reaches the next — a world with
@@ -321,6 +327,27 @@ many more bricks than it simulates at once. `MaxBodies` stays the number of bric
 allocated only when copies are asked for (`O` recreates the world). A copy costs nothing until a cannonball hits it: it
 wakes whole, settles and sleeps again while the others never stir (`CastleSmokeTests`: 0.8 ms per step with the eight
 castles asleep, 1.1 ms once one has been hit and put back to sleep).
+
+**Trees** (`Trees`, key `F`, `-avbd-trees n`, `TreeSeed`): up to thirty trees scattered around the castle, each one of the six
+brick-assembly documents of `Assets/Resources/Trees` (oak, pine, cypress, elm, birch, maple — 1 100 to 1 250 pieces of the
+construction pack each, 16 to 25 m tall at the brick scale, see the preview demo below) turned by a random quarter turn
+(`BrickAssembly.Turned`), built like the preview demo builds a document (`AssemblyBuilder`: the castle's clearance, friction
+and snap limits, but no world joints — a castle stands on its base plate, a tree on the ground by friction) and put to sleep
+as one island from its first step (`SleepRange`). The places come from the seed by rejection: outside the castle's plateau
+core, outside the bands the armies march and fire in (the cross of the four wall faces out to the attackers' starting line),
+never touching another tree's crown, clear of the outlying copies, as many as fit `TreeBodies` (49 152 on top of `MaxBodies`,
+reserved only while trees are asked for; `F` recreates the world). A tree stands on the ground under its trunk: on the level
+ground around the castle that is the plateau, on the hills a terrace levelled under its crown (a 6 m blend, cut after the
+castle's plateau and uploaded with it, the trunk's own square levelled again exactly afterwards). A tree's 2 x 3 brick weighs
+`TreeMass`, 0.25 kg, a quarter of the castle's: a crown of a thousand pieces stands on the few contacts of its trunk top,
+and at the castle's brick mass it sinks its trunk a decimetre and tears the snaps of its lowest courses as it lands — the
+castle's own brick mass was chosen the same way, for the gatehouse (at half of it two of the six lose snaps as they land
+and the broad crowns collapse dry; at the castle's, every tree loses thirty to eighty base snaps and the crowns sink). The
+price is fragility: a 20 kg cannonball at 54 m/s throws a 180 kg tree's crown to pieces (a thousand of them a brick height
+away, 1 600 snaps broken), where a castle wall of 1 kg bricks loses a section. Twenty trees are some 23 000 more bodies
+that cost nothing until a cannonball hits one, which wakes that tree alone; its neighbours are at most nudged by the debris
+and nothing else wakes (`CastleSmokeTests`: 0.9 ms per step with the castle and the trees asleep). `F8` (sleeping off)
+wakes everything, so the trees then count against `MaxActive` like the outlying copies.
 
 Terrain (`TerrainParams` on the demo, shared with the preview demo through `DemoBase`): a procedural heightfield generated
 from the seed, or, when a scene `Terrain` is assigned to `SceneTerrain`, that terrain's heights (drawn on it; its data is
@@ -370,7 +397,7 @@ a spent slot is free for the next spawn one step later.
 `Assets/Phys/Demo/Preview.unity` (`Phys / Build Preview Player`, or `-buildScene Preview`) is the castle demo for castles
 described as data: every `.json` file of `Assets/Resources/Castles` is a brick-assembly document
 ([BRICK_ASSEMBLY.md](BRICK_ASSEMBLY.md)) built from the 27-piece pack, and keys `1` .. `0` and `,` `.` choose between them
-(by file name; `R` re-reads the folder). `BrickAssembly.Parse` validates and expands the document (modules, instances,
+(by file name, the trees of `Assets/Resources/Trees` after the castles; `R` re-reads the folders). `BrickAssembly.Parse` validates and expands the document (modules, instances,
 palette; a rejected file shows its error in the HUD and leaves the ground), `AssemblyBuilder.Build` adds one box body per
 piece and `AvbdGpuRenderer.MeshRanges` draws each group of pieces with its model (`PreviewDemo.PieceMeshes`, the 27 meshes
 in catalog order, assigned by `Phys / Assign Preview Meshes`).
@@ -410,6 +437,27 @@ settling at most) and holds snapped with no joint breaking; the seven pieces sti
 portcullis teeth and the trees' outer foliage — hang from the bricks above them when snapped. Flags: `-avbd-castle name`
 (a file name), `-avbd-scene n`, `-avbd-snap`, `-avbd-terrain preset`, `-avbd-terrain-seed n`, `-avbd-terrain-style tiled|smooth`,
 and the screenshot / bench / camera flags above; `T` cycles the terrain and `Y` its style like the castle demo.
+
+**Trees.** The six documents of `Assets/Resources/Trees` (`Tools/generate_trees.py`; 1 100 to 1 250 pieces each) are what
+the castle demo plants: an oak (an 8 x 8 trunk with knots, a crown 12 m across), a pine (an octagonal cone carrying five
+tiers two studs narrower each, `Ramp`s on their rims and a `Roof_Prism` on top, 22 m), a cypress (a slender column of 25 m),
+an elm (a vase opening to 13 m under a flat dome), a birch (a white trunk with dark marks, a tall crown with two side lobes)
+and a maple (a low orange crown). Each is designed as stud cells course by course, the way the re-bonding tool sees a
+castle, and tiled by that tool's course tiler; what makes it stand on the solver is the *corbel rule* applied to every
+course: a course may reach one stud beyond the course below and only next to a cell that rests on it, so a crown's
+underside is an inverted cone widening one stud per course out of the trunk, and its overhanging cells are tiled first
+with `1 x 4` and `2 x 4` bricks reaching inward to keep three quarters of their footprint on the course below (a half-hanging
+piece tips under the course above and pops). The rest of a crown is `2 x 2`s and smaller, so that a crown of a given piece
+count weighs a third of what it would in `2 x 4`s — its weight over the few contacts of the trunk top is what makes a tree
+sink — and a single brick stacked on another single is dropped (a column of singles topples). Trunks are rectangular (a
+round one leaves singles under the crown), knots end below the crown (a stub the crown grew over would be a lever), and
+crowns are centred on their trunks (a dry stack takes no tension: an off-centre crown leans it over). Colours come per
+piece from a smooth noise, lighter towards the top and the outside of the crown. Loaded with `WorldSnaps` off for the trees
+and `TreeMass` (0.25 kg per 2 x 3, the castle demo's choice), every tree holds snapped at the castle scene's limits (800 N
+sideways, 300 N up) with no joint breaking and no piece moving, and stands dry-stacked for three seconds with nothing
+falling off: the pine and the cypress do not move at all, the broad crowns creep 7 to 14 cm — an inverted dome of loose
+bricks is a cantilever that friction alone holds, and the trees are meant to be snapped (`PreviewSmokeTests`). The
+loader's diagnostics find nothing floating, poorly supported or intersecting in any of them.
 
 ## Measured behaviour
 
@@ -506,10 +554,10 @@ left is the draw of the brick meshes with shadows and of the terrain tiles.
 .\RunTests.ps1 -Platform EditMode -Filter Phys.AvbdGpu.Tests.PerformanceTests   # step times (excluded by default)
 .\RunTests.ps1 -Platform EditMode -Filter Phys.AvbdGpu.Tests.SnapFractureTests  # snap limits, GPU and reference
 .\RunTests.ps1 -Platform EditMode -Filter "Phys.AvbdGpu.Tests.DriveTests;Phys.AvbdGpu.Tests.BodyPoolTests;Phys.AvbdGpu.Tests.SiegeTests"
-.\RunTests.ps1 -Platform PlayMode -Filter Phys.AvbdGpu.Tests.CastleSmokeTests   # the smallest and largest castles stand, cannonball, snaps break
+.\RunTests.ps1 -Platform PlayMode -Filter Phys.AvbdGpu.Tests.CastleSmokeTests   # the smallest and largest castles stand, cannonball, snaps break, outlying copies and trees sleep
 .\RunTests.ps1 -Platform PlayMode -Filter Phys.AvbdGpu.Tests.SiegeSmokeTests    # the Outpost under siege: volleys, kills, retirements
 .\RunTests.ps1 -Platform EditMode -Filter Phys.AvbdGpu.Tests.BrickAssemblyTests  # the brick-assembly format: catalog, parsing, rejection, boxes, snaps
-.\RunTests.ps1 -Platform PlayMode -Filter Phys.AvbdGpu.Tests.PreviewSmokeTests  # the JSON castles: the Outpost and the re-bonded citadel stand dry and snapped
+.\RunTests.ps1 -Platform PlayMode -Filter Phys.AvbdGpu.Tests.PreviewSmokeTests  # the JSON castles and trees: the Outpost, the re-bonded citadel and the six trees stand dry and snapped
 .\RunTests.ps1 -Platform EditMode -Filter Phys.AvbdGpu.Tests.TerrainTests        # the heightfield, the reference terrain contacts, the GPU against them
 .\RunTests.ps1 -Platform EditMode -Filter Phys.AvbdGpu.Tests.SleepTests          # sleeping: freezing, islands, same-step wakes, gameplay wakes, determinism
 ```

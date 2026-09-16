@@ -471,6 +471,34 @@ MonoBehaviour:
   BrickMesh: {fileID: -7080205770756681836, guid: 2012e6235bc73a94ba974d678510bb2f, type: 3}
   FigureMesh: {fileID: -3360807449873858051, guid: a7e52bc360a64628831765394423acfe, type: 3}
   ArrowMesh: {fileID: 5581172060584242650, guid: 557c9b90f02f45bab8a06f79652bfc80, type: 3}
+  PieceMeshes:
+  - {fileID: 4700812003722704328, guid: 59eca6057343efe4f9157861f207fc24, type: 3}
+  - {fileID: 2496516206567031715, guid: 8607b41bd4610e74da8ef07628c3932a, type: 3}
+  - {fileID: 7575525277670597790, guid: 183b8a6659cabe643a9f9a3456ab9d4f, type: 3}
+  - {fileID: 7880964437604995992, guid: f85f5176a56e94b418f956acb3f7a8e1, type: 3}
+  - {fileID: -6767630707695093201, guid: 52daa6b6ef030ec448043d8bb2b70879, type: 3}
+  - {fileID: -4793713186393160265, guid: e448898dcdf872245995c14bdd785931, type: 3}
+  - {fileID: -8917672817356499923, guid: 7af4bcd925592fe4090c777caf913942, type: 3}
+  - {fileID: -1012764896796071170, guid: d90351f07dc25774680f86c0c3076daf, type: 3}
+  - {fileID: -5295985140531557071, guid: ce9fbb0368a89ef44b204344f126ffe5, type: 3}
+  - {fileID: -260843961631586777, guid: ad8780679a9baaa40bb099df7b8c94ce, type: 3}
+  - {fileID: -192284018871697412, guid: 4858cba1a139e4f4ebf2f3c04f44cc94, type: 3}
+  - {fileID: 8402816874086754351, guid: b5cbf82bbab66d74a9d2d6179d51c0d4, type: 3}
+  - {fileID: 6835694069133225184, guid: eec2f4af60e8bef4e91f6e6d6afc224e, type: 3}
+  - {fileID: -4694746754767844369, guid: bbf97367e9854d64d8b32717f48bcd8d, type: 3}
+  - {fileID: 2607250971117013725, guid: 0e67b5099fed3e54a8a51f571d611165, type: 3}
+  - {fileID: -3502200169149010008, guid: c9c24bd9a63474549b29b9a4470a4e94, type: 3}
+  - {fileID: 2935304234784036183, guid: d96527ea6df6b8f4a9886c637752983c, type: 3}
+  - {fileID: 6420545175838756669, guid: d66fc324c6031be40bb1cee2a8ac6472, type: 3}
+  - {fileID: -5051485804234039155, guid: 096e2a6b6b76bc44d83dba49d134496a, type: 3}
+  - {fileID: 7256808879927781597, guid: e5951b16cb6be35499a803b5a5a101a5, type: 3}
+  - {fileID: -478882678752539408, guid: 426f18f0bd9189149a0d8340ec5e7820, type: 3}
+  - {fileID: -3621297592083349557, guid: 1efbe0180cb7afa4e8749abe93175bf8, type: 3}
+  - {fileID: -122999701322966394, guid: bede8b12d7d69a04281a8e13702af9b2, type: 3}
+  - {fileID: 6948206742473762866, guid: b868edfe0dd53724aa184f7963ef146f, type: 3}
+  - {fileID: 5131345492842388697, guid: 128493167e3664e4ba85d749b8f95cd4, type: 3}
+  - {fileID: -8172162086738532110, guid: 5628ad29daf82b94daf9c42ebfc3bded, type: 3}
+  - {fileID: 5828534285125231248, guid: 7c59cc4da4822c745896d1762a0d3079, type: 3}
   BrickScale: 5
   BrickMass: 1
   BrickFriction: 0.6
@@ -482,6 +510,13 @@ MonoBehaviour:
   ShotMass: 20
   ShotVelocity: 24
   SiegeOnLoad: 0
+  Outlying: 0
+  OutlyingBodies: 131072
+  TreeFolder: Trees
+  Trees: 20
+  TreeBodies: 49152
+  TreeSeed: 1
+  TreeMass: 0.25
   UnitCapacity: 512
   ArrowCapacity: 2048
   ShotCapacity: 512

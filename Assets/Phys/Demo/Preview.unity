@@ -497,13 +497,16 @@ MonoBehaviour:
   - {fileID: -8172162086738532110, guid: 5628ad29daf82b94daf9c42ebfc3bded, type: 3}
   - {fileID: 5828534285125231248, guid: 7c59cc4da4822c745896d1762a0d3079, type: 3}
   CastleFolder: Castles
+  TreeFolder: Trees
   BrickScale: 5
   BrickMass: 1
+  TreeMass: 0.25
   BrickFriction: 0.6
   Clearance: 0.00125
   Snap: 1
   SnapFractureLateral: 800
   SnapFractureTension: 300
+  WorldSnaps: 1
   Shadows: 1
   ShotCube: 0.12
   ShotMass: 20

@@ -32,6 +32,7 @@ namespace Phys.AvbdGpu.Tests
             m_Demo = m_Root.AddComponent<CastleDemo>();
             m_Demo.StartScene = 0;
             m_Demo.MaxBodies = 40960;
+            m_Demo.Trees = 0;   // the castle and its siege alone
             m_Demo.SiegeOnLoad = true;
             var settings = SiegeSettings.Default;
             settings.VolleyInterval = 90;      // 1.5 s

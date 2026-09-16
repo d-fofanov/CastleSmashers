@@ -103,6 +103,24 @@ namespace Phys.AvbdGpu.Scenes
             return -1;
         }
 
+        /// <summary>A copy turned about the grid's vertical axis through the origin by quarter turns (the castle demo turns its
+        /// trees): positions swapped exactly, rotations composed, bounds recomputed; stud alignment is kept, so the snaps and the
+        /// diagnostics see the same assembly.</summary>
+        public BrickAssembly Turned(int quarterTurns)
+        {
+            int k = quarterTurns & 3;
+            var q = quaternion.RotateY(math.radians(90f * k));
+            var a = new BrickAssembly { Name = Name };
+            foreach (var p in Parts)
+            {
+                float3 v = p.Position;
+                float3 position = k == 0 ? v : k == 1 ? new float3(v.z, v.y, -v.x) : k == 2 ? new float3(-v.x, v.y, -v.z) : new float3(-v.z, v.y, v.x);
+                a.Parts.Add(new AssemblyPart { Id = p.Id, Piece = p.Piece, Position = position, Rotation = k == 0 ? p.Rotation : math.mul(q, p.Rotation), Rgb = p.Rgb });
+            }
+            a.ComputeBounds();
+            return a;
+        }
+
         /// <summary>Number of parts using each piece, most used first.</summary>
         public List<(int piece, int count)> PieceCounts()
         {
@@ -625,8 +643,9 @@ namespace Phys.AvbdGpu.Scenes
 
         /// <summary>Snaps the pieces together like <see cref="BrickCastle.AddSnapJoints"/>: four hard ball-socket joints at the inset
         /// corners of every overlap in which an upright, stud-aligned piece rests exactly one body height on a studded top (bricks and
-        /// plates), and between every gripping piece on the ground and the world. The limits are split over the four joints.</summary>
-        public static int AddSnapJoints(ISceneBuilder s, BrickAssembly a, AssemblyBodies bodies, AssemblySpec spec, float fractureLateral, float fractureTension)
+        /// plates), and, unless <paramref name="worldJoints"/> is off, between every gripping piece on the ground and the world (a castle
+        /// stands on its base plate; a tree stands on the ground by friction). The limits are split over the four joints.</summary>
+        public static int AddSnapJoints(ISceneBuilder s, BrickAssembly a, AssemblyBodies bodies, AssemblySpec spec, float fractureLateral, float fractureTension, bool worldJoints = true)
         {
             const int Anchors = 4;
             float lateral = fractureLateral / Anchors, tension = fractureTension / Anchors, distance = spec.SnapBreakDistance;
@@ -662,6 +681,7 @@ namespace Phys.AvbdGpu.Scenes
                 float bottom = b.Position.y;
                 if (math.abs(bottom) < SnapTolerance)   // on the ground: snapped to the world, like the castle's ground course
                 {
+                    if (!worldJoints) continue;
                     foreach (var c in InsetCorners(rect[i]))
                     {
                         float3 anchor = spec.Origin + new float3(c.x, 0f, c.y) * spec.Unit;

@@ -40,22 +40,25 @@ namespace Phys.Demo.Editor
             if (s.result != BuildResult.Succeeded && Application.isBatchMode) EditorApplication.Exit(1);
         }
 
-        /// <summary>Assigns the brick, figure and arrow meshes to the CastleDemo of Castle.unity and saves the scene (the player
-        /// needs the references serialised; the editor falls back to loading them by path).</summary>
+        /// <summary>Assigns the brick, figure and arrow meshes and the 27 piece meshes of the construction pack (for the trees) to the
+        /// CastleDemo of Castle.unity and saves the scene (the player needs the references serialised; the editor falls back to
+        /// loading them by path).</summary>
         [MenuItem("Phys/Assign Castle Meshes")]
         public static void AssignCastleMeshes()
         {
             var scene = UnityEditor.SceneManagement.EditorSceneManager.OpenScene("Assets/Phys/Demo/Castle.unity");
             var demo = UnityEngine.Object.FindFirstObjectByType<CastleDemo>();
-            if (demo == null) { Debug.LogError("Castle.unity has no CastleDemo"); return; }
+            if (demo == null) { Debug.LogError("Castle.unity has no CastleDemo"); if (Application.isBatchMode) EditorApplication.Exit(1); return; }
             demo.BrickMesh = AssetDatabase.LoadAssetAtPath<Mesh>("Assets/Models/ConstructorBlock2x3/ConstructorBlock2x3.fbx");
             demo.FigureMesh = AssetDatabase.LoadAssetAtPath<Mesh>("Assets/Models/ConstructorFigure/ConstructorFigure.fbx");
             demo.ArrowMesh = AssetDatabase.LoadAssetAtPath<Mesh>("Assets/Models/ConstructorArrow/ConstructorArrow.fbx");
+            demo.PieceMeshes = LoadPieceMeshes("AssignCastleMeshes", out int missing);
             demo.SiegeParams = demo.SiegeParams.WithDefaults();
             EditorUtility.SetDirty(demo);
             UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(scene);
             UnityEditor.SceneManagement.EditorSceneManager.SaveScene(scene);
-            Debug.Log($"AssignCastleMeshes: brick {demo.BrickMesh}, figure {demo.FigureMesh}, arrow {demo.ArrowMesh}");
+            Debug.Log($"AssignCastleMeshes: brick {demo.BrickMesh}, figure {demo.FigureMesh}, arrow {demo.ArrowMesh}, {demo.PieceMeshes.Length - missing} of {demo.PieceMeshes.Length} piece meshes");
+            if (missing > 0 && Application.isBatchMode) EditorApplication.Exit(1);
         }
 
         /// <summary>Assigns the 27 piece meshes of the construction pack, in catalog order, to the PreviewDemo of Preview.unity and saves
@@ -66,19 +69,26 @@ namespace Phys.Demo.Editor
             var scene = UnityEditor.SceneManagement.EditorSceneManager.OpenScene("Assets/Phys/Demo/Preview.unity");
             var demo = UnityEngine.Object.FindFirstObjectByType<PreviewDemo>();
             if (demo == null) { Debug.LogError("Preview.unity has no PreviewDemo"); if (Application.isBatchMode) EditorApplication.Exit(1); return; }
-            var pieces = Phys.AvbdGpu.Scenes.PieceCatalog.Pieces;
-            demo.PieceMeshes = new Mesh[pieces.Length];
-            int missing = 0;
-            for (int i = 0; i < pieces.Length; i++)
-            {
-                demo.PieceMeshes[i] = AssetDatabase.LoadAssetAtPath<Mesh>($"Assets/Models/construction_pieces/{pieces[i].Id}.fbx");
-                if (demo.PieceMeshes[i] == null) { missing++; Debug.LogError($"AssignPreviewMeshes: no mesh for {pieces[i].Id}"); }
-            }
+            demo.PieceMeshes = LoadPieceMeshes("AssignPreviewMeshes", out int missing);
             EditorUtility.SetDirty(demo);
             UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(scene);
             UnityEditor.SceneManagement.EditorSceneManager.SaveScene(scene);
-            Debug.Log($"AssignPreviewMeshes: {pieces.Length - missing} of {pieces.Length} piece meshes assigned");
+            Debug.Log($"AssignPreviewMeshes: {demo.PieceMeshes.Length - missing} of {demo.PieceMeshes.Length} piece meshes assigned");
             if (missing > 0 && Application.isBatchMode) EditorApplication.Exit(1);
+        }
+
+        /// <summary>The 27 piece meshes of the construction pack in catalog order (null and an error for a missing one).</summary>
+        static Mesh[] LoadPieceMeshes(string who, out int missing)
+        {
+            var pieces = Phys.AvbdGpu.Scenes.PieceCatalog.Pieces;
+            var meshes = new Mesh[pieces.Length];
+            missing = 0;
+            for (int i = 0; i < pieces.Length; i++)
+            {
+                meshes[i] = AssetDatabase.LoadAssetAtPath<Mesh>($"Assets/Models/construction_pieces/{pieces[i].Id}.fbx");
+                if (meshes[i] == null) { missing++; Debug.LogError($"{who}: no mesh for {pieces[i].Id}"); }
+            }
+            return meshes;
         }
 
         /// <summary>Writes <see cref="TerrainSettings.CastleScene"/> into Castle.unity (hills on) and Preview.unity (the same field, flat

@@ -11,7 +11,8 @@ namespace Phys.AvbdGpu.Tests
 {
     /// <summary>PlayMode: the preview demo loads the castles of Resources/Castles and draws every piece with its model; the Outpost
     /// exported from the castle planner stands dry-stacked and snapped and loses bricks to a cannonball; the Emerald Crown Citadel
-    /// (an agent's design re-bonded by Tools/rebond_castle.py) stands dry-stacked and holds snapped.</summary>
+    /// (an agent's design re-bonded by Tools/rebond_castle.py) stands dry-stacked and holds snapped; the six trees of
+    /// Resources/Trees (Tools/generate_trees.py) stand dry-stacked and hold snapped.</summary>
     public class PreviewSmokeTests
     {
         GameObject m_Root;
@@ -167,6 +168,62 @@ namespace Phys.AvbdGpu.Tests
             yield return Run(180);
             Assert.Less(m_Moves.max, 0.25f * BrickHeight, "no brick moved more than a quarter of its height: the castle stands on the ridge");
             Assert.Greater(m_Moves.groundStill, 0.95f, "the pieces on the plateau stay put");
+        }
+
+        static readonly string[] s_Trees = { "oak", "pine", "cypress", "elm", "birch", "maple" };
+
+        /// <summary>The castle scene's configuration, which the trees are planted in: 1 kg castle bricks, the trees at their own 0.25 kg,
+        /// snaps of 800 N sideways and 300 N up (the script defaults' 50 N of tension tear the trunk's lowest snaps as a tree lands).</summary>
+        void SceneConfiguration()
+        {
+            m_Demo.BrickMass = 1f;
+            m_Demo.SnapFractureLateral = 800f;
+            m_Demo.SnapFractureTension = 300f;
+        }
+
+        /// <summary>Every tree document: a thousand to three thousand pieces, nothing floating, poorly supported or intersecting
+        /// (the generator's corbel rule), every piece drawn with its model, and the tree standing dry-stacked for three seconds:
+        /// nothing falls off (no piece moves a brick height) and the crown's corbel, an inverted dome that loose bricks hold by
+        /// friction alone, creeps less than a quarter of a brick height on average (all six are tried; the failures are reported
+        /// together).</summary>
+        [UnityTest]
+        public IEnumerator TreesStandDryStacked()
+        {
+            SceneConfiguration();
+            var failures = new System.Text.StringBuilder();
+            foreach (var name in s_Trees)
+            {
+                LoadCastle(name);
+                Assert.That(m_Demo.PartCount, Is.InRange(1000, 3000), name);
+                var d = m_Demo.Diagnostics;
+                if (!d.Clean) failures.Append($"{name}: {d.Floating} floating, {d.PoorlySupported} poorly supported, {d.Intersections} intersecting ({d.Sample})" + "\n");
+                yield return Run(180);
+                Debug.Log($"dry {name}: {m_Demo.PartCount} pieces, max {m_Moves.max * 1000f:F0} mm, mean {m_Moves.mean * 1000f:F1} mm, still {m_Moves.still}/{m_Demo.PartCount}");
+                if (m_Moves.max >= BrickHeight) failures.Append($"{name}: a piece moved {m_Moves.max * 1000f:F0} mm, a brick height or more: something fell off" + "\n");
+                if (m_Moves.mean >= 0.25f * BrickHeight) failures.Append($"{name}: the pieces moved {m_Moves.mean * 1000f:F0} mm on average, a quarter of a brick height or more" + "\n");
+                if (m_Moves.groundStill < 0.95f) failures.Append($"{name}: the pieces on the ground moved" + "\n");
+            }
+            Assert.AreEqual(0, failures.Length, failures.ToString());
+        }
+
+        /// <summary>Every tree snapped: at least one snap joint per piece and none breaking under the tree's own weight.</summary>
+        [UnityTest]
+        public IEnumerator TreesHoldSnapped()
+        {
+            SceneConfiguration();
+            m_Demo.Snap = true;
+            var failures = new System.Text.StringBuilder();
+            foreach (var name in s_Trees)
+            {
+                LoadCastle(name);
+                Assert.Greater(m_Demo.SnapJoints, m_Demo.PartCount, $"{name}: at least one snap joint per piece");
+                yield return Run(120);
+                int broken = BrokenJoints();
+                Debug.Log($"snapped {name}: max {m_Moves.max * 1000f:F0} mm, mean {m_Moves.mean * 1000f:F1} mm, broken {broken}: {BrokenSummary()}");
+                if (m_Moves.max >= 0.25f * BrickHeight) failures.Append($"{name}: a piece moved {m_Moves.max * 1000f:F0} mm (more than a quarter of a brick height)\n");
+                if (broken > 0) failures.Append($"{name}: {broken} snaps broke under the tree's own weight: {BrokenSummary()}\n");
+            }
+            Assert.AreEqual(0, failures.Length, failures.ToString());
         }
 
         struct Moves { public float max, mean; public int still; public float groundStill; }
