@@ -105,8 +105,11 @@ namespace Phys.AvbdGpu
         public GraphicsBuffer LinkStart, LinkList;
         // the hot grid
         public GraphicsBuffer CellCount, CellStart, CellCursor, CellEntries, LargeBodies, BlockSums;
-        // pairs and manifolds
+        // pairs and the two manifold pools (the step reads one and writes the other, alternating: see AvbdGpuWorld.LatestPool)
         public GraphicsBuffer Pairs, ManifoldPrev, ManifoldCur, ContactsPrev, ContactsCur, HashPrev, HashCur;
+        public GraphicsBuffer Manifolds(int pool) => pool == 0 ? ManifoldPrev : ManifoldCur;
+        public GraphicsBuffer Contacts(int pool) => pool == 0 ? ContactsPrev : ContactsCur;
+        public GraphicsBuffer Hash(int pool) => pool == 0 ? HashPrev : HashCur;
         // joints and springs
         public GraphicsBuffer JointDef, JointState, SpringDef;
         // CSR
@@ -156,9 +159,9 @@ namespace Phys.AvbdGpu
             CellEntries = Structured(config.MaxCellEntries, 4); LargeBodies = Structured(config.MaxLargeBodies, 4);
             BlockSums = Structured(1024, 4);
             Pairs = Structured(config.MaxPairs, 8);
-            ManifoldPrev = Copyable(config.MaxManifolds, GpuManifold.Stride); ManifoldCur = Copyable(config.MaxManifolds, GpuManifold.Stride);
-            ContactsPrev = Copyable(config.MaxContacts, GpuContact.Stride); ContactsCur = Copyable(config.MaxContacts, GpuContact.Stride);
-            HashPrev = Copyable(config.HashSize, 4); HashCur = Copyable(config.HashSize, 4);
+            ManifoldPrev = Structured(config.MaxManifolds, GpuManifold.Stride); ManifoldCur = Structured(config.MaxManifolds, GpuManifold.Stride);
+            ContactsPrev = Structured(config.MaxContacts, GpuContact.Stride); ContactsCur = Structured(config.MaxContacts, GpuContact.Stride);
+            HashPrev = Structured(config.HashSize, 4); HashCur = Structured(config.HashSize, 4);
             JointDef = Structured(config.MaxJoints, GpuJointDef.Stride); JointState = Structured(config.MaxJoints, GpuJointState.Stride);
             SpringDef = Structured(config.MaxSprings, GpuSpringDef.Stride);
             BodyConsCount = Structured(nb, 4); BodyConsCursor = Structured(nb, 4); BodyConsStart = Structured(nb + 1, 4);
@@ -173,9 +176,6 @@ namespace Phys.AvbdGpu
         }
 
         GraphicsBuffer Structured(int count, int stride) => Track(new GraphicsBuffer(GraphicsBuffer.Target.Structured, math.max(count, 1), stride));
-
-        /// <summary>Structured buffer that CommandBuffer.CopyBuffer can copy from and to (the prev/cur manifold state).</summary>
-        GraphicsBuffer Copyable(int count, int stride) => Track(new GraphicsBuffer(GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.CopySource | GraphicsBuffer.Target.CopyDestination, math.max(count, 1), stride));
 
         GraphicsBuffer Track(GraphicsBuffer b) { m_All.Add(b); return b; }
 

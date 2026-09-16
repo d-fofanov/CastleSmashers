@@ -26,9 +26,9 @@ the tangents and the contact points are computed once per step, and the constrai
 
 ## Pipeline
 
-Every kernel is recorded once into a `CommandBuffer`; every count-dependent dispatch is indirect, so the buffer is
-re-recorded only when the iteration count, the post-stabilisation flag, the active colour count, the terrain or the
-sleeping settings change. Per-step constants (dt, gravity, α, β, γ, counts, the sleep thresholds) live in one constant
+Every kernel is recorded once into a `CommandBuffer` (twice: the two manifold pools alternate between the recordings,
+step 12); every count-dependent dispatch is indirect, so the buffers are re-recorded only when the iteration count, the
+post-stabilisation flag, the active colour count, the terrain or the sleeping settings change. Per-step constants (dt, gravity, α, β, γ, counts, the sleep thresholds) live in one constant
 buffer.
 
 0. **CPU wakes** (`WakeList`): the bodies the application changed since the last step (spawned, re-driven, re-flagged,
@@ -144,8 +144,10 @@ buffer.
     appended to the cold store with its contacts and the generations of its bodies, in the order of the step's list
     (the scans give the manifolds and the contacts their places, so the contacts of the pool lie in manifold order),
     and hashed by pair. It is not recreated next step — no pair without an active body is — so it leaves the step.
-12. The manifold, contact and hash buffers are copied to their "previous" twins (`CopyBuffer`) and the counters are
-    copied to a stats buffer for the asynchronous readback.
+12. The counters are copied to a stats buffer for the asynchronous readback. The manifold, contact and hash buffers
+    are not copied anywhere: the step is recorded twice, once reading pool 0 and writing pool 1 and once the other way
+    round, and the world executes the two recordings alternately, so the next step reads this step's manifolds from
+    where they were written.
 
 Rendering never touches the CPU: one `RenderMeshPrimitives` cube draw reads the pose and definition buffers by
 instance id; contact crosses and joint lines are written by small kernels into vertex buffers and drawn with

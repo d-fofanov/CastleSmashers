@@ -167,8 +167,8 @@ namespace Phys.AvbdGpu.Presentation
                 cs.SetBuffer(m_DebugContacts, "_Stats", b.Stats);
                 cs.SetBuffer(m_DebugContacts, "_BodyPos", b.BodyPos);
                 cs.SetBuffer(m_DebugContacts, "_BodyRot", b.BodyRot);
-                cs.SetBuffer(m_DebugContacts, "_ManifoldPrev", b.ManifoldPrev);
-                cs.SetBuffer(m_DebugContacts, "_ContactsPrev", b.ContactsPrev);
+                cs.SetBuffer(m_DebugContacts, "_ManifoldPrev", m_World.LatestManifolds);
+                cs.SetBuffer(m_DebugContacts, "_ContactsPrev", m_World.LatestContacts);
                 cs.SetBuffer(m_DebugContacts, "_DebugVerts", m_DebugVerts);
                 cs.DispatchIndirect(m_DebugContacts, b.DispatchArgs, 2 * 12);   // ARG_MANIFOLDS
                 m_ContactProps.SetBuffer(s_DebugVerts, m_DebugVerts);

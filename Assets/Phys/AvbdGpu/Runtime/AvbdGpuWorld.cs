@@ -147,6 +147,7 @@ namespace Phys.AvbdGpu
 
         Heightfield m_Terrain;
         int m_TerrainBody = -1;
+        int m_LatestPool;   // the manifold pool the last step wrote (the next one reads it and writes the other)
 
         public int BodyCount => m_BodyCount;
         public int JointCount => m_JointCount;
@@ -157,6 +158,11 @@ namespace Phys.AvbdGpu
         public AvbdGpuStats Stats => m_Stats;
         public int ActiveColors => m_ActiveColors;
         public int StepIndex { get; private set; }
+        /// <summary>The manifold pool (0 or 1) holding the last step's manifolds, contacts and hash: what the debug draw and the
+        /// synchronous readbacks read.</summary>
+        public int LatestPool => m_LatestPool;
+        public GraphicsBuffer LatestManifolds => Buffers.Manifolds(m_LatestPool);
+        public GraphicsBuffer LatestContacts => Buffers.Contacts(m_LatestPool);
 
         public AvbdGpuWorld(AvbdGpuConfig config)
         {
@@ -564,6 +570,7 @@ namespace Phys.AvbdGpu
             Array.Clear(m_EventsRead, 0, m_EventsRead.Length);
             AvbdGpuBuffers.Clear(Buffers.HashPrev);
             AvbdGpuBuffers.Clear(Buffers.HashCur);
+            m_LatestPool = 0;
             AvbdGpuBuffers.Clear(Buffers.BodyConsCount);
             AvbdGpuBuffers.Clear(Buffers.LinkStart);
             AvbdGpuBuffers.Clear(Buffers.BodySleep);
@@ -773,7 +780,10 @@ namespace Phys.AvbdGpu
             if (Params.Sleep && StepIndex % math.max(1, Params.ColdCompactSteps) == 0)
                 Graphics.ExecuteCommandBuffer(m_Pipeline.CompactCommandBuffer);
             for (int s = 0; s < substeps; s++)
-                Graphics.ExecuteCommandBuffer(m_Pipeline.CommandBuffer);
+            {
+                Graphics.ExecuteCommandBuffer(m_Pipeline.CommandBuffer(m_LatestPool));
+                m_LatestPool = 1 - m_LatestPool;
+            }
             m_Watch.Stop();
             double ms = m_Watch.Elapsed.TotalMilliseconds;
             m_StepMsSum += ms; m_StepCount++;
@@ -1031,8 +1041,8 @@ namespace Phys.AvbdGpu
             var stats = GetStatsSync();
             var m = new GpuManifold[math.max(stats.Manifolds, 1)];
             contacts = new GpuContact[math.max(stats.Contacts, 1)];
-            if (stats.Manifolds > 0) Buffers.ManifoldPrev.GetData(m, 0, 0, stats.Manifolds);
-            if (stats.Contacts > 0) Buffers.ContactsPrev.GetData(contacts, 0, 0, stats.Contacts);
+            if (stats.Manifolds > 0) LatestManifolds.GetData(m, 0, 0, stats.Manifolds);
+            if (stats.Contacts > 0) LatestContacts.GetData(contacts, 0, 0, stats.Contacts);
             return m;
         }
 

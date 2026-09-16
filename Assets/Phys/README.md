@@ -439,25 +439,25 @@ Step times (solver only, `PerformanceTests`, GPU synchronised once after 60-120 
 |---|---|---|---|---|---|
 | Pyramid (16 rows) | 137 | 283 / 1.2 k | 1.47 ms | | 3.5 ms (290 fps) |
 | Breakable | 19 | 10 / 36 | | | 3.1 ms (328 fps) |
-| Pyramid 22k | 22 141 | 85 k / 340 k | 6.3 ms | 3.9 ms | 8.3 ms (120 fps) |
-| Pile 50k (falling block) | 50 001 | 52 k / 200 k | 3.9 ms | 3.4 ms | 4.6 ms (219 fps) |
-| Pyramid 74k | 73 811 | 305 k / 1.19 M | | 17.4 ms | 37 ms (27 fps) |
-| Pyramid 22k on a heightfield | 22 141 | 85 k / 345 k (1 600 terrain manifolds) | 6.5 ms | | |
+| Pyramid 22k | 22 141 | 85 k / 340 k | 6.5 ms | 3.8 ms | 8.3 ms (120 fps) |
+| Pile 50k (falling block) | 50 001 | 52 k / 200 k | 3.6 ms | 3.1 ms | 4.6 ms (219 fps) |
+| Pyramid 74k | 73 811 | 305 k / 1.19 M | | 17.2 ms | 37 ms (27 fps) |
+| Pyramid 22k on a heightfield | 22 141 | 85 k / 345 k (1 600 terrain manifolds) | 6.7 ms | | |
 | Terrain (100 boxes on hills) | 101 | 109 / 396 | 0.8 ms | | |
-| Pyramid (16 rows), asleep | 137 | 0 (326 cold) | 0.79 ms | | |
-| Pyramid 22k, asleep | 22 141 | 0 (90 k cold) | 1.14 ms | | |
-| Stronghold (17k bricks, castle scale, 1 substep), awake / asleep | 17 130 | 38 k / 157 k | 4.7 ms / 1.16 ms | | |
+| Pyramid (16 rows), asleep | 137 | 0 (326 cold) | 0.76 ms | | |
+| Pyramid 22k, asleep | 22 141 | 0 (90 k cold) | 0.77 ms | | |
+| Stronghold (17k bricks, castle scale, 1 substep), awake / asleep | 17 130 | 38 k / 157 k | 4.4 ms / 0.77 ms | | |
 
 Small scenes are bound by the ~130 indirect dispatches of a step (about 1.5 ms); large piles by the contact traffic
 of the primal sweeps (every iteration re-reads every contact from both bodies), so the iteration count is the main
 knob — the paper uses 4 for its large piles. CPU time per step is 0.1-1 ms (parameter upload, command buffer
 submission). The terrain pass costs what the ground box did: the 22k pyramid on a flat heightfield instead of the box
 steps in 6.5 ms against 6.4 (its 1 600 base cubes carry 8 terrain contacts each instead of 4 box contacts); bodies
-above the surface leave the pass at the mip test. Asleep, a scene costs the fixed overhead of ~150 dispatches, the flat
-passes over the bodies (the hot list flags and their scan) and the copies of the pools sized for the awake bodies — the
-sleepers themselves have no thread in any pass once the sleeping grid and the cold store hold them: the 22k pyramid sleeps
-whole 3 s after it is built (the small pyramid 6 s, its top creeps longer) and the 17k castle 4 s, and they step in 1.14
-and 1.16 ms from then on against a 0.8 ms floor; the
+above the surface leave the pass at the mip test. Asleep, a scene costs the fixed overhead of ~150 dispatches and the flat
+passes over the bodies (the hot list flags and their scan) — the sleepers themselves have no thread in any pass once the
+sleeping grid and the cold store hold them, and nothing is copied at the end of a step (the two manifold pools alternate
+between two recordings of the step): the 22k pyramid sleeps whole 3 s after it is built (the small pyramid 6 s, its top
+creeps longer) and the 17k castle 4 s, and they step in 0.77 ms from then on, the floor of the small scenes; the
 Outpost under siege sleeps between the volleys with its holding units, and its arrows wake what they hit. In the castle
 player (snapped castles on the tiled hills, 1280 x 720, `-avbd-bench` against `-avbd-nosleep`) the frame drops from
 9.9 to 6.6 ms for the Outpost, 25.0 to 19.1 ms for the Stronghold and 40.3 to 31.2 ms for the Royal citadel; what is
