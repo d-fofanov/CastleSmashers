@@ -322,7 +322,8 @@ namespace Phys.AvbdGpu
 
         // ------------------------------------------------------------------------------------------------ sleeping
 
-        /// <summary>Wakes a body and, through its contacts, the island it belongs to (applied at the start of the next step).
+        /// <summary>Wakes a body for at least <see cref="AvbdGpuParams.SleepTime"/> (applied at the start of the next step); what it
+        /// then touches wakes in turn, the whole island of a touched body once it moves faster than <see cref="AvbdGpuParams.WakeSpeed"/>.
         /// Gameplay changes made through the world (drives, flags, joints, spawns, retirements, the terrain) wake by themselves.</summary>
         public void WakeBody(int slot) => Wake(slot, WakeMode.Self);
 
