@@ -86,6 +86,9 @@ namespace Phys.AvbdGpu
         readonly GpuBodyDrive[] m_Drives;
         readonly float4[] m_Pos, m_Rot, m_Vel;
         readonly uint[] m_Uncolored, m_ZeroUints, m_Identity, m_FreshUints;
+        // the sleep words and island labels new bodies go up with: awake and their own island, unless SleepRange put them to sleep
+        readonly uint[] m_SleepWords, m_Labels;
+        bool m_RebuildNow;
         int m_BodyCount, m_UploadedBodies;
         double m_ExtentSum; int m_ExtentCount;
         // definitions and drives are CPU-owned: changes to uploaded bodies are re-sent as one range each
@@ -133,6 +136,10 @@ namespace Phys.AvbdGpu
         bool m_PoseRequestPending, m_StatsRequestPending;
         /// <summary>Body ranges whose event words are read back asynchronously every step (the unit and projectile pools).</summary>
         public readonly List<(int start, int count)> EventRanges = new List<(int, int)>();
+        /// <summary>Body ranges whose poses <see cref="ReadbackPoses"/> reads back (none: every body). A world larger than what a
+        /// frame can read back keeps the ranges it steers and picks in here; <see cref="ReadPositions"/> is stale outside them.</summary>
+        public readonly List<(int start, int count)> PoseRanges = new List<(int, int)>();
+        int m_PoseRequests;
         uint[] m_EventsRead;
         int m_EventRequestsPending;
         /// <summary>Incremented when a full set of event ranges has arrived.</summary>
@@ -169,6 +176,8 @@ namespace Phys.AvbdGpu
             for (int i = 0; i < m_Uncolored.Length; i++) m_Uncolored[i] = 0xFFFFFFFFu;
             m_FreshUints = new uint[config.MaxBodies];
             for (int i = 0; i < m_FreshUints.Length; i++) m_FreshUints[i] = GpuBodySleep.Fresh;
+            m_SleepWords = new uint[config.MaxBodies];
+            m_Labels = new uint[config.MaxBodies];
             m_Identity = new uint[config.MaxBodies];
             for (int i = 0; i < m_Identity.Length; i++) m_Identity[i] = (uint)i;
             m_WakeArray = new uint2[math.max(config.MaxWakes, 1)];
@@ -206,6 +215,7 @@ namespace Phys.AvbdGpu
             m_Pos[i] = new float4(position, 0);
             m_Rot[i] = rotation.value;
             m_Vel[i] = new float4(velocity, 0);
+            m_SleepWords[i] = 0; m_Labels[i] = (uint)i;
             if (m_BodyDefs[i].Mass > 0f) { m_ExtentSum += math.cmax(size); m_ExtentCount++; }
             return i;
         }
@@ -274,6 +284,7 @@ namespace Phys.AvbdGpu
                 m_Pos[slot] = float4.zero;
                 m_Rot[slot] = quaternion.identity.value;
                 m_Vel[slot] = float4.zero;
+                m_SleepWords[slot] = 0; m_Labels[slot] = (uint)slot;
             }
             return first;
         }
@@ -339,6 +350,27 @@ namespace Phys.AvbdGpu
             a.Mode == b.Mode && math.all(a.Target == b.Target) && math.all(a.Mask == b.Mask) && a.Limit == b.Limit && a.Yaw == b.Yaw;
 
         // ------------------------------------------------------------------------------------------------ sleeping
+
+        /// <summary>Builds the bodies [first, first + count) — added since the last step and not stepped yet — asleep: they start
+        /// in the sleeping grid at the pose they were added with, as one island (representative <paramref name="island"/>, the first
+        /// of them by default: a fast touch on any of them wakes them all) and cost nothing until something wakes them, when they
+        /// settle from cold contacts like a freshly built scene and sleep again. This is how a world larger than its active
+        /// capacity is built: structure by structure, each put to sleep before the next is stepped. Static bodies are left alone.</summary>
+        public void SleepRange(int first, int count, int island = -1)
+        {
+            if (first < 0 || count < 0 || first + count > m_BodyCount) throw new ArgumentOutOfRangeException(nameof(first));
+            if (first < m_UploadedBodies) throw new InvalidOperationException("AvbdGpuWorld.SleepRange: the bodies were stepped already (they sleep by resting, or by nothing at all)");
+            if (island < 0) island = first;
+            const uint word = GpuBodySleep.Asleep | 0x08000000u;   // asleep, with a rest counter no sleep time exceeds
+            for (int i = first; i < first + count; i++)
+            {
+                if (m_BodyDefs[i].IsStatic) continue;
+                m_SleepWords[i] = word;
+                m_Labels[i] = (uint)island;
+                m_Vel[i] = float4.zero;
+            }
+            m_RebuildNow = true;   // into the sleeping grid before their first step: the hot grid has no room for them
+        }
 
         /// <summary>Wakes a body for at least <see cref="AvbdGpuParams.SleepTime"/> (applied at the start of the next step); what it
         /// then touches wakes in turn, the whole island of a touched body once it moves faster than <see cref="AvbdGpuParams.WakeSpeed"/>.
@@ -528,6 +560,7 @@ namespace Phys.AvbdGpu
             m_SpawnQueue.Clear();
             m_WakeList.Clear(); m_WakeAll = false;
             EventRanges.Clear();
+            PoseRanges.Clear();
             Array.Clear(m_EventsRead, 0, m_EventsRead.Length);
             AvbdGpuBuffers.Clear(Buffers.HashPrev);
             AvbdGpuBuffers.Clear(Buffers.HashCur);
@@ -556,6 +589,16 @@ namespace Phys.AvbdGpu
         public void Upload()
         {
             var b = Buffers;
+            if (m_WakeAll)
+            {
+                // every body on the GPU awake and fresh (its contacts warm start from the cold store); nothing is in the sleeping
+                // grid any more, and the cold store's bookkeeping restarts with it (its entries die with their bodies' next sleep).
+                // Bodies added since go up with their own words below (SleepRange may have put them to sleep).
+                if (m_UploadedBodies > 0) b.BodySleep.SetData(m_FreshUints, 0, 0, m_UploadedBodies);
+                b.Counters.SetData(m_ZeroPersistent, 0, (int)StatSlot.Persistent, (int)StatSlot.Cold - (int)StatSlot.Persistent);
+                m_WakeAll = false;
+                m_WakeList.Clear();
+            }
             if (m_UploadedBodies < m_BodyCount)
             {
                 int start = m_UploadedBodies, count = m_BodyCount - start;
@@ -572,20 +615,11 @@ namespace Phys.AvbdGpu
                 b.BodyVelAng.SetData(new float4[count], 0, start, count);
                 b.BodyColor.SetData(m_Uncolored, start, start, count);
                 b.BodyEvents.SetData(m_ZeroUints, start, start, count);
-                b.BodySleep.SetData(m_ZeroUints, start, start, count);   // awake, and each its own island
-                b.BodyLabel.SetData(m_Identity, start, start, count);
+                b.BodySleep.SetData(m_SleepWords, start, start, count);   // awake and each its own island, or asleep as SleepRange said
+                b.BodyLabel.SetData(m_Labels, start, start, count);
                 m_UploadedBodies = m_BodyCount;
                 // static bodies never fall asleep, so nothing but a requested rebuild would move new ones into the sleeping grid
                 b.Counters.SetData(m_One, 0, (int)StatSlot.RebuildForce, 1);
-            }
-            if (m_WakeAll)
-            {
-                // every body awake and fresh (its contacts warm start from the cold store); nothing is in the sleeping grid any
-                // more, and the cold store's bookkeeping restarts with it (its entries die with their bodies' next sleep)
-                if (m_BodyCount > 0) b.BodySleep.SetData(m_FreshUints, 0, 0, m_BodyCount);
-                b.Counters.SetData(m_ZeroPersistent, 0, (int)StatSlot.Persistent, (int)StatSlot.Cold - (int)StatSlot.Persistent);
-                m_WakeAll = false;
-                m_WakeList.Clear();
             }
             if (m_WakeList.Count > 0 && Params.Sleep)
             {
@@ -720,8 +754,9 @@ namespace Phys.AvbdGpu
         /// <summary>Advances the world by Params.Dt (Params.Substeps substeps). Nothing is read back synchronously.</summary>
         public void Step()
         {
-            // a change of gravity or switching sleeping off must reach the sleeping bodies
-            if (math.any(Params.Gravity != m_LastGravity) || (m_SleepWasOn && !Params.Sleep)) WakeAll();
+            // a change of gravity or switching sleeping off must reach the sleeping bodies (between steps: nothing slept before the
+            // first one, and structures built asleep for it must stay so)
+            if (StepIndex > 0 && (math.any(Params.Gravity != m_LastGravity) || (m_SleepWasOn && !Params.Sleep))) WakeAll();
             m_LastGravity = Params.Gravity; m_SleepWasOn = Params.Sleep;
             Upload();
             int substeps = math.max(1, Params.Substeps);
@@ -732,8 +767,9 @@ namespace Phys.AvbdGpu
             m_Watch.Restart();
             // the sleeping grid rebuild and the cold store compaction, every few steps; they decide on the GPU whether enough
             // bodies fell asleep or woke, or enough of the store was thawed
-            if (Params.Sleep && StepIndex % math.max(1, Params.SleepGridRebuildSteps) == 0)
+            if (Params.Sleep && (m_RebuildNow || StepIndex % math.max(1, Params.SleepGridRebuildSteps) == 0))
                 Graphics.ExecuteCommandBuffer(m_Pipeline.RebuildCommandBuffer);
+            m_RebuildNow = false;
             if (Params.Sleep && StepIndex % math.max(1, Params.ColdCompactSteps) == 0)
                 Graphics.ExecuteCommandBuffer(m_Pipeline.CompactCommandBuffer);
             for (int s = 0; s < substeps; s++)
@@ -754,11 +790,14 @@ namespace Phys.AvbdGpu
             }
             if (ReadbackPoses && !m_PoseRequestPending && m_BodyCount > 0)
             {
-                m_PoseRequestPending = true;
                 m_PosRequestStep = StepIndex;
-                int count = m_BodyCount;
-                AsyncGPUReadback.Request(Buffers.BodyPos, count * 16, 0, r => OnPoses(r, count, true));
-                AsyncGPUReadback.Request(Buffers.BodyRot, count * 16, 0, r => OnPoses(r, count, false));
+                int total = m_BodyCount;
+                if (m_PosRead == null || m_PosRead.Length < total) m_PosRead = new float4[math.max(total, 1024)];
+                if (m_RotRead == null || m_RotRead.Length < total) m_RotRead = new float4[math.max(total, 1024)];
+                m_PoseRequests = 0;
+                if (PoseRanges.Count == 0) RequestPoses(0, total);
+                else foreach (var (start, count) in PoseRanges) RequestPoses(math.max(start, 0), math.min(start + count, total) - math.max(start, 0));
+                m_PoseRequestPending = m_PoseRequests > 0;
             }
             if (m_EventRequestsPending == 0 && EventRanges.Count > 0)
             {
@@ -836,23 +875,25 @@ namespace Phys.AvbdGpu
             else m_ShrinkCounter = 0;
         }
 
-        void OnPoses(AsyncGPUReadbackRequest r, int count, bool positions)
+        void RequestPoses(int start, int count)
         {
-            if (!positions) m_PoseRequestPending = false;
-            if (r.hasError) return;
-            var data = r.GetData<float4>();
-            if (positions)
+            if (count <= 0) return;
+            m_PoseRequests += 2;
+            AsyncGPUReadback.Request(Buffers.BodyPos, count * 16, start * 16, r => OnPoses(r, start, count, true));
+            AsyncGPUReadback.Request(Buffers.BodyRot, count * 16, start * 16, r => OnPoses(r, start, count, false));
+        }
+
+        void OnPoses(AsyncGPUReadbackRequest r, int start, int count, bool positions)
+        {
+            if (!r.hasError)
             {
-                if (m_PosRead == null || m_PosRead.Length < count) m_PosRead = new float4[math.max(count, 1024)];
-                NativeArray<float4>.Copy(data, m_PosRead, count);
+                var data = r.GetData<float4>();
+                NativeArray<float4>.Copy(data, 0, positions ? m_PosRead : m_RotRead, start, count);
             }
-            else
-            {
-                if (m_RotRead == null || m_RotRead.Length < count) m_RotRead = new float4[math.max(count, 1024)];
-                NativeArray<float4>.Copy(data, m_RotRead, count);
-                m_PosReadCount = count;
-                m_PosReadStep = m_PosRequestStep;
-            }
+            if (--m_PoseRequests > 0) return;
+            m_PoseRequestPending = false;
+            m_PosReadCount = m_BodyCount;
+            m_PosReadStep = m_PosRequestStep;
         }
 
         /// <summary>Poses from the last asynchronous readback (one or two frames old); null until the first arrives.</summary>
@@ -1000,14 +1041,22 @@ namespace Phys.AvbdGpu
         /// <summary>Ray vs the dynamic OBBs of the last read-back poses (Solver::pick): returns the body or -1; local is the hit in body space.</summary>
         public int Pick(float3 origin, float3 dir, out float3 local, out float distance)
         {
-            const float epsilon = 1.0e-6f;
             float bestT = float.PositiveInfinity;
             int best = -1;
             local = float3.zero;
             distance = 0f;
             if (m_PosRead == null || m_RotRead == null) return -1;
             int n = math.min(m_PosReadCount, m_BodyCount);
-            for (int i = 0; i < n; i++)
+            if (PoseRanges.Count == 0) PickRange(origin, dir, 0, n, ref bestT, ref best, ref local);
+            else foreach (var (start, count) in PoseRanges) PickRange(origin, dir, math.max(start, 0), math.min(start + count, n), ref bestT, ref best, ref local);
+            distance = bestT;
+            return best;
+        }
+
+        void PickRange(float3 origin, float3 dir, int from, int to, ref float bestT, ref int best, ref float3 local)
+        {
+            const float epsilon = 1.0e-6f;
+            for (int i = from; i < to; i++)
             {
                 if (m_BodyDefs[i].IsStatic) continue;
                 quaternion invRot = math.conjugate(new quaternion(m_RotRead[i]));
@@ -1037,8 +1086,6 @@ namespace Phys.AvbdGpu
                 best = i;
                 local = o + d * tHit;
             }
-            distance = bestT;
-            return best;
         }
     }
 }

@@ -304,6 +304,66 @@ namespace Phys.AvbdGpu.Tests
             Assert.AreEqual(0, world.GetStatsSync().OverflowFlags);
         }
 
+        /// <summary>Structures built asleep (<see cref="AvbdGpuWorld.SleepRange"/>) start in the sleeping grid as one island each and
+        /// cost nothing: three pyramids of 385 cubes in a world with room for 1024 awake bodies. A shot into one wakes that pyramid
+        /// alone, which settles from cold contacts and sleeps again; the others never stir.</summary>
+        [Test]
+        public void BodiesBuiltAsleepWaitInTheGridUntilWoken()
+        {
+            if (!AvbdGpuKernels.Supported) Assert.Ignore("no compute");
+            using var world = new AvbdGpuWorld(AvbdGpuConfig.ForBodies(4096, 1024));
+            world.Params.SleepGridRebuildMin = 1;
+            world.AddBody(new float3(400, 1, 400), 0f, 0.5f, new float3(0, -0.5f, 0), quaternion.identity, float3.zero);
+            const int n = 10;
+            var firsts = new int[3];
+            for (int p = 0; p < 3; p++)
+            {
+                firsts[p] = AddPyramid(world, n, new float3(p * 30f - 30f, 0, 0));
+                world.SleepRange(firsts[p], 385);
+            }
+            world.Step();
+            var stats = world.GetStatsSync();
+            Assert.AreEqual(1155, stats.Sleeping, "every cube sleeps from the first step");
+            Assert.AreEqual(1155, stats.SleepGrid, "in the sleeping grid, from the first step");
+            Assert.AreEqual(1, stats.Hot, "only the ground is hot");
+            Assert.AreEqual(0, stats.Active);
+            Assert.AreEqual(0, stats.OverflowFlags, "nothing overflowed the pools sized for 1024 awake bodies");
+            var labels = world.GetLabelsSync();
+            var words = world.GetSleepSync();
+            for (int p = 0; p < 3; p++)
+                for (int b = firsts[p]; b < firsts[p] + 385; b++)
+                {
+                    Assert.AreEqual((uint)firsts[p], labels[b], $"cube {b} carries the island of its pyramid");
+                    Assert.IsTrue(GpuBodySleep.IsAsleep(words[b]) && GpuBodySleep.IsInGrid(words[b]), $"cube {b} sleeps in the grid");
+                }
+            for (int i = 0; i < 30; i++) world.Step();
+            world.GetPosesSync(out var pos0, out _);
+
+            int shot = world.AddBody(new float3(1, 1, 1), 2f, 0.5f, new float3(0f, 2f, -12f), quaternion.identity, new float3(0, 0, 18f));
+            int impact = -1;
+            for (int i = 0; i < 120 && impact < 0; i++)
+            {
+                world.Step();
+                words = world.GetSleepSync();
+                if (Asleep(words, firsts[1])) continue;
+                impact = i;
+                int awake = 0;
+                for (int b = firsts[1]; b < firsts[1] + 385; b++) if (!Asleep(words, b)) awake++;
+                Assert.AreEqual(385, awake, "the whole hit pyramid woke: one island");
+            }
+            Assert.GreaterOrEqual(impact, 0, "the shot hit the middle pyramid");
+            StepUntilAsleep(world, 900);
+            world.GetPosesSync(out var pos1, out _);
+            for (int p = 0; p < 3; p += 2)
+                for (int b = firsts[p]; b < firsts[p] + 385; b++)
+                    Assert.IsTrue(math.all(pos0[b] == pos1[b]), $"cube {b} of an untouched pyramid never moved");
+            float settled = 0f;
+            for (int b = firsts[1]; b < firsts[1] + 385; b++) settled = math.max(settled, math.abs(pos1[b].y - pos0[b].y));
+            Debug.Log($"built asleep: the hit pyramid woke at step {impact}, settled by up to {settled * 1000f:F1} mm from its cold contacts and sleeps again");
+            Assert.AreEqual(0, world.GetStatsSync().OverflowFlags);
+            _ = shot;
+        }
+
         [Test]
         public void TwoStacksAreTwoIslands()
         {

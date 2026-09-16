@@ -20,6 +20,13 @@ namespace Phys.AvbdGpu.Tests
         public IEnumerator SetUp()
         {
             if (!AvbdGpuKernels.Supported) Assert.Ignore("no compute");
+            CreateDemo(null);
+            yield return null;
+        }
+
+        /// <summary>The demo with its camera and light; <paramref name="configure"/> sets fields before Start runs (next frame).</summary>
+        void CreateDemo(System.Action<CastleDemo> configure)
+        {
             m_Root = new GameObject("CastleSmoke");
             var camGo = new GameObject("Main Camera") { tag = "MainCamera" };
             camGo.transform.SetParent(m_Root.transform);
@@ -36,7 +43,7 @@ namespace Phys.AvbdGpu.Tests
 #if UNITY_EDITOR
             m_Demo.BrickMesh = UnityEditor.AssetDatabase.LoadAssetAtPath<Mesh>("Assets/Models/ConstructorBlock2x3/ConstructorBlock2x3.fbx");
 #endif
-            yield return null;
+            configure?.Invoke(m_Demo);
         }
 
         [UnityTearDown]
@@ -238,6 +245,77 @@ namespace Phys.AvbdGpu.Tests
             Assert.IsNull(m_Demo.World.Terrain);
             Assert.IsFalse(m_Demo.TerrainView.Visible);
             Assert.AreEqual(0f, m_Demo.Plateau);
+        }
+
+        /// <summary>Seven Strongholds built asleep around an eighth: 137k bricks in a world that simulates 40 960 at a time. They cost
+        /// nothing until a cannonball hits one, which wakes it whole (an island), settles it and puts it back to sleep; nothing
+        /// overflows and the centre castle stands throughout.</summary>
+        [UnityTest]
+        public IEnumerator OutlyingCastlesSleepBeyondTheActiveCapacity()
+        {
+            Object.Destroy(m_Root);
+            yield return null;
+            CreateDemo(d => { d.StartScene = 7; d.Outlying = 7; d.OutlyingBodies = 131072; d.TerrainParams.Preset = TerrainPreset.Hills; });
+            yield return null;   // Start: the world with room for the copies, the scene with its 180 settle steps
+            Assert.AreEqual(7, m_Demo.OutlyingCount, "seven copies fit the reserved bodies");
+            int n = m_Demo.BrickCount;
+            Assert.Greater(n * 8, m_Demo.World.Config.MaxActive, "more bricks than the world simulates at once");
+            Assert.AreEqual(n * 8, m_Demo.Renderer.MeshRanges[0].Count, "the copies are drawn with the brick model too");
+            var stats = m_Demo.World.GetStatsSync();
+            {
+                var words = m_Demo.World.GetSleepSync();
+                var sb = new System.Text.StringBuilder();
+                for (int k = 0; k < 7; k++)
+                {
+                    int awake = 0, inGrid = 0;
+                    for (int b = m_Demo.FirstOutlyingBrick + k * n; b < m_Demo.FirstOutlyingBrick + (k + 1) * n; b++) { if (!GpuBodySleep.IsAsleep(words[b])) awake++; if (GpuBodySleep.IsInGrid(words[b])) inGrid++; }
+                    sb.Append($" copy {k} at {m_Demo.OutlyingCentres[k]}: {awake} awake, {inGrid} in the grid;");
+                }
+                Debug.Log($"after the settle steps: {m_Demo.World.BodyCount} bodies, active {stats.Active}, hot {stats.Hot}, asleep {stats.Sleeping}, grid {stats.SleepGrid}, flags {stats.OverflowFlags}, rebuilds {stats.Rebuilds};{sb}");
+            }
+            Assert.AreEqual(0, stats.OverflowFlags, $"no overflow after the settle steps (flags {stats.OverflowFlags})");
+            Assert.GreaterOrEqual(stats.SleepGrid, 7 * n, "the copies are in the sleeping grid");
+            Assert.LessOrEqual(stats.Active, n, "at most the centre castle is awake");
+            Assert.LessOrEqual(stats.Hot, n + 1 + 16, "the hot list holds the centre castle at most");
+            m_Demo.World.GetPosesSync(out var start, out _);
+            for (int f = 0; f < 60; f++) yield return null;
+            stats = m_Demo.World.GetStatsSync();
+            Debug.Log($"outlying castles: {m_Demo.World.BodyCount} bodies, {stats.Sleeping} asleep, {stats.Hot} hot, {stats.Active} active, grid {stats.SleepGrid}, cold {stats.ColdManifolds}, step {stats.AvgStepMs:F2} ms");
+            Assert.AreEqual(0, stats.OverflowFlags);
+
+            // a cannonball into the first copy wakes it (and it alone), which settles and sleeps again
+            float2 centre = m_Demo.OutlyingCentres[0];
+            float s = m_Demo.Spec.Scale;
+            float3 target = new float3(centre.x, m_Demo.Plateau + 2f * s, centre.y);
+            float3 from = target + math.normalize(new float3(-centre.x, 0f, -centre.y)) * 12f * s + new float3(0f, 0.5f * s, 0f);
+            float cube = m_Demo.ShotCube * s;
+            m_Demo.World.AddBody(new float3(cube), m_Demo.ShotMass / (cube * cube * cube), 0.5f, from, quaternion.identity, math.normalize(target - from) * m_Demo.ShotVelocity * math.sqrt(s));
+            int first = m_Demo.FirstOutlyingBrick;
+            bool woke = false;
+            for (int f = 0; f < 180 && !woke; f++)
+            {
+                yield return null;
+                var words = m_Demo.World.GetSleepSync();
+                int awake = 0;
+                for (int b = first; b < first + n; b++) if (!GpuBodySleep.IsAsleep(words[b])) awake++;
+                if (awake == 0) continue;
+                woke = true;
+                Assert.Greater(awake, n / 2, "the hit copy woke as an island");
+                for (int b = first + n; b < first + 7 * n; b++) Assert.IsTrue(GpuBodySleep.IsAsleep(words[b]), $"brick {b} of another copy sleeps on");
+                stats = m_Demo.World.GetStatsSync();
+                Assert.AreEqual(0, stats.OverflowFlags, "the woken copy fits the pools");
+                Assert.LessOrEqual(stats.Active, 2 * n + 1, "one castle awake at most on top of the centre one");
+            }
+            Assert.IsTrue(woke, "the cannonball hit the copy");
+            for (int f = 0; f < 300; f++) yield return null;
+            m_Demo.World.GetPosesSync(out var pos, out _);
+            for (int i = m_Demo.FirstBrick; i < m_Demo.FirstBrick + n; i++) Assert.IsTrue(math.all(math.isfinite(pos[i])), $"brick {i} position");
+            float maxMove = 0f;
+            for (int b = first + n; b < first + 7 * n; b++) maxMove = math.max(maxMove, math.distance(pos[b].xyz, start[b].xyz));
+            Assert.AreEqual(0f, maxMove, "the other copies never moved");
+            stats = m_Demo.World.GetStatsSync();
+            Assert.AreEqual(0, stats.OverflowFlags);
+            Debug.Log($"after the shot: {stats.Sleeping} asleep, {stats.Active} active, hot {stats.Hot}, cold {stats.ColdManifolds} (dead {stats.ColdDead}), step {stats.AvgStepMs:F2} ms");
         }
 
         int BrokenJoints()

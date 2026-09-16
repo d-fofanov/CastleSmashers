@@ -235,8 +235,13 @@ around each creeper awake and lets the rest sleep. The island is used for waking
 * The application wakes what it changes: spawns (sleep word and label reset), changed drives, flags, joints and
   springs added, removed or re-anchored, ignore links, whatever overlaps a retired body (found in both grids: its
   manifolds may be in the cold store, which no list indexes), and everything when the terrain or gravity changes
-  (`WakeAll`, an upload of fresh words). A body woken this way is awake at pair generation, so its contacts are
-  recomputed with the normal warm-start decay from the cold store, and `WakeTouch` then wakes what it touches.
+  (`WakeAll`, an upload of fresh words for the bodies on the GPU). A body woken this way is awake at pair generation,
+  so its contacts are recomputed with the normal warm-start decay from the cold store, and `WakeTouch` then wakes what
+  it touches.
+* The application can build asleep (`SleepRange`): bodies added since the last step go up with the asleep bit, a rest
+  counter no sleep time exceeds and a common island label, and the sleeping grid is rebuilt before their first step
+  (their AABBs come from the rebuild), so they never enter the hot list, the hot grid or the pools — a world larger
+  than its active capacity is built this way. They have no cold manifolds: woken, they start their contacts cold.
 
 Islands are maintained incrementally by the label rounds above and only ever merge between relabels, so debris that
 left an island shares its label for up to `SleepRelabelSteps` (a touch on it wakes the old island meanwhile). Labels

@@ -40,6 +40,11 @@ namespace Phys.Demo
         public float ShotVelocity = 24f;
         [Tooltip("Spawn the armies when a castle is loaded (also the -avbd-siege flag).")]
         public bool SiegeOnLoad;
+        [Tooltip("Copies of the castle built asleep around it, up to eight (key O cycles 0 / 4 / 8; -avbd-outlying n): a world with more " +
+                 "bricks than it simulates at once. A copy wakes when something hits it and sleeps again once it has settled.")]
+        public int Outlying;
+        [Tooltip("Bodies reserved for the outlying castles on top of MaxBodies, which stays the number of bricks awake at a time.")]
+        public int OutlyingBodies = 131072;
         [Tooltip("Body pools reserved for the siege: units, arrow-shaped and cube projectiles.")]
         public int UnitCapacity = 512;
         public int ArrowCapacity = 2048;
@@ -51,6 +56,8 @@ namespace Phys.Demo
         BrickLayout m_Layout;
         BrickSpec m_Spec;
         int m_FirstBrick, m_SnapJoints;
+        int m_OutlyingCount, m_OutlyingBricks;
+        float2[] m_OutlyingCentres = new float2[0];
         float m_Plateau;
         uint[] m_Tints;
         SiegeSystem m_Siege;
@@ -71,6 +78,12 @@ namespace Phys.Demo
         public bool SiegeActive => m_SiegeActive;
         /// <summary>Ground height under the castle (the plateau levelled into the terrain; 0 on the flat ground).</summary>
         public float Plateau => m_Plateau;
+        /// <summary>The outlying copies built asleep around the castle: how many, their centres, their bricks (contiguous after the
+        /// castle's own).</summary>
+        public int OutlyingCount => m_OutlyingCount;
+        public float2[] OutlyingCentres => m_OutlyingCentres;
+        public int OutlyingBricks => m_OutlyingBricks;
+        public int FirstOutlyingBrick => m_FirstBrick + BrickCount;
 
         protected override int SceneCount => CastlePlan.Presets.Length;
         protected override string SceneName(int index) => CastlePlan.Presets[index].Name;
@@ -91,8 +104,10 @@ namespace Phys.Demo
 
         protected override AvbdGpuConfig CreateConfig()
         {
-            var cfg = AvbdGpuConfig.ForBodies(MaxBodies);
-            cfg.MaxJoints = MaxBodies * 12;                   // four snap joints per brick overlap (about ten per brick) plus drag joints
+            // the outlying castles sleep: room for their bodies and joints, the pools stay sized for MaxBodies awake bricks
+            int total = MaxBodies + (Outlying > 0 ? OutlyingBodies : 0);
+            var cfg = AvbdGpuConfig.ForBodies(total, MaxBodies);
+            cfg.MaxJoints = total * 12;                       // four snap joints per brick overlap (about ten per brick) plus drag joints
             cfg.MaxLinks = cfg.MaxJoints * 2 + 4096;
             cfg.MaxSpawns = math.max(cfg.MaxSpawns, UnitCapacity + ArrowCapacity + ShotCapacity);
             return cfg;
@@ -100,10 +115,12 @@ namespace Phys.Demo
 
         protected override void Configure()
         {
-            foreach (var arg in System.Environment.GetCommandLineArgs())
+            var args = System.Environment.GetCommandLineArgs();
+            for (int i = 0; i < args.Length; i++)
             {
-                if (arg == "-avbd-snap") Snap = true;
-                if (arg == "-avbd-siege") SiegeOnLoad = true;
+                if (args[i] == "-avbd-snap") Snap = true;
+                if (args[i] == "-avbd-siege") SiegeOnLoad = true;
+                if (args[i] == "-avbd-outlying" && i + 1 < args.Length && int.TryParse(args[i + 1], out int outlying)) Outlying = outlying;
             }
             SiegeParams = SiegeParams.WithDefaults();   // fields a scene was serialised without come out as zero
             m_Renderer.Shadows = Shadows;
@@ -123,9 +140,24 @@ namespace Phys.Demo
             m_Layout = BrickCastle.Generate(plan);
             float2 c = BrickCastle.Center(plan) * Brick.Pitch * BrickScale;
             float volume = Brick.Width * Brick.BodyHeight * Brick.Length * BrickScale * BrickScale * BrickScale;
-            // the terrain (or the flat ground), with a plateau under the castle's footprint and a few studs around it
-            float2 halfSide = plan.Side * Brick.Pitch * BrickScale * 0.5f;
-            m_Plateau = AddGround(CreateTerrain(), BrickFriction, halfSide, 4f * Brick.Pitch * BrickScale, out int groundBody);
+            int n = m_Layout.Bricks.Count;
+            // the outlying copies: as many as fit the reserved bodies (eight at most), on the cells of a 3 x 3 grid around the castle
+            // whose pitch keeps every plateau, skirt and army clear of the next
+            float side = plan.Side * Brick.Pitch * BrickScale;
+            float border = 4f * Brick.Pitch * BrickScale;
+            m_OutlyingCount = Outlying > 0 && OutlyingBodies > 0 ? math.min(math.min(Outlying, 8), OutlyingBodies / math.max(n, 1)) : 0;
+            m_OutlyingCentres = new float2[m_OutlyingCount];
+            float pitch = side + 2f * border + 2f * TerrainParams.Margin + 2f * TerrainParams.Skirt;
+            var cells = new[] { new float2(1, 0), new float2(-1, 0), new float2(0, 1), new float2(0, -1), new float2(1, 1), new float2(-1, -1), new float2(1, -1), new float2(-1, 1) };
+            for (int k = 0; k < m_OutlyingCount; k++) m_OutlyingCentres[k] = cells[k] * pitch;
+            // the terrain (or the flat ground), with a plateau under the castle's footprint and a few studs around it, and one
+            // under every outlying copy (cut before the field goes up)
+            float2 halfSide = side * 0.5f;
+            var field = CreateTerrain();
+            var outlyingPlateau = new float[m_OutlyingCount];
+            if (field != null)
+                for (int k = 0; k < m_OutlyingCount; k++) outlyingPlateau[k] = CutPlateau(field, m_OutlyingCentres[k], halfSide, border, 0f);
+            m_Plateau = AddGround(field, BrickFriction, halfSide, border, out int groundBody);
             m_Spec = new BrickSpec
             {
                 Scale = BrickScale, Density = BrickMass / volume, Friction = BrickFriction, Margin = AvbdGpuConstants.CollisionMargin,
@@ -133,16 +165,27 @@ namespace Phys.Demo
             };
             m_FirstBrick = BrickCastle.Build(m_World, m_Layout, m_Spec);
             m_SnapJoints = Snap ? BrickCastle.AddSnapJoints(m_World, m_Layout, m_FirstBrick, m_Spec, SnapFractureLateral, SnapFractureTension) : 0;
+            // the outlying copies, each built asleep as one island right behind the castle's bricks
+            for (int k = 0; k < m_OutlyingCount; k++)
+            {
+                var spec = m_Spec;
+                spec.Origin = new float3(-c.x + m_OutlyingCentres[k].x, outlyingPlateau[k], -c.y + m_OutlyingCentres[k].y);
+                int first = BrickCastle.Build(m_World, m_Layout, spec);
+                if (Snap) BrickCastle.AddSnapJoints(m_World, m_Layout, first, spec, SnapFractureLateral, SnapFractureTension);
+                m_World.SleepRange(first, n);
+            }
+            m_OutlyingBricks = m_OutlyingCount * n;
 
-            // colours: the ground, then one tint per brick from its tone with a little per-brick variation
-            int n = m_Layout.Bricks.Count;
-            if (m_Tints == null || m_Tints.Length < m_FirstBrick + n) m_Tints = new uint[m_FirstBrick + n];
+            // colours: the ground, then one tint per brick from its tone with a little per-brick variation (the copies alike)
+            int bricks = n + m_OutlyingBricks;
+            if (m_Tints == null || m_Tints.Length < m_FirstBrick + bricks) m_Tints = new uint[m_FirstBrick + bricks];
             m_Tints[groundBody] = AvbdGpuRenderer.Tint(new Color32(78, 112, 58, 255));
             var rng = new Unity.Mathematics.Random(0x9E3779B9u);
             for (int i = 0; i < n; i++) m_Tints[m_FirstBrick + i] = AvbdGpuRenderer.Tint(ToneColor(m_Layout.Bricks[i].Tone, rng.NextFloat()));
-            m_Renderer.SetTints(m_Tints, 0, m_FirstBrick + n);
+            for (int k = 1; k <= m_OutlyingCount; k++) System.Array.Copy(m_Tints, m_FirstBrick, m_Tints, m_FirstBrick + k * n, n);
+            m_Renderer.SetTints(m_Tints, 0, m_FirstBrick + bricks);
             if (BrickMesh != null)
-                m_Renderer.MeshRanges.Add(new AvbdGpuRenderer.MeshRange { Mesh = BrickMesh, Scale = BrickScale, Offset = m_Spec.MeshOffset, Start = m_FirstBrick, Count = n });
+                m_Renderer.MeshRanges.Add(new AvbdGpuRenderer.MeshRange { Mesh = BrickMesh, Scale = BrickScale, Offset = m_Spec.MeshOffset, Start = m_FirstBrick, Count = bricks });
 
             // the siege's body pools (retired slots until an army is spawned), drawn with the figure and arrow models
             var siegeSpec = SiegeSpec.Default;
@@ -232,6 +275,7 @@ namespace Phys.Demo
             if (kb.kKey.wasPressedThisFrame && m_Siege != null) m_Siege.AutoVolleys = !m_Siege.AutoVolleys;
             if (kb.xKey.wasPressedThisFrame && m_Siege != null) { ReleaseDrag(); m_Siege.Purge(); }
             if (kb.tKey.wasPressedThisFrame) CycleTerrain();
+            if (kb.oKey.wasPressedThisFrame) { Outlying = Outlying >= 8 ? 0 : Outlying + 4; RecreateWorld(); }
 #endif
         }
 
@@ -246,9 +290,10 @@ namespace Phys.Demo
                 (Snap ? $"<color=#88ddff>snapped</color>: {m_SnapJoints} joints; a snap breaks at {SnapFractureLateral:F0} N sideways, {SnapFractureTension:F0} N upward or {m_Spec.SnapBreakDistance * 100f:F1} cm apart  -  cannonball {ShotMass:F0} kg\n"
                       : $"dry-stacked (friction only)  -  cannonball {ShotMass:F0} kg\n") +
                 (m_SiegeActive ? $"<color=#ffcc88>siege</color> (volleys {(m_Siege.AutoVolleys ? "auto" : "manual")}): {m_Siege.Summary()}\n" : "no siege (U)\n") +
+                (m_OutlyingCount > 0 ? $"<color=#c8a8e8>{m_OutlyingCount} outlying copies</color> built asleep around the castle ({m_OutlyingBricks} bricks; the world simulates {m_World.Config.MaxActive} at once)\n" : "") +
                 TerrainText(m_Plateau) + "\n\n" +
                 StatsText() + "\n\n" +
-                "1-0 castle size  , . prev/next  R rebuild  J snap bricks on/off  T terrain  U siege on/off  V volley  K auto volleys  X retire the dead and spent now  Space pause  N step\n" +
+                "1-0 castle size  , . prev/next  R rebuild  J snap bricks on/off  T terrain  O outlying copies 0/4/8  U siege on/off  V volley  K auto volleys  X retire the dead and spent now  Space pause  N step\n" +
                 "F1 contacts  F2 colour mode  F5 joints  F6 collision boxes  F7 shadows  F8 sleep on/off  +/- iterations  [ ] substeps  B/Enter cannonball  G gravity  H hide HUD\n" +
                 "LMB drag  RMB orbit  MMB pan  wheel / Q E zoom  W A S D orbit";
         }

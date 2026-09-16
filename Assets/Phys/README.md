@@ -157,6 +157,8 @@ world.Params.Sleep = true;             // the default; off = every body is simul
 world.WakeBody(box);                   // wakes a body (and, through its contacts, what it then sets in motion)
 world.WakeAll();                       // after changing something the solver cannot see (all bodies, next step)
 bool asleep = GpuBodySleep.IsAsleep(world.GetSleepSync()[box]);   // sync readback (tests); the stats count the sleepers
+int first = world.BodyCount; BuildCastle(world); world.SleepRange(first, world.BodyCount - first);   // built asleep, one island
+world.PoseRanges.Add((first, count));  // with more bodies than a frame should read back: the poses gameplay steers and picks
 ```
 
 A body that has stayed within `SleepDistance` / `SleepAngle` of its rest pose for `SleepTime`, with every body within
@@ -192,6 +194,13 @@ count the lists; the HUD shows them next to the body count). A rebuild is one co
 milliseconds for a million), the cold store is compacted in place every `ColdCompactSteps` steps once a quarter of it was
 thawed, a gate on the GPU skips either when nothing is due, and everything the CPU moves outside the solver (the terrain,
 gravity, `WakeAll`) wakes all bodies at once — an overflow when there are more than `active` of them.
+
+Such a world is built structure by structure: `SleepRange(first, count, island)` puts bodies added since the last step to
+sleep before their first one (at the pose they were added with, as one island — a fast touch on any wakes them all — and
+in the sleeping grid from the start), so a hundred castles go up in one load with none of them ever awake at once; a
+structure woken later settles from cold contacts like a freshly built scene (it sinks a few millimetres as the penalties
+ramp up) and sleeps again. `PoseRanges` restricts the asynchronous pose readback (and `Pick`) to the ranges gameplay
+needs — the pools it steers — once a frame should not read back every body.
 
 ## Parameters (`AvbdGpuParams`, defaults = reference, sleeping on)
 
@@ -300,10 +309,18 @@ planned by `BrickCastle` on the stud grid (`CastlePlan.Presets`):
   and blows the hit section out; the rest stays snapped. Jointed bodies do not collide until a joint breaks (the reference's rule),
   and the angular lock assumes equal orientations, hence four points per overlap rather than one lock.
 
-Keys as the main demo plus `J` snap on/off, `T` terrain (hills, valley, ridge, flat), `Y` terrain style (tiled / smooth), `F6`
-collision boxes, `F7` shadows; `B` / `Enter` fires a 30 kg cannonball at 24 model m/s (× √5 in the solver). Flags: `-avbd-scene
-0..9`, `-avbd-snap`, `-avbd-siege`, `-avbd-terrain hills|valley|ridge|none`, `-avbd-terrain-seed n`, `-avbd-terrain-style
-tiled|smooth`, and the screenshot / bench / camera flags above.
+Keys as the main demo plus `J` snap on/off, `T` terrain (hills, valley, ridge, flat), `Y` terrain style (tiled / smooth), `O`
+outlying copies (0 / 4 / 8), `F6` collision boxes, `F7` shadows; `B` / `Enter` fires a 30 kg cannonball at 24 model m/s (× √5 in
+the solver). Flags: `-avbd-scene 0..9`, `-avbd-snap`, `-avbd-siege`, `-avbd-outlying n`, `-avbd-terrain hills|valley|ridge|none`,
+`-avbd-terrain-seed n`, `-avbd-terrain-style tiled|smooth`, and the screenshot / bench / camera flags above.
+
+**Outlying copies** (`Outlying`, key `O`, `-avbd-outlying n`): up to eight copies of the castle built asleep on the cells of a
+3 x 3 grid around it, each on its own plateau, spaced so that no plateau, skirt or army reaches the next — a world with
+many more bricks than it simulates at once. `MaxBodies` stays the number of bricks awake at a time; `OutlyingBodies`
+(131 072) is the room reserved for the copies on top of it (seven Strongholds: 140 k bodies in all, 41 k awake at most),
+allocated only when copies are asked for (`O` recreates the world). A copy costs nothing until a cannonball hits it: it
+wakes whole, settles and sleeps again while the others never stir (`CastleSmokeTests`: 0.8 ms per step with the eight
+castles asleep, 1.1 ms once one has been hit and put back to sleep).
 
 Terrain (`TerrainParams` on the demo, shared with the preview demo through `DemoBase`): a procedural heightfield generated
 from the seed, or, when a scene `Terrain` is assigned to `SceneTerrain`, that terrain's heights (drawn on it; its data is
@@ -465,6 +482,8 @@ left is the draw of the brick meshes with shadows and of the terrain tiles.
   of its own until it wakes, and a fast touch on one of the two wakes the other a step later through the boundary.
 * The hot list is capped by `MaxActive` only through the pools: with more awake bodies than that, pairs, grid entries
   and colour lists overflow (flag 64 reports the count) and contacts go missing until enough bodies sleep again.
+  A structure built asleep has no cold manifolds: woken, it starts its contacts cold and settles by a few millimetres
+  before it sleeps again, as a freshly built scene does.
 * One terrain per world, with one friction value, touched by dynamic bodies only; it is sampled at a box's 26 lattice
   points, so terrain features smaller than about half a box extent can poke into a face between them, and a body more
   than its size below the surface is pushed out along the local normal (a heightfield has no other side). Unity terrains

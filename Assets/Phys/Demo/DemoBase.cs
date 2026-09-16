@@ -179,6 +179,21 @@ namespace Phys.Demo
             m_World?.Dispose();
         }
 
+        /// <summary>Disposes the world and the renderer and creates them again from <see cref="CreateConfig"/> (a capacity change),
+        /// keeping the parameters and the colour mode, then reloads the scene.</summary>
+        protected void RecreateWorld()
+        {
+            var p = m_World.Params;
+            var mode = m_Renderer.ColorMode;
+            m_DragJoint = m_DragBody = -1;
+            m_Renderer.Dispose();
+            m_World.Dispose();
+            m_World = new AvbdGpuWorld(CreateConfig()) { ReadbackPoses = true, Params = p };
+            m_Renderer = new AvbdGpuRenderer(m_World) { ColorMode = mode };
+            Configure();
+            Load(m_Scene);
+        }
+
         public void Load(int index)
         {
             index = math.clamp(index, 0, SceneCount - 1);
@@ -321,9 +336,12 @@ namespace Phys.Demo
         /// <summary>Levels a plateau for a footprint centred on the origin (half extents <paramref name="halfExtent"/> plus
         /// <paramref name="border"/> plus the settings' margin) at the mean terrain height under it, blending over the skirt;
         /// returns the plateau height.</summary>
-        protected float CutPlateau(Heightfield field, float2 halfExtent, float border)
+        protected float CutPlateau(Heightfield field, float2 halfExtent, float border) => CutPlateau(field, float2.zero, halfExtent, border, TerrainParams.Margin);
+
+        /// <summary>A plateau for a footprint centred on <paramref name="centre"/> with the given margin of level ground around it.</summary>
+        protected float CutPlateau(Heightfield field, float2 centre, float2 halfExtent, float border, float margin)
         {
-            float2 lo = -halfExtent - border - TerrainParams.Margin, hi = halfExtent + border + TerrainParams.Margin;
+            float2 lo = centre - halfExtent - border - margin, hi = centre + halfExtent + border + margin;
             float plateau = field.MeanHeight(lo, hi);
             field.Flatten(lo, hi, plateau, TerrainParams.Skirt);
             return plateau;
