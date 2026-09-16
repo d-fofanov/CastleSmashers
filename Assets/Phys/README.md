@@ -227,7 +227,8 @@ sleeping bodies, the bodies woken in the step and the carried manifolds.
 
 Player flags: `-avbd-scene n`, `-avbd-screenshot file [-avbd-frames n]` (screenshot then quit),
 `-avbd-bench [-avbd-frames n]` (average frame time of the second half of the run logged, then quit),
-`-avbd-yaw deg -avbd-pitch deg -avbd-distance m` (camera), `-avbd-shoot n` (fire a box at frame n), `-avbd-nosleep`.
+`-avbd-yaw deg -avbd-pitch deg -avbd-distance m` (camera), `-avbd-shoot n` (fire a box at frame n), `-avbd-nosleep`,
+`-avbd-colormode n` (start in colour mode n; 3 = sleep).
 
 ## Castle demo
 
@@ -413,7 +414,10 @@ steps in 6.5 ms against 6.4 (its 1 600 base cubes carry 8 terrain contacts each 
 above the surface leave the pass at the mip test. Asleep, a scene costs its broadphase (the sleepers stay in the grid but
 walk no cells), the copy of its carried manifolds and the fixed overhead: the 22k pyramid sleeps whole 3 s after it is
 built (the small pyramid 6 s, its top creeps longer) and the 17k castle 4 s, and both step in 1.8 ms from then on; the
-Outpost under siege sleeps between the volleys with its holding units, and its arrows wake what they hit.
+Outpost under siege sleeps between the volleys with its holding units, and its arrows wake what they hit. In the castle
+player (snapped castles on the tiled hills, 1280 x 720, `-avbd-bench` against `-avbd-nosleep`) the frame drops from
+9.9 to 6.6 ms for the Outpost, 25.0 to 19.1 ms for the Stronghold and 40.3 to 31.2 ms for the Royal citadel; what is
+left is the draw of the brick meshes with shadows and of the terrain tiles.
 
 ## Known limits
 
