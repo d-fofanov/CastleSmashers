@@ -93,8 +93,13 @@ namespace Phys.AvbdGpu.Scenes
         public readonly List<AssemblyPart> Parts = new List<AssemblyPart>();
         /// <summary>Bounds of the pieces' bodies in grid units (the boxes rotated into the world, studs excluded).</summary>
         public float3 Min, Max;
+        /// <summary>The document's occupancy map, null when it carries none (see <see cref="OccupancyOrDerived"/>).</summary>
+        public AssemblyOccupancy Occupancy;
 
         public float3 Extent => Max - Min;
+
+        /// <summary>The occupancy map: the document's, or one derived from the parts (kept from then on).</summary>
+        public AssemblyOccupancy OccupancyOrDerived() => Occupancy ??= AssemblyOccupancy.FromParts(this);
 
         /// <summary>Index of the part with the expanded ID, or -1.</summary>
         public int IndexOf(string id)
@@ -183,6 +188,8 @@ namespace Phys.AvbdGpu.Scenes
             foreach (var p in a.Parts)
                 if (!seen.Add(p.Id)) throw new BrickAssemblyException($"expanded part ID '{p.Id}' is not unique (IDs with slashes collide with instance paths)");
             a.ComputeBounds();
+            var occupancy = GetObject(root, "occupancy", "the document", false);
+            if (occupancy != null) a.Occupancy = AssemblyOccupancy.Parse(occupancy, "occupancy");
             return a;
         }
 
@@ -271,7 +278,8 @@ namespace Phys.AvbdGpu.Scenes
         static readonly string[] s_ToneColors = { "#9EA0A4", "#484E5A", "#CDB280", "#A82C24", "#86603A" };
 
         /// <summary>Writes a stud-grid layout of 2 x 3 bricks (<see cref="BrickCastle.Generate"/>) as a brick-assembly document: one
-        /// part per brick, courses at the body-height pitch, rotated bricks turned +90 degrees about Y, tones as the palette.</summary>
+        /// part per brick, courses at the body-height pitch, rotated bricks turned +90 degrees about Y, tones as the palette, the
+        /// occupancy map (cell tops from the layout, posts derived) as the last section.</summary>
         public static string WriteLayout(BrickLayout layout, string name)
         {
             var sb = new StringBuilder(layout.Bricks.Count * 120 + 512);
@@ -288,8 +296,32 @@ namespace Phys.AvbdGpu.Scenes
                 if (b.Rotated) sb.Append(", \"rotation\": [0, 90, 0]");
                 sb.Append(", \"color\": \"").Append(s_ToneNames[math.clamp((int)b.Tone, 0, s_ToneNames.Length - 1)]).Append("\" }").Append(i + 1 < layout.Bricks.Count ? ",\n" : "\n");
             }
-            sb.Append("  ]\n}\n");
+            sb.Append("  ],\n  \"occupancy\": ");
+            LayoutOccupancy(layout).Write(sb, "  ");
+            sb.Append("\n}\n");
             return sb.ToString();
+        }
+
+        /// <summary>The occupancy map of a stud-grid layout: a brick on layer L tops its cells at (L + 1) x 1.2; the posts are derived
+        /// (the same map <see cref="AssemblyOccupancy.FromParts"/> gives the written document).</summary>
+        public static AssemblyOccupancy LayoutOccupancy(BrickLayout layout)
+        {
+            if (layout.Bricks.Count == 0) return new AssemblyOccupancy(int2.zero, new int2(1, 1));
+            int2 min = int.MaxValue, max = int.MinValue;
+            foreach (var b in layout.Bricks) { min = math.min(min, new int2(b.X, b.Z)); max = math.max(max, new int2(b.X + b.W, b.Z + b.D)); }
+            var o = new AssemblyOccupancy(min, max - min);
+            foreach (var b in layout.Bricks)
+            {
+                float top = (b.Layer + 1) * 1.2f;
+                for (int z = b.Z; z < b.Z + b.D; z++)
+                    for (int x = b.X; x < b.X + b.W; x++)
+                    {
+                        int i = (z - min.y) * o.Size.x + (x - min.x);
+                        if (top > o.Top[i]) o.Top[i] = top;
+                    }
+            }
+            o.DerivePosts(AssemblyOccupancy.PostRules.Default);
+            return o;
         }
 
         static string Number(float v) => v.ToString(math.abs(v - math.round(v)) < 1e-6f ? "0" : "0.###", CultureInfo.InvariantCulture);
@@ -320,7 +352,7 @@ namespace Phys.AvbdGpu.Scenes
             return o;
         }
 
-        static List<object> GetArray(Dictionary<string, object> obj, string key, string where, bool required)
+        internal static List<object> GetArray(Dictionary<string, object> obj, string key, string where, bool required)
         {
             if (!obj.TryGetValue(key, out object v) || v == null)
             {

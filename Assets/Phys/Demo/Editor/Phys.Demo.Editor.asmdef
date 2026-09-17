@@ -4,7 +4,8 @@
     "references": [
         "Phys.Demo",
         "Phys.AvbdGpu.Siege",
-        "Phys.AvbdGpu.Scenes"
+        "Phys.AvbdGpu.Scenes",
+        "Unity.Mathematics"
     ],
     "includePlatforms": [
         "Editor"

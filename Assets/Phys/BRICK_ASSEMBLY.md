@@ -81,6 +81,7 @@ in mind when adding directional pieces. The sloped meshes lose under a millimetr
 | `palette` | no | named colours `"key": "#RRGGBB"`, referenced by `color`; applies inside modules too |
 | `modules` | no | reusable groups, see below |
 | `instances` | no | root placements of modules |
+| `occupancy` | no | the occupancy map: per stud cell the top of the highest piece, and the posts where figures stand (see below) |
 
 ```json
 {
@@ -135,6 +136,54 @@ placement); an expanded part's ID is its path, `pillar_left/bottom`. Part and in
 containing scope, module names document-wide. Unknown module references and circular references are errors. Version 1
 defines no module scale and no per-instance colour override.
 
+## Occupancy map
+
+A castle is also a place where figures stand: on its walls, in its courtyard. The optional root field `occupancy` says
+where, without anyone having to recover it from thousands of placements: a grid over the footprint, one cell per stud,
+holding the top of the highest piece over the cell in grid units, and the posts of the garrison.
+
+```json
+"occupancy": {
+  "origin": [1, 1],
+  "size": [38, 38],
+  "rows": [
+    [6, 6, 6, 6, 0, 0, 0, 0, 6, 6, 6, 6],
+    [6, 6, 6, 6, 0, 0, 0, 0, 6, 6, 6, 6]
+  ],
+  "posts": [
+    [3, 6, 2, 180],
+    [36, 6, 2, 0]
+  ]
+}
+```
+
+| Field | Required | Value |
+|---|---|---|
+| `origin` | yes | two integers: the grid cell (x, z) whose min corner is the first cell of the first row; the map covers `[origin, origin + size)` |
+| `size` | yes | two positive integers: cells along x, cells along z |
+| `rows` | yes | exactly `size[1]` arrays of exactly `size[0]` finite numbers ≥ 0: the top of the highest body over the cell `(origin[0] + i, origin[1] + j)` in grid units, studs excluded; `0` = nothing stands there |
+| `posts` | no | `[x, y, z, yaw]` in grid units and degrees: where a figure stands — `y` is the surface under its feet, `yaw` the heading about +Y with 0 facing +Z (the format's rotation convention); `[x, y, z]` faces +Z |
+
+A piece covers every cell whose centre lies within its body's bounding box on the ground plane (a `Brick_2x3` at x = 1
+covers cells 0 and 1, not 2; a turned or lying piece takes its bounding box), and a cell's top is the highest such box.
+The map holds tops only: the passage under a lintel reads as solid, which is acceptable for what the map is for (where
+nothing stands, where a shot may start). A document with the section is taken as written — an author may leave a
+gateway open or add posts by hand; a document without it gets the map derived from its parts by the same rule, and
+posts derived from the map:
+
+* **Wall posts** stand on a cell at least three courses high (3.6) that is level within a plate (0.45) with its two
+  neighbours along the wall (a merlon next to it disqualifies; when the cell inward is level too, the post stands half a
+  cell back from the edge), and whose walk outward from the map's centre (along the dominant axis) steps down within
+  the wall's thickness (8 cells, room for a parapet in front of the walk) and meets nothing as high again before the
+  border. Posts closest to the outer edge come first, then those behind an equally high outer wall (an inner ward),
+  spread around the centre by angle at least four cells apart; they face outward.
+* **Ground posts** stand on a cell below wall height whose 3 x 3 neighbourhood is level — the ground, a pavement or a
+  raised courtyard floor — enclosed in all four axis directions by cells three courses above it; those nearest a wall
+  come first, facing it.
+
+Reject: `size` that is not two positive integers, a row count or length that does not match `size`, a top that is not
+a finite non-negative number, a post with fewer than three or more than four numbers.
+
 ## Reconstruction
 
 A receiving agent — or the loader — reconstructs the document exactly: pieces loaded by catalog ID, normalised to the
@@ -161,7 +210,10 @@ height, studs on top and whether the underside grips studs), the reader (`BrickA
 validation above, module expansion into `Parts` with their ID paths, composed rotations and resolved colours, the bounds),
 a writer for the castle planner's layouts (`BrickAssembly.WriteLayout`, behind `Phys / Export Outpost as Brick
 Assembly`) and `AssemblyBuilder`, which turns an assembly into solver bodies; `PreviewDemo` drives it, `BrickAssemblyTests`
-and `PreviewSmokeTests` check it.
+and `PreviewSmokeTests` check it. `AssemblyOccupancy.cs` is the occupancy map: parsed from the section, derived from the
+parts (`FromParts`), its posts derived (`DerivePosts`), written back into a document (`Splice`, behind `Phys / Write
+Occupancy`, which refreshes every document of `Resources/Castles`); the siege demo places the garrison on its posts and
+skips shots that would start inside a wall (`AssemblyOccupancyTests`).
 
 * **Bodies.** `AssemblyBuilder.Build` adds one box per part (grouped so that parts sharing a piece and a mesh offset are one
   draw range of `AvbdGpuRenderer.MeshRanges`; `AssemblyBodies` maps parts to bodies and back). The castle demo's rules for

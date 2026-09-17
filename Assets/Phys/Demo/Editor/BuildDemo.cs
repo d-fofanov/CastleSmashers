@@ -130,6 +130,37 @@ namespace Phys.Demo.Editor
             Debug.Log($"ExportOutpostAssembly: {layout.Bricks.Count} bricks -> {path}");
         }
 
+        /// <summary>Writes (or refreshes) the occupancy section of every brick-assembly document in Resources/Castles from its parts
+        /// (<see cref="Phys.AvbdGpu.Scenes.AssemblyOccupancy.FromParts"/>, posts derived), so that the documents carry the map the
+        /// siege demo expects; the rest of the text is kept as written.</summary>
+        [MenuItem("Phys/Write Occupancy")]
+        public static void WriteOccupancy()
+        {
+            int written = 0;
+            foreach (string path in Directory.GetFiles("Assets/Resources/Castles", "*.json"))
+            {
+                string file = path.Replace('\\', '/');
+                try
+                {
+                    string text = File.ReadAllText(file);
+                    var assembly = Phys.AvbdGpu.Scenes.BrickAssembly.Parse(text);
+                    var occupancy = Phys.AvbdGpu.Scenes.AssemblyOccupancy.FromParts(assembly);
+                    occupancy.DerivePosts(Phys.AvbdGpu.Scenes.AssemblyOccupancy.PostRules.Default);
+                    File.WriteAllText(file, Phys.AvbdGpu.Scenes.AssemblyOccupancy.Splice(text, occupancy));
+                    AssetDatabase.ImportAsset(file);
+                    int walls = 0; foreach (var p in occupancy.Posts) if (p.OnWall) walls++;
+                    Debug.Log($"WriteOccupancy: {file}: {occupancy.Size.x} x {occupancy.Size.y} cells, {occupancy.SolidCells} solid, {occupancy.Posts.Count} posts ({walls} on the walls)");
+                    written++;
+                }
+                catch (Phys.AvbdGpu.Scenes.BrickAssemblyException e)
+                {
+                    Debug.LogError($"WriteOccupancy: {file}: {e.Message}");
+                    if (Application.isBatchMode) EditorApplication.Exit(1);
+                }
+            }
+            Debug.Log($"WriteOccupancy: {written} documents");
+        }
+
         /// <summary>Logs the guid / local id of the brick mesh (the reference serialised in Castle.unity).</summary>
         [MenuItem("Phys/Log Brick Mesh Reference")]
         public static void LogBrickMeshReference()
