@@ -1,0 +1,99 @@
+// Blasts: explosions applied between steps (AvbdGpuWorld.Blast, flushed by Upload). BlastBodies gives every dynamic body
+// within a record's impact radius a radial velocity change that falls off linearly with the distance and wakes it;
+// BlastJoints breaks every joint whose anchor lies within a record's pulverize radius, the way the solver's own fracture
+// does. One thread per body / per joint and a sequential loop over the records: deterministic, no racing counters.
+#pragma kernel BlastBodies
+#pragma kernel BlastJoints
+
+#include "AvbdCommon.hlsl"
+
+struct BlastRecord
+{
+    float3 centre;
+    float impactRadius;      // bodies within it get the impulse (0: none)
+    float impulse;           // N s at the centre, linear falloff to the radius
+    float lift;              // upward bias added to the radial direction before normalising
+    float pulverizeRadius;   // joints anchored within it break (0: none)
+    uint exclude;            // a body left alone (the projectile that caused the blast)
+};
+
+StructuredBuffer<BlastRecord> _BlastRecords;
+StructuredBuffer<BodyDef> _BodyDef;
+StructuredBuffer<float4> _BodyPos;
+StructuredBuffer<float4> _BodyRot;
+StructuredBuffer<JointDef> _JointDef;
+RWStructuredBuffer<float4> _BodyVelLin;
+RWStructuredBuffer<float4> _BodyPrevVelLin;
+RWStructuredBuffer<uint> _BodySleep;
+RWStructuredBuffer<uint> _Counters;
+RWStructuredBuffer<JointState> _JointStateRW;
+
+// Plain ints: Upload runs before the step's parameters are written, so the constant buffer is not current here.
+int _BlastCount;
+int _BlastBodyCount;
+int _BlastJointCount;
+int _BlastWake;              // 1 when sleeping is on (the sleep word matters then)
+
+[numthreads(AVBD_THREADS, 1, 1)]
+void BlastBodies(uint3 id : SV_DispatchThreadID)
+{
+    uint i = id.x;
+    if (i >= (uint)_BlastBodyCount) return;
+    BodyDef d = _BodyDef[i];
+    if (isStatic(d) || isTerrain(d)) return;   // isStatic covers retired slots
+    float3 p = _BodyPos[i].xyz;
+    float3 dv = 0;
+    bool touched = false;
+    for (int k = 0; k < _BlastCount; k++)
+    {
+        BlastRecord r = _BlastRecords[k];
+        if (r.exclude == i) continue;
+        float3 off = p - r.centre;
+        float dist = length(off);
+        if (r.impactRadius > 0.0 && dist < r.impactRadius)
+        {
+            float3 dir = dist > 1e-4 ? off / dist : float3(0, 1, 0);
+            dir = normalize(dir + float3(0, r.lift, 0));
+            dv += dir * (r.impulse * (1.0 - dist / r.impactRadius) / d.mass);
+            touched = true;
+        }
+        // a joint of this body may break below (its anchors lie within the body's bounding sphere): wake it so it falls
+        if (r.pulverizeRadius > 0.0 && dist < r.pulverizeRadius + d.radius) touched = true;
+    }
+    if (!touched) return;
+    // Predict reads (vel - prevVel) / dt as the body's acceleration of the last step: an impulse must not look like one
+    _BodyVelLin[i] += float4(dv, 0);
+    _BodyPrevVelLin[i] += float4(dv, 0);
+    if (_BlastWake != 0)
+    {
+        // the WakeList kernel's wakeWord: one thread per body, so the plain read-then-write is race-free
+        uint w = _BodySleep[i];
+        if (inSleepGrid(w)) { uint dummy; InterlockedAdd(_Counters[CNT_STALE], 1, dummy); }
+        _BodySleep[i] = SLEEP_FRESH;
+    }
+}
+
+[numthreads(AVBD_THREADS, 1, 1)]
+void BlastJoints(uint3 id : SV_DispatchThreadID)
+{
+    uint j = id.x;
+    if (j >= (uint)_BlastJointCount) return;
+    JointDef d = _JointDef[j];
+    if (d.stiffnessLin <= 0.0 && d.stiffnessAng <= 0.0) return;   // a removed joint (AvbdGpuWorld.RemoveJoint zeroes the stiffness)
+    JointState s = _JointStateRW[j];
+    if (s.broken) return;
+    float3 pB = qtransform(_BodyPos[d.bodyB].xyz, _BodyRot[d.bodyB], d.rB);
+    float3 pA = d.bodyA >= 0 ? qtransform(_BodyPos[d.bodyA].xyz, _BodyRot[d.bodyA], d.rA) : d.rA;
+    float3 anchor = 0.5 * (pA + pB);
+    for (int k = 0; k < _BlastCount; k++)
+    {
+        BlastRecord r = _BlastRecords[k];
+        if (r.pulverizeRadius <= 0.0 || distance(anchor, r.centre) >= r.pulverizeRadius) continue;
+        // the solver's fracture: multipliers and penalties dropped, the joint skipped from now on
+        s.penaltyLin = 0; s.penaltyAng = 0;
+        s.lambdaLin = 0; s.lambdaAng = 0;
+        s.broken = 1;
+        _JointStateRW[j] = s;
+        return;
+    }
+}

@@ -85,6 +85,20 @@ namespace Phys.AvbdGpu
         public const int Stride = 64;
     }
 
+    /// <summary>An explosion applied between steps (BlastBodies / BlastJoints kernels, <see cref="AvbdGpuWorld.Blast"/>): bodies
+    /// within <see cref="ImpactRadius"/> get a radial velocity change of Impulse (1 - d / R) / mass biased upward by
+    /// <see cref="Lift"/>, joints anchored within <see cref="PulverizeRadius"/> break, everything touched wakes.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct GpuBlastRecord
+    {
+        public float3 Centre;
+        public float ImpactRadius;
+        public float Impulse, Lift, PulverizeRadius;
+        public uint Exclude;            // a body left alone (the projectile that caused it); 0xFFFFFFFF = none
+        public const int Stride = 32;
+        public const uint NoBody = 0xFFFFFFFFu;
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     public struct GpuManifold
     {

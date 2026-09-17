@@ -96,6 +96,11 @@ namespace Phys.AvbdGpu
         readonly List<GpuSpawnRecord> m_SpawnQueue = new List<GpuSpawnRecord>();
         readonly GpuSpawnRecord[] m_SpawnChunk;
         static readonly int s_SpawnCount = Shader.PropertyToID("_SpawnCount");
+        // blasts (explosions) queued for the next Upload, applied by the Blast kernels in chunks of Config.MaxBlasts
+        readonly List<GpuBlastRecord> m_BlastQueue = new List<GpuBlastRecord>();
+        readonly GpuBlastRecord[] m_BlastChunk;
+        static readonly int s_BlastCount = Shader.PropertyToID("_BlastCount"), s_BlastBodyCount = Shader.PropertyToID("_BlastBodyCount"),
+            s_BlastJointCount = Shader.PropertyToID("_BlastJointCount"), s_BlastWake = Shader.PropertyToID("_BlastWake");
         readonly uint[] m_ZeroPersistent = new uint[(int)StatSlot.Count - (int)StatSlot.Persistent];
         readonly uint[] m_One = { 1u };
         // sleeping: the wake requests of this step (applied by the WakeList kernel), or everything at once
@@ -188,6 +193,7 @@ namespace Phys.AvbdGpu
             for (int i = 0; i < m_Identity.Length; i++) m_Identity[i] = (uint)i;
             m_WakeArray = new uint2[math.max(config.MaxWakes, 1)];
             m_SpawnChunk = new GpuSpawnRecord[math.max(config.MaxSpawns, 1)];
+            m_BlastChunk = new GpuBlastRecord[math.max(config.MaxBlasts, 1)];
             m_EventsRead = new uint[config.MaxBodies];
             m_JointDefs = new GpuJointDef[config.MaxJoints];
             m_ZeroJointStates = new GpuJointState[config.MaxJoints];
@@ -564,6 +570,7 @@ namespace Phys.AvbdGpu
             m_DirtyDefMin = m_DirtyDriveMin = int.MaxValue; m_DirtyDefMax = m_DirtyDriveMax = -1;
             m_PosReadStep = -1;
             m_SpawnQueue.Clear();
+            m_BlastQueue.Clear();
             m_WakeList.Clear(); m_WakeAll = false;
             EventRanges.Clear();
             PoseRanges.Clear();
@@ -672,6 +679,63 @@ namespace Phys.AvbdGpu
                 UploadLinks();
                 m_LinksDirty = false;
             }
+            FlushBlasts();   // after the bodies and joints of this step are on the GPU: a blast sees everything queued before it
+        }
+
+        /// <summary>Queues an explosion applied before the next step: every dynamic body within <paramref name="impactRadius"/> of
+        /// <paramref name="centre"/> gets a radial velocity change of impulse (1 - d / R) / mass, its direction biased upward by
+        /// <paramref name="lift"/> (0 = purely radial, 1 = 45 degrees up on the ground plane); every joint whose anchor lies within
+        /// <paramref name="pulverizeRadius"/> breaks (like the solver's own fracture: the pieces collide again); everything touched
+        /// wakes. <paramref name="excludeBody"/> (the projectile that caused it) is left alone. Deterministic (bodies and joints are
+        /// visited in index order, the records in the order queued).</summary>
+        public void Blast(float3 centre, float impactRadius, float impulse, float lift, float pulverizeRadius, int excludeBody = -1)
+        {
+            if (impactRadius <= 0f && pulverizeRadius <= 0f) return;
+            m_BlastQueue.Add(new GpuBlastRecord
+            {
+                Centre = centre, ImpactRadius = math.max(impactRadius, 0f), Impulse = impulse, Lift = math.max(lift, 0f),
+                PulverizeRadius = math.max(pulverizeRadius, 0f), Exclude = excludeBody >= 0 ? (uint)excludeBody : GpuBlastRecord.NoBody,
+            });
+        }
+
+        /// <summary>Blasts queued and not yet applied (they go up with the next step).</summary>
+        public int PendingBlasts => m_BlastQueue.Count;
+
+        /// <summary>Applies the queued blasts (one upload and two dispatches per chunk of Config.MaxBlasts).</summary>
+        void FlushBlasts()
+        {
+            if (m_BlastQueue.Count == 0) return;
+            var cs = Kernels.Blast; var b = Buffers;
+            int kb = Kernels.BlastBodies, kj = Kernels.BlastJoints;
+            int bodies = m_UploadedBodies, joints = m_UploadedJoints;
+            for (int done = 0; done < m_BlastQueue.Count; done += m_BlastChunk.Length)
+            {
+                int n = math.min(m_BlastChunk.Length, m_BlastQueue.Count - done);
+                m_BlastQueue.CopyTo(done, m_BlastChunk, 0, n);
+                b.BlastRecords.SetData(m_BlastChunk, 0, 0, n);
+                cs.SetInt(s_BlastCount, n);
+                cs.SetInt(s_BlastBodyCount, bodies);
+                cs.SetInt(s_BlastJointCount, joints);
+                cs.SetInt(s_BlastWake, Params.Sleep ? 1 : 0);
+                cs.SetBuffer(kb, "_BlastRecords", b.BlastRecords);
+                cs.SetBuffer(kb, "_BodyDef", b.BodyDef);
+                cs.SetBuffer(kb, "_BodyPos", b.BodyPos);
+                cs.SetBuffer(kb, "_BodyVelLin", b.BodyVelLin);
+                cs.SetBuffer(kb, "_BodyPrevVelLin", b.BodyPrevVelLin);
+                cs.SetBuffer(kb, "_BodySleep", b.BodySleep);
+                cs.SetBuffer(kb, "_Counters", b.Counters);
+                if (bodies > 0) cs.Dispatch(kb, (bodies + AvbdGpuConstants.ThreadGroupSize - 1) / AvbdGpuConstants.ThreadGroupSize, 1, 1);
+                if (joints > 0)
+                {
+                    cs.SetBuffer(kj, "_BlastRecords", b.BlastRecords);
+                    cs.SetBuffer(kj, "_BodyPos", b.BodyPos);
+                    cs.SetBuffer(kj, "_BodyRot", b.BodyRot);
+                    cs.SetBuffer(kj, "_JointDef", b.JointDef);
+                    cs.SetBuffer(kj, "_JointStateRW", b.JointState);
+                    cs.Dispatch(kj, (joints + AvbdGpuConstants.ThreadGroupSize - 1) / AvbdGpuConstants.ThreadGroupSize, 1, 1);
+                }
+            }
+            m_BlastQueue.Clear();
         }
 
         /// <summary>Writes the queued spawns' GPU state (one upload and one dispatch per chunk of Config.MaxSpawns).</summary>

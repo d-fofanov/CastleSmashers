@@ -31,6 +31,7 @@ namespace Phys.AvbdGpu
         public int MaxSleepCellEntries;
         public int MaxSpawns;         // spawn records uploaded per step (larger batches are flushed in chunks)
         public int MaxWakes;          // wake list entries per step (more wake everything)
+        public int MaxBlasts;         // blast records applied per dispatch (more are flushed in chunks)
 
         /// <summary>Capacities for <paramref name="bodies"/> bodies of which at most <paramref name="active"/> are awake at a time
         /// (0: all of them). The manifold pools are sized for the awake bodies, the cold store (the manifolds of the sleeping ones)
@@ -63,6 +64,7 @@ namespace Phys.AvbdGpu
                 MaxSleepCellEntries = bodies * 8,
                 MaxSpawns = 4096,
                 MaxWakes = 4096,
+                MaxBlasts = 64,
             };
         }
 
@@ -73,7 +75,7 @@ namespace Phys.AvbdGpu
         public const int ColdChunk = 16384;
 
         public long EstimatedBytes =>
-            (long)MaxBodies * (GpuBodyDef.Stride + GpuBodyDrive.Stride + 16 * 16 + 32 + 8 * 4) + (long)MaxSpawns * GpuSpawnRecord.Stride + (long)MaxWakes * 8 + (long)MaxLinks * 8 +
+            (long)MaxBodies * (GpuBodyDef.Stride + GpuBodyDrive.Stride + 16 * 16 + 32 + 8 * 4) + (long)MaxSpawns * GpuSpawnRecord.Stride + (long)MaxBlasts * GpuBlastRecord.Stride + (long)MaxWakes * 8 + (long)MaxLinks * 8 +
             (long)CellCount * 12 + 4 + (long)MaxCellEntries * 4 + (long)MaxPairs * 8 + (long)SleepCellCount * 12 + 4 + (long)MaxSleepCellEntries * 4 +
             2L * MaxManifolds * GpuManifold.Stride + 2L * MaxContacts * GpuContact.Stride + 2L * HashSize * 4 + (long)MaxManifolds * 16 + 8 +
             (long)MaxColdManifolds * (GpuManifold.Stride + 16) + 8 + (long)MaxColdContacts * GpuContact.Stride + (long)ColdHashSize * 4 +
@@ -90,7 +92,7 @@ namespace Phys.AvbdGpu
 
         // bodies
         public GraphicsBuffer BodyDef, BodyPos, BodyRot, BodyPosNew, BodyRotNew, BodyInitialLin, BodyInitialAng, BodyInertialLin, BodyInertialAng,
-            BodyVelLin, BodyVelAng, BodyPrevVelLin, BodyAabbMin, BodyAabbMax, BodyColor, BodyColorTmp, BodyDrive, BodyEvents, SpawnRecords;
+            BodyVelLin, BodyVelAng, BodyPrevVelLin, BodyAabbMin, BodyAabbMax, BodyColor, BodyColorTmp, BodyDrive, BodyEvents, SpawnRecords, BlastRecords;
         // sleeping: sleep words, island labels (ping-pong), neighbourhood rest minima (ping-pong), wake marks, rest anchors, the CPU wake list
         public GraphicsBuffer BodySleep, BodyLabel, BodyLabelTmp, RestMin, RestMinTmp, WakeMark, BodyRestPose, WakeList;
         // the hot list (flags, their scan, the list), the bodies woken by a touch, the active joint and spring lists
@@ -138,6 +140,7 @@ namespace Phys.AvbdGpu
             BodyColor = Structured(nb, 4); BodyColorTmp = Structured(nb, 4);
             BodyDrive = Structured(nb, GpuBodyDrive.Stride); BodyEvents = Structured(nb, 4);
             SpawnRecords = Structured(math.max(config.MaxSpawns, 1), GpuSpawnRecord.Stride);
+            BlastRecords = Structured(math.max(config.MaxBlasts, 1), GpuBlastRecord.Stride);
             BodySleep = Structured(nb, 4); BodyLabel = Structured(nb, 4); BodyLabelTmp = Structured(nb, 4);
             RestMin = Structured(nb, 4); RestMinTmp = Structured(nb, 4); WakeMark = Structured(nb, 4); BodyRestPose = Structured(nb, 32);
             WakeList = Structured(math.max(config.MaxWakes, 1), 8);

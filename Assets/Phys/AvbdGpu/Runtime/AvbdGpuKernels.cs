@@ -6,7 +6,7 @@ namespace Phys.AvbdGpu
     /// <summary>The compute shaders (loaded from Resources/AvbdGpu) and their kernel indices.</summary>
     public sealed class AvbdGpuKernels
     {
-        public readonly ComputeShader Util, Scan, Broadphase, Narrowphase, Constraints, Coloring, Solver, Sleep, SleepGrid, Cold;
+        public readonly ComputeShader Util, Scan, Broadphase, Narrowphase, Constraints, Coloring, Solver, Sleep, SleepGrid, Cold, Blast;
 
         public readonly int BuildArgs, HotFlag, HotScatter, HashClear, CopyStats, ClearUints, SpawnBodies;
         public readonly int ScanBlock, ScanTop, ScanAdd;
@@ -18,6 +18,7 @@ namespace Phys.AvbdGpu
         public readonly int WakeList, WakeTouch, WakeApply, WakeClear, LabelRound, SleepTimer, RestSpread, RestSleep;
         public readonly int RebuildGate, SleepFlag, SleepScatter, RebuildListArgs, SleepGridClear, SleepGridCount, SleepGridScatter, SleepGridSortCell, SleepMark;
         public readonly int FreezeCount, FreezeCopy, FreezeFinish, ColdGate, ColdFlag, ColdGather, ColdWrite, ColdFinish, ColdHashClear, ColdHashInsert;
+        public readonly int BlastBodies, BlastJoints;
 
         public static bool Supported => SystemInfo.supportsComputeShaders;
 
@@ -33,6 +34,7 @@ namespace Phys.AvbdGpu
             Sleep = Load("AvbdSleep");
             SleepGrid = Load("AvbdSleepGrid");
             Cold = Load("AvbdCold");
+            Blast = Load("AvbdBlast");
 
             BuildArgs = Util.FindKernel("BuildArgs");
             HotFlag = Util.FindKernel("HotFlag");
@@ -99,6 +101,8 @@ namespace Phys.AvbdGpu
             ColdFinish = Cold.FindKernel("ColdFinish");
             ColdHashClear = Cold.FindKernel("ColdHashClear");
             ColdHashInsert = Cold.FindKernel("ColdHashInsert");
+            BlastBodies = Blast.FindKernel("BlastBodies");
+            BlastJoints = Blast.FindKernel("BlastJoints");
         }
 
         static ComputeShader Load(string name)
