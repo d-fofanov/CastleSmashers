@@ -7,8 +7,8 @@ using UnityEngine;
 namespace Phys.Demo.Editor
 {
     /// <summary>Batch build of the demo players: Unity.exe -batchmode -quit -executeMethod Phys.Demo.Editor.BuildDemo.Build
-    /// [-buildScene Demo|Castle|Preview] [-buildPath C:/out/Demo.exe]. Menu: Phys / Build Demo Player, Build Castle Player,
-    /// Build Preview Player.</summary>
+    /// [-buildScene Demo|Castle|Preview|Siege] [-buildPath C:/out/Demo.exe]. Menu: Phys / Build Demo Player, Build Castle Player,
+    /// Build Preview Player, Build Siege Player.</summary>
     public static class BuildDemo
     {
         [MenuItem("Phys/Build Demo Player")]
@@ -19,6 +19,9 @@ namespace Phys.Demo.Editor
 
         [MenuItem("Phys/Build Preview Player")]
         public static void BuildPreview() => BuildPlayer("Preview");
+
+        [MenuItem("Phys/Build Siege Player")]
+        public static void BuildSiege() => BuildPlayer("Siege");
 
         static void BuildPlayer(string scene)
         {

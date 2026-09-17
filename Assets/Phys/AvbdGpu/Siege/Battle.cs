@@ -40,6 +40,9 @@ namespace Phys.AvbdGpu.Siege
         public int LaunchStep;
         public int SpentStep;         // -1 while in flight
         public bool HitApplied;       // its hit effect (if any) went off
+        public float3 LastPosition;   // the last read-back position and its step, and the velocity between the last two (the impact point
+        public int LastPositionStep;  // is extrapolated from them: the readback lags the contact by a step or two)
+        public float3 Velocity;
         public bool Spent => SpentStep >= 0;
     }
 
@@ -216,12 +219,12 @@ namespace Phys.AvbdGpu.Siege
         /// keeping its offset from the centroid (the formation walks as it stands).</summary>
         public void Move(IReadOnlyList<int> units, float3 point)
         {
-            if (!Centroid(units, out float3 c)) return;
+            bool known = Centroid(units, out float3 c);
             foreach (int i in units)
             {
                 var u = Units[i];
-                if (u.State == UnitState.Dead || !Known(u)) continue;
-                float3 offset = m_Positions[u.Body].xyz - c; offset.y = 0f;
+                if (u.State == UnitState.Dead) continue;
+                float3 offset = known && Known(u) ? m_Positions[u.Body].xyz - c : float3.zero; offset.y = 0f;   // positions not read back yet: everyone to the point
                 u.Goal = point + offset;
                 u.Order = OrderKind.Move; u.State = UnitState.Moving; u.TargetBody = -1; u.PendingShotStep = -1;
                 Units[i] = u;
@@ -233,19 +236,24 @@ namespace Phys.AvbdGpu.Siege
         public void Attack(IReadOnlyList<int> units, int targetBody)
         {
             if (targetBody < 0 || m_Positions == null || targetBody >= m_PositionCount || !World.IsAlive(targetBody)) return;
-            if (!Centroid(units, out float3 c)) return;
+            bool known = Centroid(units, out float3 c);
             float3 target = m_Positions[targetBody].xyz;
             float3 n = math.normalizesafe(new float3(target.x - c.x, 0f, target.z - c.z), new float3(0, 0, 1));
             foreach (int i in units)
             {
                 var u = Units[i];
-                if (u.State == UnitState.Dead || !Known(u)) continue;
+                if (u.State == UnitState.Dead) continue;
                 var a = Types[u.Type];
-                float3 pos = m_Positions[u.Body].xyz;
-                float3 offset = pos - c; offset.y = 0f;
-                bool inRange = math.length((target - pos).xz) <= a.Range;   // already in range: shoot from where it stands
-                u.Goal = inRange ? pos : target - n * (a.Range * Settings.RangeFraction) + offset;
-                u.Order = OrderKind.Attack; u.State = inRange ? UnitState.Attacking : UnitState.Moving; u.TargetBody = targetBody; u.PendingShotStep = -1;
+                u.Order = OrderKind.Attack; u.TargetBody = targetBody; u.PendingShotStep = -1;
+                if (known && Known(u))
+                {
+                    float3 pos = m_Positions[u.Body].xyz;
+                    float3 offset = pos - c; offset.y = 0f;
+                    bool inRange = math.length((target - pos).xz) <= a.Range;   // already in range: shoot from where it stands
+                    u.Goal = inRange ? pos : target - n * (a.Range * Settings.RangeFraction) + offset;
+                    u.State = inRange ? UnitState.Attacking : UnitState.Moving;
+                }
+                else { u.Goal = target; u.State = UnitState.Moving; }   // steering stops it once in range
                 Units[i] = u;
             }
         }
@@ -270,6 +278,7 @@ namespace Phys.AvbdGpu.Siege
         {
             m_Positions = positions; m_PositionCount = positionCount; m_PositionsStep = positionsStep;
             UpdateHits();
+            TrackProjectiles();
             UpdateSpent();
             ApplyImpacts();
             if (positions != null)
@@ -310,6 +319,22 @@ namespace Phys.AvbdGpu.Siege
             Dead[u.Team]++;
         }
 
+        /// <summary>The flying projectiles' read-back positions and the velocity between the last two readbacks.</summary>
+        void TrackProjectiles()
+        {
+            if (m_Positions == null) return;
+            float dt = World.Params.Dt;
+            for (int i = 0; i < Projectiles.Count; i++)
+            {
+                var p = Projectiles[i];
+                if (p.Spent || p.Body >= m_PositionCount || p.LaunchStep >= m_PositionsStep || m_PositionsStep <= p.LastPositionStep) continue;
+                float3 pos = m_Positions[p.Body].xyz;
+                if (p.LastPositionStep > p.LaunchStep) p.Velocity = (pos - p.LastPosition) / ((m_PositionsStep - p.LastPositionStep) * dt);
+                p.LastPosition = pos; p.LastPositionStep = m_PositionsStep;
+                Projectiles[i] = p;
+            }
+        }
+
         /// <summary>A projectile that has touched anything (or flown for too long) is spent: its drive goes at once. The event word of
         /// a recycled slot may still be its predecessor's for a couple of frames, hence the guard.</summary>
         void UpdateSpent()
@@ -341,7 +366,10 @@ namespace Phys.AvbdGpu.Siege
                 if (!p.Spent || p.HitApplied) continue;
                 if (m_Positions == null || p.Body >= m_PositionCount || p.LaunchStep >= m_PositionsStep) continue;   // its position is not read back yet
                 var hit = Types[p.Type].Hit;
+                // the readback lags the contact by a step or two: the blast goes off at the tip, a step of flight ahead of the read-back centre
                 float3 centre = m_Positions[p.Body].xyz;
+                float speed = math.length(p.Velocity);
+                if (speed > 1f) centre += p.Velocity / speed * (Types[p.Type].ProjectileBoxSize.z * 0.5f) + p.Velocity * World.Params.Dt;
                 World.Blast(centre, hit.ImpactRadius, hit.Impulse, hit.Lift, hit.PulverizeRadius, p.Body);
                 if (hit.KillUnits && hit.ImpactRadius > 0f)
                     for (int k = 0; k < Units.Count; k++)
@@ -385,7 +413,7 @@ namespace Phys.AvbdGpu.Siege
                         {
                             float3 d = u.Goal - pos; d.y = 0f;
                             float dist = math.length(d);
-                            if (dist < Settings.ArriveRadius)
+                            if (dist < Settings.ArriveRadius || distance <= a.Range * Settings.RangeFraction)   // at the firing position, or close enough already
                             {
                                 if (distance <= a.Range) u.State = UnitState.Attacking;
                                 else u.Goal = pos + toTarget / math.max(distance, 1e-4f) * (distance - a.Range * Settings.RangeFraction);   // the formation's offset left it short: advance
@@ -559,7 +587,7 @@ namespace Phys.AvbdGpu.Siege
             quaternion rot = a.ProjectileAlign ? quaternion.LookRotationSafe(dir, new float3(0, 1, 0)) : quaternion.identity;
             int body = pool.Spawn(size, a.ProjectileDensity, a.Friction, pos, rot, velocity, flags, drive);
             if (body < 0) return -1;
-            Projectiles.Add(new Projectile { Body = body, Type = type, Team = team, Variant = variant, LaunchStep = World.StepIndex, SpentStep = -1 });
+            Projectiles.Add(new Projectile { Body = body, Type = type, Team = team, Variant = variant, LaunchStep = World.StepIndex, SpentStep = -1, LastPositionStep = -1, LastPosition = pos, Velocity = velocity });
             ShotsFired++;
             OnProjectileSpawned?.Invoke(body, type);
             return body;

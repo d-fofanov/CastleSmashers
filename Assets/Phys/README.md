@@ -22,32 +22,38 @@ models built from the construction-piece pack are exchanged with other agents.
 * **Presentation** (`Phys.AvbdGpu.Presentation`) — `AvbdGpuRenderer`: instanced draws straight from the solver buffers
   (the collision boxes, or any mesh for a range of bodies), per-body tints, shadows, GPU-written contact / joint debug lines;
   `TerrainView`: the heightfield drawn with Unity's terrain renderer or as tiles (`TerrainTiles`), Unity Terrain / heightmap import.
-* **Siege** (`Phys.AvbdGpu.Siege`) — `SiegeSystem`: armies of toy figures (`Assets/Models/ConstructorFigure`) that march,
-  hold a line and fire volleys of arrows (`Assets/Models/ConstructorArrow`), cannonballs, rockets and homing bolts at each
-  other and at the castle; `Ballistics`, `SiegeSpec` (the models as boxes), `BodyPool`s for units and projectiles.
+* **Siege** (`Phys.AvbdGpu.Siege`) — `Battle`: two armies of unit archetypes (`UnitArchetype`: body, motion, trajectory,
+  projectile, hit effect) in body pools, the player's move and attack orders, shots on cooldowns (`Ballistics`), impacts
+  as blasts that break snaps and toss bricks; `Formations`; the `UnitConfig`, `HitEffectConfig` and `SiegeConfig`
+  ScriptableObjects the siege scene is built from.
 * **Demo** (`Phys.Demo`) — `Demo.unity` / `DemoBootstrap` (the catalog scenes), `Castle.unity` / `CastleDemo` (the brick
-  castle and its siege) and `Preview.unity` / `PreviewDemo` (the JSON castles of `Resources/Castles`) on the shared
-  `DemoBase` (scene keys, HUD, drag, shooting, player flags), `DemoCamera`.
+  castle), `Preview.unity` / `PreviewDemo` (the JSON castles of `Resources/Castles`) and `Siege.unity` / `SiegeDemo` (a JSON
+  castle under a siege the player commands) on the shared `DemoBase` (scene keys, HUD, drag, shooting, player flags),
+  `Vegetation` (the trees and foliage around a castle), `DemoCamera`.
 * **Tests** — EditMode: reference behaviour, kernel checks, GPU vs reference comparisons, invariants, drives, body pools,
-  siege, castle layout, brick assemblies, terrain, performance; PlayMode: demo, castle, siege and preview smoke tests.
+  blasts, ballistics, battles, formations, castle layout, brick assemblies, occupancy maps, terrain, performance; PlayMode:
+  demo, castle, siege and preview smoke tests.
 
 ## Layout
 
 ```
 Assets/Phys/AvbdGpu/Runtime            AvbdGpuWorld, BodyPool, AvbdGpuPipeline, AvbdGpuBuffers, AvbdGpuKernels, AvbdGpuTypes, AvbdGpuConstants
 Assets/Phys/AvbdGpu/Runtime/Resources  AvbdCommon.hlsl, AvbdTerrain.hlsl, AvbdUtil, AvbdScan, AvbdBroadphase, AvbdNarrowphase, AvbdConstraints,
-                                       AvbdColoring, AvbdSolver, AvbdSleep, AvbdDebug (.compute)
+                                       AvbdColoring, AvbdSolver, AvbdSleep, AvbdSleepGrid, AvbdCold, AvbdBlast (.compute)
 Assets/Phys/AvbdGpu/Reference          RefMath, RefBodies, RefJoint (+Spring), RefManifold, RefCollide (boxes, terrain), RefSolver, RefSceneBuilder
 Assets/Phys/AvbdGpu/Scenes             AvbdScenes (catalog + ISceneBuilder), Heightfield (terrain samples, normals, max mip, presets, plateau),
                                        BrickCastle (brick, layout, castle plans, snap joints),
-                                       BrickAssembly (piece catalog, document parser + writer, AssemblyBuilder: boxes, snaps, diagnostics)
-Assets/Phys/AvbdGpu/Siege              SiegeSpec (figure and arrow models as boxes), Ballistics, SiegeSystem (armies, volleys, retirement)
-Assets/Phys/AvbdGpu/Presentation       AvbdGpuRenderer, TerrainView, TerrainTiles, Resources/AvbdGpu/AvbdBox.shader (+ AvbdBodyInstancing.hlsl),
-                                       AvbdTiles.shader (+ AvbdTileInstancing.hlsl), AvbdLines.shader, AvbdTerrainLit.mat
-Assets/Phys/AvbdGpu/Tests/Editor       ReferenceTests, GpuKernelTests, GpuVsReferenceTests, InvariantTests, DriveTests, BodyPoolTests, SiegeTests,
-                                       SnapFractureTests, BrickCastleTests, BrickAssemblyTests, TerrainTests, SleepTests, PerformanceTests, DiagnosticTests
+                                       BrickAssembly (piece catalog, document parser + writer, AssemblyBuilder: boxes, snaps, diagnostics),
+                                       AssemblyOccupancy (the occupancy map: parse / derive / write, posts)
+Assets/Phys/AvbdGpu/Siege              UnitArchetype (+ HitEffect, Trajectory), Battle (pools, orders, steering, shots, impacts, retirement), Formations, Ballistics,
+                                       Config/UnitConfig, HitEffectConfig, SiegeConfig (ScriptableObjects)
+Assets/Phys/AvbdGpu/Presentation       AvbdGpuRenderer, AttachmentRenderer, TerrainView, TerrainTiles, Resources/AvbdGpu/AvbdBox.shader (+ AvbdBodyInstancing.hlsl),
+                                       AvbdTiles.shader (+ AvbdTileInstancing.hlsl), AvbdAttach.shader (+ AvbdAttachInstancing.hlsl), AvbdLines.shader, AvbdTerrainLit.mat
+Assets/Phys/AvbdGpu/Tests/Editor       ReferenceTests, GpuKernelTests, GpuVsReferenceTests, InvariantTests, DriveTests, BodyPoolTests, BlastTests, BallisticsTests,
+                                       BattleTests, FormationsTests, SnapFractureTests, BrickCastleTests, BrickAssemblyTests, AssemblyOccupancyTests, TerrainTests,
+                                       SleepTests, PerformanceTests, DiagnosticTests
 Assets/Phys/AvbdGpu/Tests/Runtime      DemoSmokeTests, CastleSmokeTests, SiegeSmokeTests, PreviewSmokeTests
-Assets/Phys/Demo                       Demo.unity, Castle.unity, Preview.unity, DemoBase, DemoBootstrap, CastleDemo, PreviewDemo, DemoCamera,
+Assets/Phys/Demo                       Demo.unity, Castle.unity, Preview.unity, Siege.unity, DemoBase, DemoBootstrap, CastleDemo, PreviewDemo, SiegeDemo, Vegetation, DemoCamera,
                                        Editor/BuildDemo (player builds, mesh assignment, the Outpost export)
 Assets/Resources/Castles               the brick-assembly documents the preview demo offers (emerald_crown_citadel.json, outpost.json)
 Assets/Resources/Trees                 the six trees the castle demo plants and the preview demo lists after the castles (oak, pine,
@@ -158,7 +164,13 @@ if (GpuBodyEvents.Touched(world.ReadEvents[arrow])) arrows.Retire(arrow);       
 Drives (`GpuBodyDrive`, an acceleration of the inertial pose like gravity): `ConstantForce(F)`, `TowardsPoint(p, magnitude)`
 (a force of constant magnitude towards a fixed point) and `Velocity(target, maxForce, mask, yaw)` (a motor: `F = m (v_target -
 v) / h` on the masked axes, capped; being a proportional controller it runs `F h / m` below its target under a steady load
-`F`, 0.08 m/s for 5 N of friction at 60 Hz). Events (`world.ReadEvents[body]`, sticky until the slot is respawned; ranges
+`F`, 0.08 m/s for 5 N of friction at 60 Hz). Blasts (`world.Blast(centre, impactRadius, impulse, lift, pulverizeRadius,
+excludeBody)`) are explosions applied before the next step by two kernels of their own (`AvbdBlast.compute`, dispatched
+from `Upload` like the spawns): every dynamic body within the impact radius gets a velocity change of `impulse (1 - d / R) /
+mass` away from the centre (biased upward by `lift`), written to its velocity and its previous velocity alike (the
+predictor reads their difference as the body's acceleration), and wakes; every joint whose anchor lies within the pulverize
+radius breaks the way the solver's own fracture breaks it. Bodies and joints are visited in index order and the records in
+the order queued, so a blast is deterministic. Events (`world.ReadEvents[body]`, sticky until the slot is respawned; ranges
 in `world.EventRanges` are read back asynchronously every step, `BodyPool` registers its own): bits `TouchStatic`,
 `TouchBody`, `TouchUnit`, `TouchProjectile` and, above them, the number of impacts — new manifolds with a projectile moving
 faster than 2 m/s (a spent arrow lying about hurts nobody). Slot rules: a retired slot is reusable from the step after
@@ -486,6 +498,74 @@ falling off: the pine and the cypress do not move at all, the broad crowns creep
 bricks is a cantilever that friction alone holds, and the trees are meant to be snapped (`PreviewSmokeTests`). The
 loader's diagnostics find nothing floating, poorly supported or intersecting in any of them.
 
+## Siege demo
+
+`Assets/Phys/Demo/Siege.unity` (`Phys / Build Siege Player`, or `-buildScene Siege`) puts the player in command of a siege:
+a castle from a brick-assembly document on the Castle scene's hills with its trees and foliage (`Vegetation`, the same code
+as the castle demo, the ground of the attackers kept clear), a garrison of AI defenders standing on the castle's posts (the
+occupancy map of the document, see [BRICK_ASSEMBLY.md](BRICK_ASSEMBLY.md#occupancy-map): the wall tops first) and the
+player's army formed up on one side. Everything comes from a `SiegeConfig` asset in `Assets/Resources` (`SiegeConfig1`,
+the Outpost; `SiegeConfig2`, the Emerald Crown citadel; keys `1` .. `0` and `, .` choose between the assets by name,
+`-avbd-config name` starts on one): the castle document, the two rosters as unit configs with counts, the attacked side
+(`AttackSide`: 0 = -z, the gate side of the planned castles), the formation's distance and spacing. `Phys / Create Siege
+Configs` (`SiegeAssets.CreateSiegeConfigs`) writes the default assets - the hit effects in `Resources/Siege/HitEffects`, the
+units in `Resources/Siege/Units`, the two sieges - from the ConstructorFantasy models (bounds read from the meshes, the
+trebuchet's part pivots from its manifest); they are ordinary assets to edit in the inspector afterwards.
+
+**Controls.** Left click one of your units to select its kind: a green plate (`AttachmentRenderer`, a rounded plate scaled
+to the unit's footprint, drawn in the body's frame) appears under every live unit of that kind; `Esc` or a click on
+anything else clears the selection. Right click orders the selected units: on the ground (the heightfield marched along
+the ray) they walk there in straight lines, the formation's centroid to the point and every unit keeping its offset; on a
+block - any dynamic body, a brick, a tree piece, an enemy - they attack it: each walks in a straight line to 85 % of its
+range (units already in range shoot from where they stand), then shoots at the block until it is gone, with no
+line-of-sight check (an arrow into the wall in between is an arrow into the wall). A right drag still orbits the camera;
+a click is a press and release within five pixels. Units without an order shoot at the nearest enemy in range on their own
+when their kind says so (`AutoEngage`); the defenders always do. Keys as the castle demo (`J` snaps, `T` / `Y` terrain,
+`F` trees, `F6` / `F7`), `X` retires the dead and the spent at once, `B` / `Enter` the camera's cannonball.
+
+**Units** (`UnitConfig`: model metres relative to the model's pivot, scaled by `BrickScale` into the solver; `ToArchetype`
+builds the `UnitArchetype` the battle runs on). The body is a box of the body model's bounds plus one collision margin in
+height, the mesh offset so that the feet rest on the ground (the castle brick's trick), a heading-locked motor (`Speed`,
+`Force`) that dies (topples, then retires) at `HitPoints` fast projectile hits. The weapon is a list of meshes with their
+places in the figure's frame - the bow in the archer's hand at the model pack's suggested (0.148, 0.197, 0.008); the
+trebuchet's beam, counterweight and basin about its axle - and an optional swing: the weapon rests turned by
+`SwingDegrees` about `SwingPivot` / `SwingAxis` (the trebuchet cocked, its basin down behind and its counterweight raised),
+a shot swings it to the model's pose over `SwingSteps` and it re-cocks over `ResetSteps`; the projectile leaves
+`LaunchDelaySteps` after the shot starts (the rock at the top of the swing), `LaunchOffset` metres along its velocity from
+`LaunchPoint` (the shoulder, the basin), never from inside the castle (the occupancy map skips such shots). The projectile
+is a box of its model's bounds with `ProjectileMass`, aligned to its velocity or tumbling, drawn with one of its meshes
+(variants cycle: the four rocks), an optional tip mesh attached (the spell on the heavy arrow), and flies by `Trajectory`:
+`Elevation` (an arrow: the speed solved for a fixed elevation, `MaxSpeed` at most), `HighArc` / `LowArc` (a fixed speed,
+the angle solved: the trebuchet's rock, a cannonball), `Straight` (plus a constant thrust: a rocket) or `Homing` (straight
+at the aim, pulled towards it with `Thrust`: the mages' spells), all with the implicit Euler correction of `Ballistics`
+and a random `Spread` seeded per step. A spent projectile (anything touched, or `ProjectileMaxAge`) lies about for
+`ProjectileRetireDelay` steps - zero for what explodes.
+
+**Hit effects** (`HitEffectConfig`). Where a projectile with one lands (its first contact, at its read-back position),
+`world.Blast` goes off: every snap anchored within `PulverizeRadius` breaks unconditionally, every body within
+`ImpactRadius` is thrown away from the impact with `Impulse (1 - d / R) / mass` biased upward by `Lift`, units within the
+impact radius die (`KillUnits`), and the effect's mesh (the spell explosions of the pack) is drawn at the impact for
+`LifeSteps`, growing from `StartScale` to `EndScale`, fading and spinning, lit or as a flat glow (`Unlit`). The defaults:
+explosive arrows (1.2 / 3 m, 6 N s), rocks (0.8 / 2.5 m, 8 N s), fire (2 / 5 m, 12 N s, the starburst), frost (0.8 / 6 m,
+16 N s, the shock ring) and arcane (3 / 3 m, 6 N s, the puff); a 1 kg brick at the centre of a 12 N s blast leaves at
+12 m/s. Plain arrows have no effect: they kill by their impact.
+
+**Under the hood.** `SiegeDemo.BuildScene` parses the document, levels the plateau (the level margin of the terrain holds
+the formation: a warning when it does not), builds the castle like the preview demo, scatters the vegetation clear of the
+plateau core and the attackers' band, then creates the `Battle` with one body pool per unit kind and one per projectile
+kind and variant (six projectiles per unit, 64 at least; `MaxSpawns` and the awake budget grow with the largest config's
+pools), drawn as mesh ranges without culling, and spawns the garrison over the posts (`Formations.AssignPosts`, wall posts
+first, facing outward) and the attackers in ranks by range (`Formations.Ranks`: the short-ranged in front, the machines
+behind, rows centred on the attacked face). Every frame `Battle.Tick` runs on the asynchronous pose readback before the
+step: hits (a unit dies at its hit points), contacts (a projectile is spent at its first touch; the sticky event word of a
+recycled slot is trusted only `EventGuardSteps` after the launch), impacts (a blast, once the projectile's position is
+read back), steering (motors toward the goals, a target that fell out of range is walked after), shots (per-unit
+cooldowns) and retirement. Weapons, tips, plates and effects go through `AttachmentRenderer`: instances in a body's frame
+read the body's pose straight from the solver buffers in the vertex shader (no frame of lag), world-space instances draw
+the effects; one opaque material with shadows and one transparent (queue Transparent, no depth write, two-sided). Flags:
+`-avbd-config name`, `-avbd-scene n`, `-avbd-snap` / `-avbd-dry`, `-avbd-trees n`, `-avbd-foliage n`, `-avbd-noshadows`,
+`-avbd-meshshadows`, the terrain flags and the screenshot / bench / camera flags above.
+
 ## Measured behaviour
 
 Numbers from the EditMode suite and the player on an RTX 4070 Laptop GPU (i7-14700HX, D3D12), plugged in. On battery
@@ -533,7 +613,7 @@ passes over the bodies (the hot list flags and their scan) — the sleepers them
 sleeping grid and the cold store hold them, and nothing is copied at the end of a step (the two manifold pools alternate
 between two recordings of the step): the 22k pyramid sleeps whole 3 s after it is built (the small pyramid 6 s, its top
 creeps longer) and the 17k castle 4 s, and they step in 0.77 ms from then on, the floor of the small scenes; the
-Outpost under siege sleeps between the volleys with its holding units, and its arrows wake what they hit. In the castle
+Outpost under siege sleeps between the shots with its holding units, and its arrows wake what they hit. In the castle
 player (snapped castles on the tiled hills, 1280 x 720, `-avbd-bench` against `-avbd-nosleep`) the frame drops from
 9.9 to 6.6 ms for the Outpost, 25.0 to 19.1 ms for the Stronghold and 40.3 to 31.2 ms for the Royal citadel; what is
 left is the draw of the brick meshes with shadows and of the terrain tiles (measured before the box shadow proxies, which
@@ -581,10 +661,11 @@ take a third off the castle's own frame as well).
 .\RunTests.ps1 -Platform EditMode -Filter Phys.AvbdGpu.Tests.GpuVsReferenceTests
 .\RunTests.ps1 -Platform EditMode -Filter Phys.AvbdGpu.Tests.PerformanceTests   # step times (excluded by default)
 .\RunTests.ps1 -Platform EditMode -Filter Phys.AvbdGpu.Tests.SnapFractureTests  # snap limits, GPU and reference
-.\RunTests.ps1 -Platform EditMode -Filter "Phys.AvbdGpu.Tests.DriveTests;Phys.AvbdGpu.Tests.BodyPoolTests;Phys.AvbdGpu.Tests.SiegeTests"
+.\RunTests.ps1 -Platform EditMode -Filter "Phys.AvbdGpu.Tests.DriveTests;Phys.AvbdGpu.Tests.BodyPoolTests;Phys.AvbdGpu.Tests.BlastTests"
+.\RunTests.ps1 -Platform EditMode -Filter "Phys.AvbdGpu.Tests.BallisticsTests;Phys.AvbdGpu.Tests.BattleTests;Phys.AvbdGpu.Tests.FormationsTests"
 .\RunTests.ps1 -Platform PlayMode -Filter Phys.AvbdGpu.Tests.CastleSmokeTests   # the smallest and largest castles stand, cannonball, snaps break, outlying copies, trees and foliage sleep
-.\RunTests.ps1 -Platform PlayMode -Filter Phys.AvbdGpu.Tests.SiegeSmokeTests    # the Outpost under siege: volleys, kills, retirements
-.\RunTests.ps1 -Platform EditMode -Filter Phys.AvbdGpu.Tests.BrickAssemblyTests  # the brick-assembly format: catalog, parsing, rejection, boxes, snaps
+.\RunTests.ps1 -Platform PlayMode -Filter Phys.AvbdGpu.Tests.SiegeSmokeTests    # the Outpost under siege: the armies, orders, shots, impacts, plates
+.\RunTests.ps1 -Platform EditMode -Filter "Phys.AvbdGpu.Tests.BrickAssemblyTests;Phys.AvbdGpu.Tests.AssemblyOccupancyTests"  # the brick-assembly format: catalog, parsing, rejection, boxes, snaps, the occupancy map
 .\RunTests.ps1 -Platform PlayMode -Filter Phys.AvbdGpu.Tests.PreviewSmokeTests  # the JSON castles and trees: the Outpost, the re-bonded citadel and the six trees stand dry and snapped
 .\RunTests.ps1 -Platform EditMode -Filter Phys.AvbdGpu.Tests.TerrainTests        # the heightfield, the reference terrain contacts, the GPU against them
 .\RunTests.ps1 -Platform EditMode -Filter Phys.AvbdGpu.Tests.SleepTests          # sleeping: freezing, islands, same-step wakes, gameplay wakes, determinism
@@ -592,17 +673,24 @@ take a third off the castle's own frame as well).
 
 `DriveTests` check the drives against the implicit Euler parabola and the reference mirror (constant force 1e-5, motor
 2e-3, a locked tall box that stays upright while a free one tips); `BodyPoolTests` that retired slots neither collide nor
-move, that a respawn starts from a clean state and that the events report what units and projectiles touch;
-`SiegeTests` the ballistics (closest approach 2e-3 m over three arcs), marching, a volley that kills its target, the
-retirement cooldown, the drives switched off at the first contact and a 600-step siege of the Outpost with synchronous
-readbacks (bitwise reproducible over two runs). `TerrainTests` check the heightfield (an inclined plane reproduced with its
+move, that a respawn starts from a clean state and that the events report what units and projectiles touch; `BlastTests`
+the impulse's linear falloff and radial direction (the excluded and static bodies untouched, the lift's upward bias), the
+snaps within the pulverize radius broken and the others not (removed joints left alone), sleepers within reach woken and
+the others left asleep, and bitwise determinism; `BallisticsTests` the closest approach (2e-3 m over three arcs) of the
+implicit Euler solutions and of a launched box; `BattleTests` (synchronous readbacks) a move order keeping the formation's
+offsets, an attack order walking into range before the first shot (and none for a unit already in range), an
+auto-engaging archer killing a defender that topples and retires, an explosive arrow whose impact breaks unbreakable snaps
+and tosses the cubes (the arrow gone at its impact), a trebuchet lobbing on the high arc after its launch delay, a homing
+spell reaching its slab, defenders standing on the Outpost's wall posts, spent projectiles retiring and their slots
+recycling without stale events, and a scripted battle bitwise reproducible over two runs; `FormationsTests` the ranks by
+range and the post assignment. `TerrainTests` check the heightfield (an inclined plane reproduced with its
 normal, the flat continuation past the border, the max mip as an upper bound, the plateau and its skirt, the presets), the
 reference's terrain contacts (eight sticking points under a resting box carrying its weight, cubes sticking or sliding on a
 30° slope by their friction, a long box resting on the crest of a ridge through its mid-face points) and the GPU against
 the reference on those scenes, the early-out (hovering boxes get no terrain manifold) and the bitwise determinism of the
 Terrain scene, and the tile layout of the tiled style (tiles of three sizes covering the field once, tops on the step grid,
-risers closed); the PlayMode smoke tests put the Outpost on hills with its siege, the Outpost document on a ridge and the
-Terrain scene through the demo with the terrain drawn smooth and tiled and imported back. `SleepTests` check that the settled
+risers closed); the PlayMode smoke tests put the Outpost on hills, the Outpost document on a ridge and the Terrain scene
+through the demo with the terrain drawn smooth and tiled and imported back. `SleepTests` check that the settled
 pyramid sleeps whole (no pairs, every manifold carried, one island label, poses bitwise constant and velocities zero
 afterwards), that two stacks are two islands, that a box sliding into a sleeping stack wakes the whole stack in the impact
 step and leaves the other stack asleep (the hit box takes its momentum at once), that a resting box beside a moving one stays
@@ -610,13 +698,17 @@ awake and both sleep once it stops, that a retired support drops what rested on 
 box wake, that debris knocked off a stack becomes its own island after a relabel, that an impact on the sleeping pyramid
 matches the awake run (the same boxes displaced; the momentum of the hit box within a third at 10 iterations and 5 % at
 40), that a hanging chain and a snapped pair sleep with their joint states frozen and wake as islands, and that two runs
-with sleeping are bitwise identical; `SiegeTests` run the Outpost siege with sleeping (the castle sleeps between the
-volleys, arrows still kill, the run is still bitwise reproducible). All other GPU tests run with sleeping off
+with sleeping are bitwise identical. All other GPU tests run with sleeping off
 (`GpuTestUtil.NewWorld`): the reference has none. `BrickAssemblyTests` check the piece catalog against the pack's manifest,
 the rotation convention against `Quaternion.Euler`, the format's examples and error cases, the boxes of upright and lying
 pieces, the snapped bridge on the reference solver, the expansion and diagnostics of the citadel as designed and as
 re-bonded, and the Outpost round trip (planner to document to bodies: the same pivots and the same snap joints as
-`BrickCastle`).
+`BrickCastle`); `AssemblyOccupancyTests` the occupancy map derived from the parts (the bridge's turned deck), parsed and
+rejected, written by the layout writer and equal to the derivation, spliced into a document, and the posts of the
+Outpost (a ring on the outer wall tops, courtyard posts after) and the citadel (wall posts and posts on its raised floor).
+`SiegeSmokeTests` run the siege demo on the Outpost with in-memory configs: the armies spawn with the garrison on the
+walls, a move order walks the archers in formation, an attack order on a wall brick makes the explosive archers' impacts
+break snaps and draw effects, the selection draws its plates and the trebuchet lobs a rock.
 
 The runner forces D3D12 (`-GraphicsApi ""` for the editor default). `DiagnosticTests` only log traces and are
 excluded from the default runs, like `PerformanceTests`.
