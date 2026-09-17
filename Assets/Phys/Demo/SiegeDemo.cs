@@ -90,7 +90,7 @@ namespace Phys.Demo
         Mesh m_Plate;
         readonly List<Effect> m_Effects = new List<Effect>();
         int m_Selected = -1;
-        string m_LastOrder = "";
+        string m_LastOrder = "", m_LastDeath = "";
         Vector2 m_LeftPress, m_RightPress;
         static readonly Color32 s_Iron = new Color32(70, 72, 78, 255);
 
@@ -335,7 +335,7 @@ namespace Phys.Demo
                 m_Battle = new Battle(m_World, archetypes, unitCaps, projectileCaps, BattleParams)
                 {
                     Terrain = m_World.Terrain, Occupancy = m_Occupancy, OccupancyOrigin = origin, OccupancyUnit = unit,
-                    OnUnitSpawned = OnUnitSpawned, OnProjectileSpawned = OnProjectileSpawned, OnRetiring = OnRetiring, OnImpact = OnImpact,
+                    OnUnitSpawned = OnUnitSpawned, OnProjectileSpawned = OnProjectileSpawned, OnRetiring = OnRetiring, OnImpact = OnImpact, OnUnitKilled = OnUnitKilled,
                 };
                 for (int t = 0; t < m_Types.Length; t++)
                 {
@@ -358,11 +358,12 @@ namespace Phys.Demo
             if (m_Tints.Length < m_World.BodyCount) System.Array.Resize(ref m_Tints, m_World.BodyCount);   // the pools' retired slots included
             m_Renderer.SetTints(m_Tints, 0, m_World.BodyCount);
 
-            // the camera behind the attackers, looking at the castle
+            // the camera behind the attackers, looking over them at the castle: the target midway between the castle and the formation
             float3 extent = m_Assembly != null ? m_Assembly.Extent * unit : new float3(8f * BrickScale);
-            cameraTarget = new float3(0f, m_Plateau + 0.3f * extent.y, 0f);
-            cameraDistance = 1.2f * (faceDistance + formationDistance + formationDepth) + 12f;
-            if (m_Camera != null) { m_Camera.Yaw = cfg != null ? (cfg.AttackSide == 1 ? -90f : cfg.AttackSide == 2 ? 180f : cfg.AttackSide == 3 ? 90f : 0f) : 0f; m_Camera.Pitch = 24f; }
+            float reach = faceDistance + formationDistance + formationDepth;
+            cameraTarget = outward * (0.5f * (faceDistance + formationDistance + 0.5f * formationDepth)) + new float3(0f, m_Plateau + 0.25f * extent.y, 0f);
+            cameraDistance = 1.1f * reach + 10f;
+            if (m_Camera != null) { m_Camera.Yaw = cfg != null ? (cfg.AttackSide == 1 ? -90f : cfg.AttackSide == 2 ? 180f : cfg.AttackSide == 3 ? 90f : 0f) : 0f; m_Camera.Pitch = 30f; }
         }
 
         /// <summary>The ground the trees keep clear of: the castle's plateau core and the attackers' band from the face out past the
@@ -465,18 +466,34 @@ namespace Phys.Demo
             m_Effects.Add(new Effect { Config = effect, Position = at, Birth = m_World.StepIndex, Yaw = (m_Effects.Count * 137) % 360 });
         }
 
+        void OnUnitKilled(int unit, string cause)
+        {
+            var u = m_Battle.Units[unit];
+            m_LastDeath = $"{(u.Team == Battle.Defenders ? "defender" : "attacker")} {m_Types[u.Type].name} ({cause}) at step {m_World.StepIndex}";
+            Debug.Log("SiegeDemo: " + m_LastDeath);
+        }
+
         protected override void OnShot(int body) => SetTint(body, s_Iron);
 
         /// <summary>Every attacker kind attacks the castle's highest piece (the -avbd-attack flag, for screenshots and benches).</summary>
         public void AttackTheCastle()
         {
-            if (m_Battle == null || m_Bodies == null || m_World.ReadCount == 0) return;
+            if (m_Battle == null || m_Bodies == null || m_World.ReadCount == 0 || Config == null) return;
+            // the highest piece standing on the attacked face's line (not a brick blown into the air somewhere)
+            float unit = PieceCatalog.GridToUnity * BrickScale;
+            float3 outward = Config.Outward;
+            float face = math.abs(outward.x) > 0.5f ? m_Assembly.Extent.x * 0.5f * unit : m_Assembly.Extent.z * 0.5f * unit;
             int target = -1; float top = float.NegativeInfinity;
             for (int i = 0; i < m_Bodies.Count && m_Bodies.First + i < m_World.ReadCount; i++)
-                if (m_World.ReadPositions[m_Bodies.First + i].y > top) { top = m_World.ReadPositions[m_Bodies.First + i].y; target = m_Bodies.First + i; }
+            {
+                float3 p = m_World.ReadPositions[m_Bodies.First + i].xyz;
+                if (math.abs(math.dot(p, outward) - face) > 3f * unit || p.y > m_Plateau + 40f) continue;
+                if (p.y > top) { top = p.y; target = m_Bodies.First + i; }
+            }
             if (target < 0) return;
             for (int t = 0; t < m_Types.Length; t++) m_Battle.Attack(m_Battle.Select(Battle.Attackers, t), target);
-            m_LastOrder = $"attack the highest piece (body {target})";
+            m_LastOrder = $"attack the top of the facing wall (body {target})";
+            if (m_Selected < 0) SelectUnitType(0);   // the plates show in the screenshot
         }
 
         protected override void OnStep()
@@ -703,12 +720,13 @@ namespace Phys.Demo
                          (Snap ? $"<color=#88ddff>snapped</color>: {m_SnapJoints} joints ({SnapFractureLateral:F0} / {SnapFractureTension:F0} N)" : "dry-stacked") +
                          (m_Diagnostics.Clean ? "" : $"  <color=#ffcc55>{m_Diagnostics.Floating} floating, {m_Diagnostics.PoorlySupported} poorly supported, {m_Diagnostics.Intersections} intersecting</color>") + "\n";
             }
+            string deaths = m_LastDeath.Length > 0 ? $"  -  last death: {m_LastDeath}" : "";
             string selection = m_Battle == null ? "" : m_Selected >= 0
                 ? $"<color=#80ff90>selected: {m_Types[m_Selected].name}</color> x {m_Battle.AliveOf(Battle.Attackers, m_Selected)} (range {m_Battle.Types[m_Selected].Range:F0} m)  -  RMB on a block: attack, on the ground: move" + (m_LastOrder.Length > 0 ? $"  -  last order: {m_LastOrder}" : "") + "\n"
                 : "nothing selected: LMB on one of your units selects its kind\n";
             return
                 $"{title}{PausedText}\n" + castle + ArmiesText() + selection +
-                (m_Battle != null ? m_Battle.Summary() + $"; {m_Effects.Count} effects, {(m_Attachments != null ? m_Attachments.LastInstances : 0)} attachments\n" : "") +
+                (m_Battle != null ? m_Battle.Summary() + $"; {m_Effects.Count} effects, {(m_Attachments != null ? m_Attachments.LastInstances : 0)} attachments{deaths}\n" : "") +
                 m_Vegetation.AroundText() + TerrainText(m_Plateau) + "\n\n" +
                 StatsText() + "\n\n" +
                 "1-0 siege config  , . prev/next  R rebuild  Esc deselect  X retire the dead now  J snap on/off  T terrain  F trees 0/10/20/30  Space pause  N step\n" +

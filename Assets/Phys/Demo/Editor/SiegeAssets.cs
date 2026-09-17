@@ -109,10 +109,11 @@ namespace Phys.Demo.Editor
             var outpost = AssetDatabase.LoadAssetAtPath<TextAsset>("Assets/Resources/Castles/outpost.json");
             var citadel = AssetDatabase.LoadAssetAtPath<TextAsset>("Assets/Resources/Castles/emerald_crown_citadel.json");
             if (outpost == null || citadel == null) { Debug.LogError("SiegeAssets: the castle documents are missing"); if (Application.isBatchMode) EditorApplication.Exit(1); return; }
-            Siege("SiegeConfig1", "Siege of the Outpost", outpost, 30f,
+            // the front rank out of the archers' 35 m range of the walls (and of the garrison's), still on the level margin of 60 m
+            Siege("SiegeConfig1", "Siege of the Outpost", outpost, 38f,
                 new[] { Roster(archer, 12), Roster(explosiveArcher, 4), Roster(trebuchetUnit, 2), Roster(mageFire, 2) },
                 new[] { Roster(archer, 12), Roster(mageFrost, 2) });
-            Siege("SiegeConfig2", "Siege of the Emerald Crown", citadel, 30f,
+            Siege("SiegeConfig2", "Siege of the Emerald Crown", citadel, 36f,
                 new[] { Roster(archer, 24), Roster(explosiveArcher, 8), Roster(trebuchetUnit, 4), Roster(mageFire, 3), Roster(mageFrost, 3), Roster(mageArcane, 3) },
                 new[] { Roster(archer, 24), Roster(mageArcane, 4), Roster(mageFrost, 2) });
             AssetDatabase.SaveAssets();

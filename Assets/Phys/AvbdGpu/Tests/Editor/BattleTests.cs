@@ -32,13 +32,15 @@ namespace Phys.AvbdGpu.Tests
             return a;
         }
 
+        /// <summary>The default Trebuchet config's numbers (the Base model's bounds x 5, the basin as the launch point).</summary>
         static UnitArchetype Trebuchet() => new UnitArchetype
         {
-            Name = "trebuchet", BoxSize = new float3(3.6f, 3f + Margin, 6.6f), StandHeight = 1.5f, Mass = 20f, Friction = 0.6f, Speed = 1f, Force = 60f, HitPoints = 3,
-            Range = 60f, CooldownSteps = 240, AutoEngage = false, Trajectory = Trajectory.HighArc, LaunchSpeed = 30f, Spread = 0f,
-            LaunchLocal = new float3(0f, 3f, 0f), LaunchOffset = 4f, LaunchDelaySteps = 20,
-            ProjectileBoxSize = new float3(0.5f, 0.5f, 0.5f), ProjectileMass = 5f, ProjectileAlign = false, ProjectileVariants = 4, ProjectileRetireDelay = 300,
-            Hit = new HitEffect { PulverizeRadius = 0.6f, ImpactRadius = 2f, Impulse = 10f, Lift = 0.5f, KillUnits = true },
+            Name = "trebuchet", BoxSize = new float3(3.63f, 3.585f + Margin, 4.6f), MeshOffset = new float3(0f, -1.7925f + Margin * 0.5f, 0f), StandHeight = 1.7925f - Margin * 0.5f,
+            Mass = 30f, Friction = 0.6f, Speed = 1.2f, Force = 120f, HitPoints = 5,
+            Range = 70f, CooldownSteps = 240, AutoEngage = false, Trajectory = Trajectory.HighArc, LaunchSpeed = 32f, Spread = 0f,
+            LaunchLocal = new float3(0f, 5.25f - 1.7925f, 3.25f), LaunchOffset = 1f, LaunchDelaySteps = 30,
+            ProjectileBoxSize = new float3(0.58f, 0.58f, 0.56f), ProjectileMass = 6f, ProjectileAlign = false, ProjectileVariants = 4, ProjectileRetireDelay = 300,
+            Hit = new HitEffect { PulverizeRadius = 0.8f, ImpactRadius = 2.5f, Impulse = 8f, Lift = 0.5f, KillUnits = true },
         };
 
         static UnitArchetype Mage()
@@ -244,8 +246,8 @@ namespace Phys.AvbdGpu.Tests
             Assert.AreEqual(1, a.Shots.Count, "the shot started");
             int started = a.Shots[0].step;
             Assert.AreEqual(0, a.Battle.ShotsFired, "the rock is not out yet");
-            Assert.GreaterOrEqual(a.Battle.Units[0].PendingShotStep, started + 20);
-            a.Run(19);
+            Assert.GreaterOrEqual(a.Battle.Units[0].PendingShotStep, started + 30);
+            a.Run(29);
             Assert.AreEqual(0, a.Battle.ShotsFired, "still swinging");
             a.Run(2);
             Assert.AreEqual(1, a.Battle.ShotsFired, "the rock leaves at the top of the swing");
@@ -269,6 +271,12 @@ namespace Phys.AvbdGpu.Tests
                 if (p1.y < -5f) break;
             }
             Assert.Less(best, 1.5f, $"aimed at the slab (closest approach {best:F2} m; the rock leaves a step or two after the solution)");
+            // the rock lands; the machine is untouched by its own shots (the basin's launch point clears its box)
+            a.Run(600);
+            Assert.GreaterOrEqual(a.Battle.Impacts, 1, "the rock landed and went off");
+            Assert.AreEqual(UnitState.Attacking, a.Battle.Units[0].State, "the trebuchet is alive and attacking");
+            Assert.AreEqual(0, a.Battle.Units[0].Hits, "never hit by its own rocks");
+            Assert.Greater(a.Battle.ShotsFired, 1, "and it keeps firing");
             GpuTestUtil.AssertFinite(a.World);
         }
 

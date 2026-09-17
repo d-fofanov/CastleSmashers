@@ -111,6 +111,8 @@ namespace Phys.AvbdGpu.Siege
         public Action<int> OnShot;
         /// <summary>(type, world position) of a projectile's impact with a hit effect.</summary>
         public Action<int, float3> OnImpact;
+        /// <summary>(unit index, what killed it: "hits" or "blast") when a unit dies.</summary>
+        public Action<int, string> OnUnitKilled;
 
         public readonly int[] Alive = new int[2], Dead = new int[2];
         public int ShotsFired, Retired, Impacts;
@@ -301,15 +303,16 @@ namespace Phys.AvbdGpu.Siege
                 if (hits <= u.Hits) continue;
                 u.Hits = hits;
                 Units[i] = u;
-                if (hits >= Types[u.Type].HitPoints) Kill(i);
+                if (hits >= Types[u.Type].HitPoints) Kill(i, "hits");
             }
         }
 
         /// <summary>A unit dies: its rotation is unlocked and its motor switched off, so it topples; retired after the delay.</summary>
-        public void Kill(int unitIndex)
+        public void Kill(int unitIndex, string cause = "killed")
         {
             var u = Units[unitIndex];
             if (u.State == UnitState.Dead) return;
+            OnUnitKilled?.Invoke(unitIndex, cause);
             u.State = UnitState.Dead; u.Order = OrderKind.None; u.PendingShotStep = -1;
             u.DeathStep = World.StepIndex;
             Units[unitIndex] = u;
@@ -376,7 +379,7 @@ namespace Phys.AvbdGpu.Siege
                     {
                         var u = Units[k];
                         if (u.State == UnitState.Dead || !Known(u)) continue;
-                        if (math.distance(m_Positions[u.Body].xyz, centre) < hit.ImpactRadius) Kill(k);
+                        if (math.distance(m_Positions[u.Body].xyz, centre) < hit.ImpactRadius) Kill(k, "blast");
                     }
                 p.HitApplied = true;
                 Projectiles[i] = p;

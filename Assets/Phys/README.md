@@ -562,9 +562,13 @@ recycled slot is trusted only `EventGuardSteps` after the launch), impacts (a bl
 read back), steering (motors toward the goals, a target that fell out of range is walked after), shots (per-unit
 cooldowns) and retirement. Weapons, tips, plates and effects go through `AttachmentRenderer`: instances in a body's frame
 read the body's pose straight from the solver buffers in the vertex shader (no frame of lag), world-space instances draw
-the effects; one opaque material with shadows and one transparent (queue Transparent, no depth write, two-sided). Flags:
-`-avbd-config name`, `-avbd-scene n`, `-avbd-snap` / `-avbd-dry`, `-avbd-trees n`, `-avbd-foliage n`, `-avbd-noshadows`,
-`-avbd-meshshadows`, the terrain flags and the screenshot / bench / camera flags above.
+the effects; one opaque material with shadows and one transparent (queue Transparent, no depth write, two-sided). The HUD
+names the last unit to die and what killed it (a projectile's hits, or a blast). Flags: `-avbd-config name`, `-avbd-scene n`,
+`-avbd-attack n` (at frame n every attacker kind attacks the top of the facing wall and the first kind is selected: screenshots
+and benches), `-avbd-snap` / `-avbd-dry`, `-avbd-trees n`, `-avbd-foliage n`, `-avbd-noshadows`, `-avbd-meshshadows`, the terrain
+flags and the screenshot / bench / camera flags above, e.g. `Siege.exe -avbd-config SiegeConfig1 -avbd-attack 60 -avbd-screenshot
+siege.png -avbd-frames 420`. The default formation stands 38 m from the wall, a few metres beyond the archers' range: nothing flies
+until the player orders (the defenders shoot at whatever comes within theirs).
 
 ## Measured behaviour
 

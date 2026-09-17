@@ -1,0 +1,67 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 924183012db24c108d898c3dfce22808, type: 3}
+  m_Name: ExplosiveArcher
+  m_EditorClassIdentifier: Phys.AvbdGpu.Siege::Phys.AvbdGpu.Siege.UnitConfig
+  DisplayName: ExplosiveArcher
+  BodyMesh: {fileID: -3360807449873858051, guid: a7e52bc360a64628831765394423acfe, type: 3}
+  BodyBoundsCenter: {x: 0, y: 0.24, z: 0.0030000024}
+  BodyBoundsSize: {x: 0.354, y: 0.48, z: 0.12}
+  Tint:
+    serializedVersion: 2
+    rgba: 4280845030
+  Mass: 1
+  Friction: 0.6
+  Speed: 3
+  Force: 12
+  HitPoints: 1
+  Weapon:
+  - Mesh: {fileID: 684213905789190454, guid: baa430b86f194e1994272c479150b35e, type: 3}
+    LocalPosition: {x: 0.148, y: 0.197, z: 0.008}
+    LocalEuler: {x: 0, y: 0, z: 0}
+    Scale: 1
+  SwingPivot: {x: 0, y: 0, z: 0}
+  SwingAxis: {x: 1, y: 0, z: 0}
+  SwingDegrees: 0
+  SwingSteps: 15
+  ResetSteps: 90
+  ProjectileMeshes:
+  - {fileID: 2798387442707240067, guid: 59b92b039cb54f2eb5d7dfe2a9cff4ab, type: 3}
+  ProjectileBoundsCenter: {x: 0, y: 0.0000000037252903, z: 0}
+  ProjectileBoundsSize: {x: 0.044, y: 0.043999996, z: 0.28000003}
+  ProjectileMass: 0.05
+  AlignToVelocity: 1
+  ProjectileColor:
+    serializedVersion: 2
+    rgba: 4280827000
+  ProjectileUnlit: 0
+  TipMesh: {fileID: 2827203981834236628, guid: 972d1b5ca1c64afaab5c69db30050ee3, type: 3}
+  TipLocalPosition: {x: 0, y: 0, z: 0.12}
+  TipScale: 0.45
+  TipColor:
+    serializedVersion: 2
+    rgba: 4280847615
+  TipUnlit: 1
+  Trajectory: 0
+  ElevationDeg: 50
+  LaunchSpeed: 35
+  MaxSpeed: 40
+  Spread: 0.03
+  Thrust: 0
+  LaunchPoint: {x: 0.15, y: 0.36, z: 0.06}
+  LaunchOffset: 2.6
+  LaunchDelaySteps: 0
+  ProjectileRetireDelay: 0
+  Range: 35
+  CooldownSteps: 240
+  AutoEngage: 1
+  HitEffect: {fileID: 11400000, guid: e62b6167ebdc4664dafd4dd7e1eca6bd, type: 2}

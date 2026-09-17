@@ -1,0 +1,78 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 924183012db24c108d898c3dfce22808, type: 3}
+  m_Name: Trebuchet
+  m_EditorClassIdentifier: Phys.AvbdGpu.Siege::Phys.AvbdGpu.Siege.UnitConfig
+  DisplayName: Trebuchet
+  BodyMesh: {fileID: 3909233067320746374, guid: 1b36705b995a4570ab76549e8e95cf77, type: 3}
+  BodyBoundsCenter: {x: -0.000000029802322, y: 0.35849997, z: 0}
+  BodyBoundsSize: {x: 0.726, y: 0.71699995, z: 0.91999996}
+  Tint:
+    serializedVersion: 2
+    rgba: 4282015878
+  Mass: 30
+  Friction: 0.6
+  Speed: 1.2
+  Force: 120
+  HitPoints: 5
+  Weapon:
+  - Mesh: {fileID: 7714956886007214842, guid: 1b36705b995a4570ab76549e8e95cf77, type: 3}
+    LocalPosition: {x: 0, y: 0.65, z: 0}
+    LocalEuler: {x: 0, y: 0, z: 0}
+    Scale: 1
+  - Mesh: {fileID: -8399051934535764852, guid: 1b36705b995a4570ab76549e8e95cf77, type: 3}
+    LocalPosition: {x: 0, y: 0.47, z: -0.28}
+    LocalEuler: {x: 0, y: 0, z: 0}
+    Scale: 1
+  - Mesh: {fileID: 6978091871961537495, guid: 1b36705b995a4570ab76549e8e95cf77, type: 3}
+    LocalPosition: {x: 0, y: 1.05, z: 0.65}
+    LocalEuler: {x: 0, y: 0, z: 0}
+    Scale: 1
+  SwingPivot: {x: 0, y: 0.65, z: 0}
+  SwingAxis: {x: 1, y: 0, z: 0}
+  SwingDegrees: -210
+  SwingSteps: 30
+  ResetSteps: 180
+  ProjectileMeshes:
+  - {fileID: 7478072907504327270, guid: 5451f5d176864b9bbf721e8f41225c16, type: 3}
+  - {fileID: 7028486168840282379, guid: 0784e0ee6df24314b9d8b6f95216c8c7, type: 3}
+  - {fileID: -1302704195494578633, guid: 8315ebd296a44ff0acd338a0a2ab986c, type: 3}
+  - {fileID: 6295315937758776595, guid: ed85b40d2fe8408d887733495990a688, type: 3}
+  ProjectileBoundsCenter: {x: 0.001344908, y: -0.0056213066, z: -0.0017360672}
+  ProjectileBoundsSize: {x: 0.115939915, y: 0.11581643, z: 0.11266941}
+  ProjectileMass: 6
+  AlignToVelocity: 0
+  ProjectileColor:
+    serializedVersion: 2
+    rgba: 4284770670
+  ProjectileUnlit: 0
+  TipMesh: {fileID: 0}
+  TipLocalPosition: {x: 0, y: 0, z: 0.14}
+  TipScale: 0.5
+  TipColor:
+    serializedVersion: 2
+    rgba: 4280842495
+  TipUnlit: 1
+  Trajectory: 1
+  ElevationDeg: 55
+  LaunchSpeed: 32
+  MaxSpeed: 40
+  Spread: 0.02
+  Thrust: 0
+  LaunchPoint: {x: 0, y: 1.05, z: 0.65}
+  LaunchOffset: 1
+  LaunchDelaySteps: 30
+  ProjectileRetireDelay: 600
+  Range: 70
+  CooldownSteps: 420
+  AutoEngage: 0
+  HitEffect: {fileID: 11400000, guid: 2c559c6fc224e07419124f91d7f1072c, type: 2}

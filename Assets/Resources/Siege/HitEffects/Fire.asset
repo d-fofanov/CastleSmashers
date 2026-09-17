@@ -1,0 +1,28 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f62e693c7c96491eb112a4a7253e360d, type: 3}
+  m_Name: Fire
+  m_EditorClassIdentifier: Phys.AvbdGpu.Siege::Phys.AvbdGpu.Siege.HitEffectConfig
+  PulverizeRadius: 2
+  ImpactRadius: 5
+  Impulse: 12
+  Lift: 0.4
+  KillUnits: 1
+  Mesh: {fileID: -2433465580418009930, guid: dcdb2259eccc4097bffbc9df5755dac1, type: 3}
+  Color:
+    serializedVersion: 2
+    rgba: 3860749055
+  StartScale: 3
+  EndScale: 12
+  LifeSteps: 45
+  SpinDegPerSec: 120
+  Unlit: 1

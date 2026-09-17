@@ -1,0 +1,28 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: f62e693c7c96491eb112a4a7253e360d, type: 3}
+  m_Name: Explosive
+  m_EditorClassIdentifier: Phys.AvbdGpu.Siege::Phys.AvbdGpu.Siege.HitEffectConfig
+  PulverizeRadius: 1.2
+  ImpactRadius: 3
+  Impulse: 6
+  Lift: 0.4
+  KillUnits: 1
+  Mesh: {fileID: 367154607571373237, guid: b4662e55a4f54aa4b52feeebd048f5cb, type: 3}
+  Color:
+    serializedVersion: 2
+    rgba: 3694958335
+  StartScale: 2
+  EndScale: 8
+  LifeSteps: 36
+  SpinDegPerSec: 60
+  Unlit: 1
