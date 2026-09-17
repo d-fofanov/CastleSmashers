@@ -328,7 +328,7 @@ stud grid (`CastlePlan.Presets`):
 Keys as the main demo plus `J` snap on/off, `T` terrain (hills, valley, ridge, flat), `Y` terrain style (tiled / smooth), `O`
 outlying copies (0 / 4 / 8), `F` trees (0 / 10 / 20 / 30, with six clumps of foliage each), `F6` collision boxes, `F7` shadows;
 `B` / `Enter` fires a 30 kg cannonball at 24 model m/s (× √5 in the solver). Flags: `-avbd-scene 0..9`, `-avbd-snap`,
-`-avbd-siege`, `-avbd-outlying n`, `-avbd-trees n`, `-avbd-foliage n` (clumps per tree), `-avbd-noshadows`, `-avbd-meshshadows`, `-avbd-norangeculling`, `-avbd-terrain hills|valley|ridge|none`,
+`-avbd-outlying n`, `-avbd-trees n`, `-avbd-foliage n` (clumps per tree), `-avbd-noshadows`, `-avbd-meshshadows`, `-avbd-norangeculling`, `-avbd-terrain hills|valley|ridge|none`,
 `-avbd-terrain-seed n`, `-avbd-terrain-style tiled|smooth`, and the screenshot / bench / camera flags above (a demo's own flags are read by
 `ParseArgs` before the world is created, so that the outlying, tree and foliage reserves follow them). The bench log reports the GPU
 render time and the draw count next to the frame and step times. What twenty trees cost is their shadows: they are 13 M
@@ -411,39 +411,13 @@ into the scene by `Phys / Set Demo Terrains`): 513 samples 3 m apart (1.5 km), h
 60 m of level ground around the castle (the armies march on the flat) blending into the hills over 40 m, drawn in the
 tiled style (3 m tiles, 20 cm steps: a floor of smooth pieces around the castle, terraced hills beyond); the smooth style
 draws the runtime terrain with two flat-colour layers, grass and a dry hilltop tint blended in with the height, so the hills
-read under flat lighting. The armies spawn standing on the surface wherever it is (`SiegeSystem.Terrain`, `StandHeight`), walk
-in over the slopes on their xz motors and aim at the wall crest above the plateau; arrows that stick in the hillside are
-spent like those in the ground. `Preview.unity` carries the same settings with the preset off (flat ground until `T`);
+read under flat lighting. `Preview.unity` carries the same settings with the preset off (flat ground until `T`);
 its plateau spans the document's footprint plus two studs plus the margin.
 
 ### Siege
 
-`U` surrounds the castle with two armies (`SiegeSystem`, tunables in `CastleDemo.SiegeParams`): on every side two ranks of
-twelve attackers march in from 30 m to a firing line 14 m outside the wall, and up to 24 defenders stand on free ground
-inside the walls (found through the layout's occupancy map). Every four seconds each holding unit fires once, all the
-shots going up in one batch (`V` fires a volley now, `K` stops the automatic volleys). Attackers aim at the nearest
-defender in range or, failing that, at the nearest wall crest; defenders at the nearest attacker. A unit hit by a moving
-projectile dies: its rotation lock and motor go and it topples where it stands. A projectile that touches anything is
-spent: a rocket or bolt loses its drive at that first contact and flies on by inertia. The dead and the spent are
-retired one by one, each two seconds after its death or first contact (`RetireDelay`; `X` retires them all at once);
-a spent slot is free for the next spawn one step later.
-
-* Units are the figure model (`Assets/Models/ConstructorFigure`, 0.354 x 0.48 x 0.12 m): the collision box is its bounding
-  box scaled like the bricks (1.77 x 2.4 x 0.6 m at scale 5, plus one margin in height so that the feet rest on the ground),
-  1 kg, rotation locked with a heading, a motor of 12 N (six of them go to the ground friction of 0.6) walking at 3 m/s.
-  Attackers are archers (red), on the gate side also gunners (dark red), rocketeers (orange) and mages (purple); defenders
-  are blue archers.
-* Arrows are the arrow model (`Assets/Models/ConstructorArrow`, a 0.15 x 0.018 x 0.3 m plate pointing +z; 0.75 x 0.1 x 1.5 m at
-  scale 5), 0.02 kg, aligned to their velocity, launched at a 55° elevation with the speed solved from the range (40 m/s at
-  most: further targets get the top speed and a short shot). Rockets are arrows under a constant 0.3 N thrust along their
-  launch direction; cannonballs 5 kg cubes at 35 m/s on the flat arc; bolts 0.1 kg cubes pulled towards their aim point with
-  3 N, with no drag, so they overshoot and swing back until they hit something. Launch velocities carry the implicit
-  Euler correction (`Ballistics`, + g h / 2 upward), so an undisturbed projectile passes through its aim point exactly.
-* Projectiles spawn 2.6 m from the shooter's shoulder along their velocity and never inside a castle brick (the shot is
-  skipped instead). Body pools: 512 units, 2 048 arrow-shaped and 512 cube projectiles reserved at load (3 072 retired slots
-  that cost nothing measurable), so the largest castle plus the siege fits in the 40 960 bodies.
-* Cost: the siege of the Outpost (109 units, a few hundred projectiles in flight) adds ~0.5 ms to the 7.6 ms frame; on the
-  Royal citadel it is lost in the noise (38 ms either way).
+The siege moved to its own scene: see [Siege demo](#siege-demo) (`Siege.unity`, `SiegeDemo`, the `Battle` of
+`Phys.AvbdGpu.Siege`), which loads its castle from a brick-assembly document and puts the player in command of the attackers.
 
 ## Preview demo
 
@@ -469,7 +443,7 @@ in catalog order, assigned by `Phys / Assign Preview Meshes`).
 * The HUD reports what the format asks a loader to report and never corrects: pieces resting on nothing, pieces resting on
   less than half their footprint (a piece a stud height above a top counts as resting on the studs) and intersecting
   pairs, with the first offending IDs (`AssemblyBuilder.Diagnose`; the full counts go to the log).
-* No siege: the armies need the procedural plan's wall geometry and the layout's occupancy map.
+* No siege: `Siege.unity` sieges the same documents (their occupancy map places the garrison).
 
 `Phys / Export Outpost as Brick Assembly` writes the castle planner's Outpost as `outpost.json` (`BrickAssembly.WriteLayout`),
 a castle that stands dry-stacked and snapped. `emerald_crown_citadel.json` is an agent's design (2 000 pieces, modules and

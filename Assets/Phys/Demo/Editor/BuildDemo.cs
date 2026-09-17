@@ -40,9 +40,8 @@ namespace Phys.Demo.Editor
             if (s.result != BuildResult.Succeeded && Application.isBatchMode) EditorApplication.Exit(1);
         }
 
-        /// <summary>Assigns the brick, figure and arrow meshes and the 27 piece meshes of the construction pack (for the trees) to the
-        /// CastleDemo of Castle.unity and saves the scene (the player needs the references serialised; the editor falls back to
-        /// loading them by path).</summary>
+        /// <summary>Assigns the brick mesh and the 27 piece meshes of the construction pack (for the trees) to the CastleDemo of
+        /// Castle.unity and saves the scene (the player needs the references serialised; the editor falls back to loading them by path).</summary>
         [MenuItem("Phys/Assign Castle Meshes")]
         public static void AssignCastleMeshes()
         {
@@ -50,14 +49,11 @@ namespace Phys.Demo.Editor
             var demo = UnityEngine.Object.FindFirstObjectByType<CastleDemo>();
             if (demo == null) { Debug.LogError("Castle.unity has no CastleDemo"); if (Application.isBatchMode) EditorApplication.Exit(1); return; }
             demo.BrickMesh = AssetDatabase.LoadAssetAtPath<Mesh>("Assets/Models/ConstructorBlock2x3/ConstructorBlock2x3.fbx");
-            demo.FigureMesh = AssetDatabase.LoadAssetAtPath<Mesh>("Assets/Models/ConstructorFigure/ConstructorFigure.fbx");
-            demo.ArrowMesh = AssetDatabase.LoadAssetAtPath<Mesh>("Assets/Models/ConstructorArrow/ConstructorArrow.fbx");
             demo.PieceMeshes = LoadPieceMeshes("AssignCastleMeshes", out int missing);
-            demo.SiegeParams = demo.SiegeParams.WithDefaults();
             EditorUtility.SetDirty(demo);
             UnityEditor.SceneManagement.EditorSceneManager.MarkSceneDirty(scene);
             UnityEditor.SceneManagement.EditorSceneManager.SaveScene(scene);
-            Debug.Log($"AssignCastleMeshes: brick {demo.BrickMesh}, figure {demo.FigureMesh}, arrow {demo.ArrowMesh}, {demo.PieceMeshes.Length - missing} of {demo.PieceMeshes.Length} piece meshes");
+            Debug.Log($"AssignCastleMeshes: brick {demo.BrickMesh}, {demo.PieceMeshes.Length - missing} of {demo.PieceMeshes.Length} piece meshes");
             if (missing > 0 && Application.isBatchMode) EditorApplication.Exit(1);
         }
 

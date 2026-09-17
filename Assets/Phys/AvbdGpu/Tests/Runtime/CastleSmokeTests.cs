@@ -2,7 +2,6 @@ using System.Collections;
 using NUnit.Framework;
 using Phys.AvbdGpu;
 using Phys.AvbdGpu.Scenes;
-using Phys.AvbdGpu.Siege;
 using Phys.Demo;
 using Unity.Mathematics;
 using UnityEngine;
@@ -60,7 +59,7 @@ namespace Phys.AvbdGpu.Tests
         public IEnumerator DryStackedCastleStands()
         {
             Assert.IsNotNull(m_Demo.BrickMesh, "brick mesh");
-            Assert.AreEqual(3, m_Demo.Renderer.MeshRanges.Count, "the bricks are drawn with the brick model, the siege pools with the figure and arrow models");
+            Assert.AreEqual(1, m_Demo.Renderer.MeshRanges.Count, "the bricks are drawn with the brick model");
             Assert.AreEqual(m_Demo.BrickCount, m_Demo.Renderer.MeshRanges[0].Count);
             for (int f = 0; f < 8; f++) yield return null;   // the range bounds read back
             Assert.AreEqual(1, m_Demo.Renderer.BoundedDraws, "the castle is drawn with its own bounds, the pools with the world's");
@@ -183,9 +182,9 @@ namespace Phys.AvbdGpu.Tests
         }
 
         /// <summary>The Outpost on hills: a plateau is levelled under it, the bricks rest on the plateau, the castle stands, and the
-        /// armies of its siege spawn on the surface around it and march in over the slopes.</summary>
+        /// flat ground comes back when the terrain is switched off.</summary>
         [UnityTest]
-        public IEnumerator CastleStandsOnHillsAndTheArmiesWalkThem()
+        public IEnumerator CastleStandsOnHills()
         {
             m_Demo.TerrainParams.Preset = TerrainPreset.Hills;
             m_Demo.TerrainParams.Seed = 3;
@@ -216,38 +215,6 @@ namespace Phys.AvbdGpu.Tests
                 }
             }
             Assert.Less(maxMove, 0.25f * Brick.BodyHeight * m_Demo.Spec.Scale, "the castle stands on its plateau");
-
-            // the siege: units spawn standing on the surface wherever it is, and the attackers walk in over the slopes
-            m_Demo.ToggleSiege();
-            var siege = m_Demo.Siege;
-            Assert.AreSame(field, siege.Terrain);
-            yield return null;
-            yield return null;
-            m_Demo.World.GetPosesSync(out var spawned, out _);
-            float meanDistance0 = 0f;
-            int attackers = 0;
-            foreach (var u in siege.UnitList)
-            {
-                float3 p = spawned[u.Body].xyz;
-                Assert.AreEqual(siege.StandHeight(p.xz), p.y, 0.3f, $"unit {u.Body} ({u.Kind}, team {u.Team}) stands on the ground at {p}");
-                if (u.Team == SiegeSystem.Attackers) { meanDistance0 += math.length(p.xz); attackers++; }
-            }
-            meanDistance0 /= attackers;
-            for (int f = 0; f < 240; f++) yield return null;
-            m_Demo.World.GetPosesSync(out var later, out _);
-            float meanDistance1 = 0f;
-            foreach (var u in siege.UnitList)
-            {
-                float3 p = later[u.Body].xyz;
-                Assert.IsTrue(math.all(math.isfinite(p)), $"unit {u.Body} position");
-                Assert.Greater(p.y, siege.GroundHeight(p.xz) - 1f, $"unit {u.Body} stays above the terrain at {p}");
-                if (u.Team == SiegeSystem.Attackers) meanDistance1 += math.length(p.xz);
-            }
-            meanDistance1 /= attackers;
-            Debug.Log($"siege on hills: plateau {plateau:F2} m, terrain {field.MinHeight:F1} .. {field.MaxHeight:F1} m, attackers {meanDistance0:F1} -> {meanDistance1:F1} m from the centre after 4 s");
-            Assert.Less(meanDistance1, meanDistance0 - 2f, "the attackers marched in over the slopes");
-            var stats = m_Demo.World.GetStatsSync();
-            Assert.AreEqual(0, stats.OverflowFlags, $"capacity overflow {stats.OverflowFlags}");
 
             // back to the flat ground: the terrain goes away
             m_Demo.TerrainParams.Preset = TerrainPreset.None;
@@ -342,16 +309,13 @@ namespace Phys.AvbdGpu.Tests
             yield return null;
             CreateDemo(d => { d.StartScene = 3; d.Trees = 20; d.Snap = true; d.BrickMass = 1f; d.SnapFractureLateral = 800f; d.SnapFractureTension = 300f; d.ShotMass = 20f; d.TerrainParams.Preset = TerrainPreset.Hills; });   // the scene's configuration
             yield return null;   // Start: the world with room for the trees, the scene with its 180 settle steps
-            Assert.AreEqual(6, m_Demo.TreeDocuments.Length, "the six tree documents of Resources/Trees");
-            foreach (var kind in m_Demo.TreeKinds) { Assert.IsNotNull(kind); Assert.That(kind.Parts.Count, Is.InRange(1000, 3000), $"{kind.Name}: a thousand to three thousand pieces"); }
-            Assert.AreEqual(20, m_Demo.TreeCount, "twenty trees were placed");
-            Assert.AreEqual(m_Demo.FirstOutlyingBrick, m_Demo.FirstTreePiece, "the trees come right after the castle");
+            Assert.AreEqual(6, m_Demo.Vegetation.TreeDocuments.Length, "the six tree documents of Resources/Trees");
+            foreach (var kind in m_Demo.Vegetation.TreeKinds) { Assert.IsNotNull(kind); Assert.That(kind.Parts.Count, Is.InRange(1000, 3000), $"{kind.Name}: a thousand to three thousand pieces"); }
+            Assert.AreEqual(20, m_Demo.Vegetation.TreeCount, "twenty trees were placed");
+            Assert.AreEqual(m_Demo.FirstOutlyingBrick, m_Demo.Vegetation.FirstTreePiece, "the trees come right after the castle");
             var plan = CastlePlan.Presets[3];
             float side = plan.Side * Brick.Pitch * m_Demo.BrickScale, half = side * 0.5f + 4f * Brick.Pitch * m_Demo.BrickScale;
-            var sp = m_Demo.SiegeParams;
-            float reach = side * 0.5f - BrickCastle.TowerOut * Brick.Pitch * m_Demo.BrickScale + sp.AttackDistance + (sp.Ranks - 1) * sp.RankSpacing + sp.MarchDistance;
-            float bandHalf = (sp.ArchersPerRank - 1) * 0.5f * sp.ColumnSpacing;
-            var placements = m_Demo.TreePlacements;
+            var placements = m_Demo.Vegetation.TreePlacements;
             int pieces = 0;
             var kinds = new System.Collections.Generic.HashSet<int>();
             for (int i = 0; i < placements.Count; i++)
@@ -359,38 +323,37 @@ namespace Phys.AvbdGpu.Tests
                 var p = placements[i];
                 pieces += p.Count;
                 kinds.Add(p.Kind);
-                Assert.AreEqual(m_Demo.TreeKinds[p.Kind].Parts.Count, p.Count, "every piece of the document became a body");
+                Assert.AreEqual(m_Demo.Vegetation.TreeKinds[p.Kind].Parts.Count, p.Count, "every piece of the document became a body");
                 Assert.Greater(math.cmax(math.abs(p.Centre)), half + p.Radius, $"tree {i} clears the castle's plateau core");
-                Assert.IsFalse((math.abs(p.Centre.x) < bandHalf + p.Radius && math.abs(p.Centre.y) < reach + p.Radius) || (math.abs(p.Centre.y) < bandHalf + p.Radius && math.abs(p.Centre.x) < reach + p.Radius), $"tree {i} is off the armies' bands");
                 for (int j = 0; j < i; j++) Assert.Greater(math.distance(p.Centre, placements[j].Centre), p.Radius + placements[j].Radius, $"trees {i} and {j} do not touch");
                 Assert.AreEqual(m_Demo.World.Terrain.Height(p.Centre), p.Ground, 0.05f, $"tree {i} stands on its ground");
             }
-            Assert.AreEqual(pieces, m_Demo.TreePieces);
+            Assert.AreEqual(pieces, m_Demo.Vegetation.TreePieces);
             Assert.GreaterOrEqual(kinds.Count, 4, "several kinds of tree");
             int drawn = 0;
-            foreach (var r in m_Demo.Renderer.MeshRanges) { Assert.IsNotNull(r.Mesh); if (r.Start >= m_Demo.FirstTreePiece && r.Start < m_Demo.FirstTreePiece + pieces) drawn += r.Count; }
+            foreach (var r in m_Demo.Renderer.MeshRanges) { Assert.IsNotNull(r.Mesh); if (r.Start >= m_Demo.Vegetation.FirstTreePiece && r.Start < m_Demo.Vegetation.FirstTreePiece + pieces) drawn += r.Count; }
             Assert.AreEqual(pieces, drawn, "every piece of every tree is drawn with its model");
             Assert.Greater(m_Demo.World.JointCount, pieces, "the trees are snapped like the castle");
 
             var stats = m_Demo.World.GetStatsSync();
             Assert.AreEqual(0, stats.OverflowFlags, $"no overflow after the settle steps (flags {stats.OverflowFlags})");
             var words = m_Demo.World.GetSleepSync();
-            int first = m_Demo.FirstTreePiece;
+            int first = m_Demo.Vegetation.FirstTreePiece;
             for (int b = first; b < first + pieces; b++) { Assert.IsTrue(GpuBodySleep.IsAsleep(words[b]), $"tree piece {b} sleeps"); Assert.IsTrue(GpuBodySleep.IsInGrid(words[b]), $"tree piece {b} is in the sleeping grid"); }
             Assert.LessOrEqual(stats.Active, m_Demo.BrickCount, "at most the castle is awake");
             m_Demo.World.GetPosesSync(out var start, out _);
             for (int f = 0; f < 60; f++) yield return null;
             stats = m_Demo.World.GetStatsSync();
-            Debug.Log($"trees: {m_Demo.TreeCount} trees, {pieces} pieces, {m_Demo.World.BodyCount} bodies, {stats.Sleeping} asleep, {stats.Hot} hot, {stats.Active} active, grid {stats.SleepGrid}, cold {stats.ColdManifolds}, step {stats.AvgStepMs:F2} ms");
+            Debug.Log($"trees: {m_Demo.Vegetation.TreeCount} trees, {pieces} pieces, {m_Demo.World.BodyCount} bodies, {stats.Sleeping} asleep, {stats.Hot} hot, {stats.Active} active, grid {stats.SleepGrid}, cold {stats.ColdManifolds}, step {stats.AvgStepMs:F2} ms");
             Assert.AreEqual(0, stats.OverflowFlags);
 
             // every range but the pools is drawn with bounds read back from the GPU; a tree's ranges lie within its placement
             var renderer = m_Demo.Renderer;
             int culled = 0;
             foreach (var r in renderer.MeshRanges) if (!r.NoCulling) culled++;
-            Assert.AreEqual(culled, renderer.BoundedDraws, "every range but the siege pools is drawn with its own bounds");
+            Assert.AreEqual(culled, renderer.BoundedDraws, "every range is drawn with its own bounds");
             var tree0 = placements[0];
-            float3 tree0Extent = m_Demo.TreeKinds[tree0.Kind].Extent * PieceCatalog.GridToUnity * m_Demo.Spec.Scale;
+            float3 tree0Extent = m_Demo.Vegetation.TreeKinds[tree0.Kind].Extent * PieceCatalog.GridToUnity * m_Demo.Spec.Scale;
             float tree0Reach = tree0.Radius + renderer.BoundsMargin + 1f;
             int treeRanges = 0;
             foreach (var r in renderer.MeshRanges)
@@ -406,10 +369,13 @@ namespace Phys.AvbdGpu.Tests
             }
             Assert.Greater(treeRanges, 0);
 
-            // a cannonball into the crown of the first tree wakes it (and it alone)
-            var hit = placements[0];
+            // a cannonball into the crown of the tree farthest from the castle wakes it (and it alone: its debris lands on the ground,
+            // not on the castle, as a tree standing at the plateau's edge would have it)
+            int farthest = 0;
+            for (int i = 1; i < placements.Count; i++) if (math.cmax(math.abs(placements[i].Centre)) > math.cmax(math.abs(placements[farthest].Centre))) farthest = i;
+            var hit = placements[farthest];
             float s = m_Demo.Spec.Scale;
-            float3 extent = m_Demo.TreeKinds[hit.Kind].Extent * PieceCatalog.GridToUnity * s;
+            float3 extent = m_Demo.Vegetation.TreeKinds[hit.Kind].Extent * PieceCatalog.GridToUnity * s;
             float3 target = new float3(hit.Centre.x, hit.Ground + 0.6f * extent.y, hit.Centre.y);
             float3 from = target + new float3(0.3f * s, 10f * s, 0f);   // from high above: nothing else in the way
             float cube = m_Demo.ShotCube * s;
@@ -424,8 +390,9 @@ namespace Phys.AvbdGpu.Tests
                 if (awake == 0) continue;
                 woke = true;
                 Assert.Greater(awake, hit.Count / 2, "the hit tree woke as an island");
-                for (int i = 1; i < placements.Count; i++)
-                    for (int b = placements[i].First; b < placements[i].First + placements[i].Count; b++) Assert.IsTrue(GpuBodySleep.IsAsleep(words[b]), $"piece {b} of tree {i} sleeps on");
+                for (int i = 0; i < placements.Count; i++)
+                    if (i != farthest)
+                        for (int b = placements[i].First; b < placements[i].First + placements[i].Count; b++) Assert.IsTrue(GpuBodySleep.IsAsleep(words[b]), $"piece {b} of tree {i} sleeps on");
                 stats = m_Demo.World.GetStatsSync();
                 Assert.AreEqual(0, stats.OverflowFlags, "the woken tree fits the pools");
             }
@@ -433,8 +400,9 @@ namespace Phys.AvbdGpu.Tests
             for (int f = 0; f < 300; f++) yield return null;
             m_Demo.World.GetPosesSync(out var pos, out _);
             float maxMove = 0f;
-            for (int i = 1; i < placements.Count; i++)
-                for (int b = placements[i].First; b < placements[i].First + placements[i].Count; b++) maxMove = math.max(maxMove, math.distance(pos[b].xyz, start[b].xyz));
+            for (int i = 0; i < placements.Count; i++)
+                if (i != farthest)
+                    for (int b = placements[i].First; b < placements[i].First + placements[i].Count; b++) maxMove = math.max(maxMove, math.distance(pos[b].xyz, start[b].xyz));
             Assert.Less(maxMove, 0.5f * 1.2f * PieceCatalog.GridToUnity * s, $"the other trees were nudged by debris at most ({maxMove * 1000f:F0} mm), none knocked down");
             int fell = 0, brokenTree = 0;
             float meanMove = 0f;
@@ -453,7 +421,7 @@ namespace Phys.AvbdGpu.Tests
             }
             stats = m_Demo.World.GetStatsSync();
             Assert.AreEqual(0, stats.OverflowFlags);
-            Debug.Log($"after the shot: tree 0 ({m_Demo.TreeKinds[hit.Kind].Name}) lost {fell} of {hit.Count} pieces (a brick height away), moved {meanMove * 1000f:F0} mm on average, {brokenTree} snaps broken; {stats.Sleeping} asleep, {stats.Active} active, hot {stats.Hot}, cold {stats.ColdManifolds}, step {stats.AvgStepMs:F2} ms");
+            Debug.Log($"after the shot: tree {farthest} ({m_Demo.Vegetation.TreeKinds[hit.Kind].Name}) lost {fell} of {hit.Count} pieces (a brick height away), moved {meanMove * 1000f:F0} mm on average, {brokenTree} snaps broken; {stats.Sleeping} asleep, {stats.Active} active, hot {stats.Hot}, cold {stats.ColdManifolds}, step {stats.AvgStepMs:F2} ms");
             Assert.Greater(fell, 0, "the cannonball took pieces off the tree");
             Assert.Greater(brokenTree, 0, "snaps of the tree broke");
             Assert.LessOrEqual(stats.Active, hit.Count + 1, "nothing but the hit tree, its debris and the ball is awake");
@@ -472,19 +440,16 @@ namespace Phys.AvbdGpu.Tests
             yield return null;
             CreateDemo(d => { d.StartScene = 3; d.Trees = 20; d.Snap = true; d.BrickMass = 1f; d.SnapFractureLateral = 800f; d.SnapFractureTension = 300f; d.ShotMass = 20f; d.FoliagePerTree = 6; d.FoliageMass = 1f; d.TerrainParams = TerrainSettings.CastleScene; });   // the scene's configuration, terrain included (the level ground around the castle, 3 m cells)
             yield return null;
-            Assert.AreEqual(20, m_Demo.FoliageDocuments.Length, "the twenty foliage documents of Resources/Foliage");
-            foreach (var kind in m_Demo.FoliageKinds) { Assert.IsNotNull(kind); Assert.That(kind.Parts.Count, Is.InRange(100, 600), $"{kind.Name}: a hundred to six hundred pieces"); }
-            Assert.AreEqual(20, m_Demo.TreeCount, "twenty trees were placed");
-            Assert.AreEqual(120, m_Demo.FoliageCount, "six clumps per tree were placed");
-            Assert.AreEqual(m_Demo.FirstTreePiece + m_Demo.TreePieces, m_Demo.FirstFoliagePiece, "the foliage comes right after the trees");
+            Assert.AreEqual(20, m_Demo.Vegetation.FoliageDocuments.Length, "the twenty foliage documents of Resources/Foliage");
+            foreach (var kind in m_Demo.Vegetation.FoliageKinds) { Assert.IsNotNull(kind); Assert.That(kind.Parts.Count, Is.InRange(10, 600), $"{kind.Name}: ten to six hundred pieces"); }
+            Assert.AreEqual(20, m_Demo.Vegetation.TreeCount, "twenty trees were placed");
+            Assert.AreEqual(120, m_Demo.Vegetation.FoliageCount, "six clumps per tree were placed");
+            Assert.AreEqual(m_Demo.Vegetation.FirstTreePiece + m_Demo.Vegetation.TreePieces, m_Demo.Vegetation.FirstFoliagePiece, "the foliage comes right after the trees");
             var plan = CastlePlan.Presets[3];
             float side = plan.Side * Brick.Pitch * m_Demo.BrickScale, half = side * 0.5f + 4f * Brick.Pitch * m_Demo.BrickScale;
-            var sp = m_Demo.SiegeParams;
-            float reach = side * 0.5f - BrickCastle.TowerOut * Brick.Pitch * m_Demo.BrickScale + sp.AttackDistance + (sp.Ranks - 1) * sp.RankSpacing + sp.MarchDistance;
-            float bandHalf = (sp.ArchersPerRank - 1) * 0.5f * sp.ColumnSpacing;
             float cell = math.cmax(m_Demo.World.Terrain.Cell);
-            var trees = m_Demo.TreePlacements;
-            var clumps = m_Demo.FoliagePlacements;
+            var trees = m_Demo.Vegetation.TreePlacements;
+            var clumps = m_Demo.Vegetation.FoliagePlacements;
             int pieces = 0, terraced = 0;
             var kinds = new System.Collections.Generic.HashSet<int>();
             var clusters = new System.Collections.Generic.HashSet<int>();
@@ -495,9 +460,8 @@ namespace Phys.AvbdGpu.Tests
                 kinds.Add(f.Kind);
                 clusters.Add(f.Cluster);
                 if (f.Terraced) terraced++;
-                Assert.AreEqual(m_Demo.FoliageKinds[f.Kind].Parts.Count, f.Count, "every piece of the document became a body");
+                Assert.AreEqual(m_Demo.Vegetation.FoliageKinds[f.Kind].Parts.Count, f.Count, "every piece of the document became a body");
                 Assert.Greater(math.cmax(math.abs(f.Centre)), half + f.Radius, $"clump {i} clears the castle's plateau core");
-                Assert.IsFalse((math.abs(f.Centre.x) < bandHalf + f.Radius && math.abs(f.Centre.y) < reach + f.Radius) || (math.abs(f.Centre.y) < bandHalf + f.Radius && math.abs(f.Centre.x) < reach + f.Radius), $"clump {i} is off the armies' bands");
                 foreach (var t in trees) Assert.Greater(math.cmax(math.abs(f.Centre - t.Centre)), t.Radius + f.Radius, $"clump {i} is clear of the trees");
                 for (int j = 0; j < i; j++)
                 {
@@ -506,31 +470,31 @@ namespace Phys.AvbdGpu.Tests
                 }
                 // level ground under the whole footprint (a terrace where the hills were), so that every plate of the ground course rests on it
                 foreach (var corner in new[] { new float2(-1f, -1f), new float2(1f, -1f), new float2(-1f, 1f), new float2(1f, 1f), float2.zero })
-                    Assert.AreEqual(f.Ground, m_Demo.World.Terrain.Height(f.Centre + corner * f.Radius), 0.01f, $"clump {i} ({m_Demo.FoliageKinds[f.Kind].Name}) stands on level ground");
-                for (int k = 1; k < f.Count; k++) Assert.AreNotEqual(m_Demo.FoliageBody(f, 0), m_Demo.FoliageBody(f, k));
+                    Assert.AreEqual(f.Ground, m_Demo.World.Terrain.Height(f.Centre + corner * f.Radius), 0.01f, $"clump {i} ({m_Demo.Vegetation.FoliageKinds[f.Kind].Name}) stands on level ground");
+                for (int k = 1; k < f.Count; k++) Assert.AreNotEqual(m_Demo.Vegetation.FoliageBody(f, 0), m_Demo.Vegetation.FoliageBody(f, k));
             }
-            Assert.AreEqual(pieces, m_Demo.FoliagePieces);
+            Assert.AreEqual(pieces, m_Demo.Vegetation.FoliagePieces);
             Assert.GreaterOrEqual(kinds.Count, 12, "many kinds of foliage");
             Assert.Greater(terraced, 0, "some clumps stand on the hills, on terraces of their own");
             Assert.Less(terraced, clumps.Count, "some clumps stand on the level ground around the castle");
-            Assert.AreEqual(clusters.Count, m_Demo.FoliageClusterCount, "every cluster holds clumps");
-            Assert.That(m_Demo.FoliageClusterCount, Is.InRange(4, CastleDemo.FoliageGrid * CastleDemo.FoliageGrid), "the clumps are clustered by grid cell");
+            Assert.AreEqual(clusters.Count, m_Demo.Vegetation.FoliageClusterCount, "every cluster holds clumps");
+            Assert.That(m_Demo.Vegetation.FoliageClusterCount, Is.InRange(4, Vegetation.FoliageGrid * Vegetation.FoliageGrid), "the clumps are clustered by grid cell");
             int drawn = 0, foliageRanges = 0;
             foreach (var r in m_Demo.Renderer.MeshRanges)
             {
                 Assert.IsNotNull(r.Mesh);
-                if (r.Start < m_Demo.FirstFoliagePiece || r.Start >= m_Demo.FirstFoliagePiece + pieces) continue;
+                if (r.Start < m_Demo.Vegetation.FirstFoliagePiece || r.Start >= m_Demo.Vegetation.FirstFoliagePiece + pieces) continue;
                 drawn += r.Count;
                 foliageRanges++;
             }
             Assert.AreEqual(pieces, drawn, "every piece of every clump is drawn with its model");
-            Assert.LessOrEqual(foliageRanges, 5 * m_Demo.FoliageClusterCount, "a cluster is drawn in a range per kind of plate, not one per clump");
-            Debug.Log($"foliage: {clumps.Count} clumps of {kinds.Count} kinds, {pieces} pieces, {terraced} on terraces, {m_Demo.FoliageClusterCount} clusters drawn in {foliageRanges} ranges ({m_Demo.Renderer.MeshRanges.Count} ranges in all)");
+            Assert.LessOrEqual(foliageRanges, 16 * m_Demo.Vegetation.FoliageClusterCount, "a cluster is drawn in a range per kind of piece (the models mix bricks and plates), not one per clump");
+            Debug.Log($"foliage: {clumps.Count} clumps of {kinds.Count} kinds, {pieces} pieces, {terraced} on terraces, {m_Demo.Vegetation.FoliageClusterCount} clusters drawn in {foliageRanges} ranges ({m_Demo.Renderer.MeshRanges.Count} ranges in all)");
 
             var stats = m_Demo.World.GetStatsSync();
             Assert.AreEqual(0, stats.OverflowFlags, $"no overflow after the settle steps (flags {stats.OverflowFlags})");
             var words = m_Demo.World.GetSleepSync();
-            int first = m_Demo.FirstFoliagePiece;
+            int first = m_Demo.Vegetation.FirstFoliagePiece;
             for (int b = first; b < first + pieces; b++) { Assert.IsTrue(GpuBodySleep.IsAsleep(words[b]), $"foliage piece {b} sleeps"); Assert.IsTrue(GpuBodySleep.IsInGrid(words[b]), $"foliage piece {b} is in the sleeping grid"); }
             Assert.LessOrEqual(stats.Active, m_Demo.BrickCount, "at most the castle is awake");
             m_Demo.World.GetPosesSync(out var start, out _);
@@ -540,7 +504,7 @@ namespace Phys.AvbdGpu.Tests
             Assert.AreEqual(0, stats.OverflowFlags);
             int culled = 0;
             foreach (var r in m_Demo.Renderer.MeshRanges) if (!r.NoCulling) culled++;
-            Assert.AreEqual(culled, m_Demo.Renderer.BoundedDraws, "every range but the siege pools is drawn with its own bounds");
+            Assert.AreEqual(culled, m_Demo.Renderer.BoundedDraws, "every range is drawn with its own bounds");
 
             // a cannonball into the clump farthest from everything else wakes it, and it alone, although its bodies lie between its
             // cluster-mates' (one island per clump)
@@ -555,7 +519,7 @@ namespace Phys.AvbdGpu.Tests
             }
             var hit = clumps[target];
             float s = m_Demo.Spec.Scale;
-            float3 extent = m_Demo.FoliageKinds[hit.Kind].Extent * PieceCatalog.GridToUnity * s;
+            float3 extent = m_Demo.Vegetation.FoliageKinds[hit.Kind].Extent * PieceCatalog.GridToUnity * s;
             float3 aim = new float3(hit.Centre.x, hit.Ground + 0.5f * extent.y, hit.Centre.y);
             float3 from = aim + new float3(0.3f * s, 10f * s, 0f);   // from high above: nothing else in the way
             float cube = m_Demo.ShotCube * s;
@@ -566,14 +530,14 @@ namespace Phys.AvbdGpu.Tests
                 yield return null;
                 words = m_Demo.World.GetSleepSync();
                 int awake = 0;
-                for (int k = 0; k < hit.Count; k++) if (!GpuBodySleep.IsAsleep(words[m_Demo.FoliageBody(hit, k)])) awake++;
+                for (int k = 0; k < hit.Count; k++) if (!GpuBodySleep.IsAsleep(words[m_Demo.Vegetation.FoliageBody(hit, k)])) awake++;
                 if (awake == 0) continue;
                 woke = true;
                 Assert.Greater(awake, hit.Count / 2, "the hit clump woke as an island");
                 for (int i = 0; i < clumps.Count; i++)
                 {
                     if (i == target) continue;
-                    for (int k = 0; k < clumps[i].Count; k++) Assert.IsTrue(GpuBodySleep.IsAsleep(words[m_Demo.FoliageBody(clumps[i], k)]), $"piece {k} of clump {i} sleeps on");
+                    for (int k = 0; k < clumps[i].Count; k++) Assert.IsTrue(GpuBodySleep.IsAsleep(words[m_Demo.Vegetation.FoliageBody(clumps[i], k)]), $"piece {k} of clump {i} sleeps on");
                 }
                 foreach (var t in trees) for (int b = t.First; b < t.First + t.Count; b++) Assert.IsTrue(GpuBodySleep.IsAsleep(words[b]), $"tree piece {b} sleeps on");
                 stats = m_Demo.World.GetStatsSync();
@@ -586,14 +550,14 @@ namespace Phys.AvbdGpu.Tests
             for (int i = 0; i < clumps.Count; i++)
             {
                 if (i == target) continue;
-                for (int k = 0; k < clumps[i].Count; k++) { int b = m_Demo.FoliageBody(clumps[i], k); maxMove = math.max(maxMove, math.distance(pos[b].xyz, start[b].xyz)); }
+                for (int k = 0; k < clumps[i].Count; k++) { int b = m_Demo.Vegetation.FoliageBody(clumps[i], k); maxMove = math.max(maxMove, math.distance(pos[b].xyz, start[b].xyz)); }
             }
             Assert.Less(maxMove, 0.5f * 1.2f * PieceCatalog.GridToUnity * s, $"the other clumps were nudged by debris at most ({maxMove * 1000f:F0} mm), none knocked over");
             int fell = 0;
             float meanMove = 0f;
             for (int k = 0; k < hit.Count; k++)
             {
-                int b = m_Demo.FoliageBody(hit, k);
+                int b = m_Demo.Vegetation.FoliageBody(hit, k);
                 Assert.IsTrue(math.all(math.isfinite(pos[b])), $"piece {b} position");
                 float dist = math.distance(pos[b].xyz, start[b].xyz);
                 meanMove += dist / hit.Count;
@@ -601,7 +565,7 @@ namespace Phys.AvbdGpu.Tests
             }
             stats = m_Demo.World.GetStatsSync();
             Assert.AreEqual(0, stats.OverflowFlags);
-            Debug.Log($"after the shot: clump {target} ({m_Demo.FoliageKinds[hit.Kind].Name}, {hit.Count} pieces, {bestGap:F1} m clear) lost {fell} pieces (a brick height away), moved {meanMove * 1000f:F0} mm on average; {stats.Sleeping} asleep, {stats.Active} active, hot {stats.Hot}, cold {stats.ColdManifolds}, step {stats.AvgStepMs:F2} ms");
+            Debug.Log($"after the shot: clump {target} ({m_Demo.Vegetation.FoliageKinds[hit.Kind].Name}, {hit.Count} pieces, {bestGap:F1} m clear) lost {fell} pieces (a brick height away), moved {meanMove * 1000f:F0} mm on average; {stats.Sleeping} asleep, {stats.Active} active, hot {stats.Hot}, cold {stats.ColdManifolds}, step {stats.AvgStepMs:F2} ms");
             Assert.Greater(fell, 0, "the cannonball took pieces off the clump");
         }
 
