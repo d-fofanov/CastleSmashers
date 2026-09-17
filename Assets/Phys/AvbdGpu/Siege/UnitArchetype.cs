@@ -19,13 +19,12 @@ namespace Phys.AvbdGpu.Siege
 
     /// <summary>What a projectile does where it lands (solver metres, N s): every joint anchored within the pulverize radius breaks,
     /// every body within the impact radius gets a radial impulse falling off linearly to the radius (biased upward by the lift),
-    /// units within the impact radius die when <see cref="KillUnits"/>.</summary>
+    /// units within the kill radius die.</summary>
     public struct HitEffect
     {
-        public float PulverizeRadius, ImpactRadius, Impulse, Lift;
-        public bool KillUnits;
+        public float PulverizeRadius, ImpactRadius, Impulse, Lift, KillRadius;
 
-        public bool Any => PulverizeRadius > 0f || ImpactRadius > 0f;
+        public bool Any => PulverizeRadius > 0f || ImpactRadius > 0f || KillRadius > 0f;
     }
 
     /// <summary>A kind of unit in solver units (m, kg, N, steps at 60 Hz): its body, how it moves, how and what it shoots, what its

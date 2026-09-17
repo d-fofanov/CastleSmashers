@@ -16,8 +16,8 @@ namespace Phys.AvbdGpu.Siege
         public float Impulse = 10f;
         [Tooltip("Upward bias of the impulse direction (0 radial, 1 = 45 degrees up for a body beside the impact).")]
         public float Lift = 0.3f;
-        [Tooltip("Units within the impact radius die.")]
-        public bool KillUnits = true;
+        [Tooltip("Units within this radius of the impact die (0: none); the impulse tosses them either way.")]
+        public float KillRadius = 2f;
 
         [Header("Visual")]
         [Tooltip("The mesh spawned at the impact (an explosion model, impact-centre pivot); nothing when unset.")]
@@ -36,7 +36,7 @@ namespace Phys.AvbdGpu.Siege
 
         public HitEffect ToHitEffect() => new HitEffect
         {
-            PulverizeRadius = Mathf.Max(PulverizeRadius, 0f), ImpactRadius = Mathf.Max(ImpactRadius, 0f), Impulse = Mathf.Max(Impulse, 0f), Lift = Mathf.Max(Lift, 0f), KillUnits = KillUnits,
+            PulverizeRadius = Mathf.Max(PulverizeRadius, 0f), ImpactRadius = Mathf.Max(ImpactRadius, 0f), Impulse = Mathf.Max(Impulse, 0f), Lift = Mathf.Max(Lift, 0f), KillRadius = Mathf.Max(KillRadius, 0f),
         };
     }
 }

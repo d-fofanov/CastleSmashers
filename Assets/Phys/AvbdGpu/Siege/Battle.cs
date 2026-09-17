@@ -360,7 +360,7 @@ namespace Phys.AvbdGpu.Siege
         }
 
         /// <summary>The hit effects of the spent projectiles whose position is known: a blast at the projectile, units within the
-        /// impact radius killed, the impact reported.</summary>
+        /// kill radius killed, the impact reported.</summary>
         void ApplyImpacts()
         {
             for (int i = 0; i < Projectiles.Count; i++)
@@ -374,12 +374,12 @@ namespace Phys.AvbdGpu.Siege
                 float speed = math.length(p.Velocity);
                 if (speed > 1f) centre += p.Velocity / speed * (Types[p.Type].ProjectileBoxSize.z * 0.5f) + p.Velocity * World.Params.Dt;
                 World.Blast(centre, hit.ImpactRadius, hit.Impulse, hit.Lift, hit.PulverizeRadius, p.Body);
-                if (hit.KillUnits && hit.ImpactRadius > 0f)
+                if (hit.KillRadius > 0f)
                     for (int k = 0; k < Units.Count; k++)
                     {
                         var u = Units[k];
                         if (u.State == UnitState.Dead || !Known(u)) continue;
-                        if (math.distance(m_Positions[u.Body].xyz, centre) < hit.ImpactRadius) Kill(k, "blast");
+                        if (math.distance(m_Positions[u.Body].xyz, centre) < hit.KillRadius) Kill(k, "blast");
                     }
                 p.HitApplied = true;
                 Projectiles[i] = p;

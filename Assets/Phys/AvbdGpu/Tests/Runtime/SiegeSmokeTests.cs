@@ -71,7 +71,7 @@ namespace Phys.AvbdGpu.Tests
             var rock = LoadMesh("Assets/Models/ConstructorFantasy/ConstructorRock01.fbx");
 
             var blast = ScriptableObject.CreateInstance<HitEffectConfig>();
-            blast.PulverizeRadius = 2.5f; blast.ImpactRadius = 4f; blast.Impulse = 6f; blast.Lift = 0.4f; blast.KillUnits = true;   // big enough to reach the wall's snaps from an arrow stopped by a defender standing on it
+            blast.PulverizeRadius = 2.5f; blast.ImpactRadius = 4f; blast.Impulse = 6f; blast.Lift = 0.4f; blast.KillRadius = 3f;   // big enough to reach the wall's snaps from an arrow stopped by a defender standing on it
             blast.Mesh = explosion; blast.LifeSteps = 40;
 
             m_Archer = ScriptableObject.CreateInstance<UnitConfig>();

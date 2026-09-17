@@ -28,7 +28,7 @@ namespace Phys.AvbdGpu.Tests
             a.ProjectileBoxSize = new float3(0.22f, 0.23f, 1.4f);
             a.ProjectileMass = 0.05f;
             a.ProjectileRetireDelay = 0;
-            a.Hit = new HitEffect { PulverizeRadius = 2f, ImpactRadius = 3f, Impulse = 8f, Lift = 0.3f, KillUnits = true };
+            a.Hit = new HitEffect { PulverizeRadius = 2f, ImpactRadius = 3f, Impulse = 8f, Lift = 0.3f, KillRadius = 2f };
             return a;
         }
 
@@ -40,7 +40,7 @@ namespace Phys.AvbdGpu.Tests
             Range = 70f, CooldownSteps = 240, AutoEngage = false, Trajectory = Trajectory.HighArc, LaunchSpeed = 32f, Spread = 0f,
             LaunchLocal = new float3(0f, 5.25f - 1.7925f, 3.25f), LaunchOffset = 1f, LaunchDelaySteps = 30,
             ProjectileBoxSize = new float3(0.58f, 0.58f, 0.56f), ProjectileMass = 6f, ProjectileAlign = false, ProjectileVariants = 4, ProjectileRetireDelay = 300,
-            Hit = new HitEffect { PulverizeRadius = 0.8f, ImpactRadius = 2.5f, Impulse = 8f, Lift = 0.5f, KillUnits = true },
+            Hit = new HitEffect { PulverizeRadius = 0.8f, ImpactRadius = 2.5f, Impulse = 8f, Lift = 0.5f, KillRadius = 1.5f },
         };
 
         static UnitArchetype Mage()
@@ -48,7 +48,7 @@ namespace Phys.AvbdGpu.Tests
             var a = Archer("mage");
             a.Trajectory = Trajectory.Homing; a.LaunchSpeed = 16f; a.Thrust = 6f; a.Range = 30f; a.CooldownSteps = 120;
             a.ProjectileBoxSize = new float3(0.5f, 0.5f, 1.5f); a.ProjectileMass = 0.1f; a.ProjectileRetireDelay = 0;
-            a.Hit = new HitEffect { PulverizeRadius = 2f, ImpactRadius = 4f, Impulse = 15f, Lift = 0.3f, KillUnits = true };
+            a.Hit = new HitEffect { PulverizeRadius = 2f, ImpactRadius = 4f, Impulse = 15f, Lift = 0.3f, KillRadius = 3f };
             return a;
         }
 

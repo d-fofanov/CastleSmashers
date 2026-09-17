@@ -16,7 +16,7 @@ MonoBehaviour:
   ImpactRadius: 5
   Impulse: 12
   Lift: 0.4
-  KillUnits: 1
+  KillRadius: 3
   Mesh: {fileID: -2433465580418009930, guid: dcdb2259eccc4097bffbc9df5755dac1, type: 3}
   Color:
     serializedVersion: 2

@@ -57,7 +57,7 @@ MonoBehaviour:
   LaunchOffset: 2.6
   LaunchDelaySteps: 0
   ProjectileRetireDelay: 0
-  Range: 40
+  Range: 36
   CooldownSteps: 300
   AutoEngage: 1
   HitEffect: {fileID: 11400000, guid: b6ae95261746bba4d8a0eb904740ae6a, type: 2}

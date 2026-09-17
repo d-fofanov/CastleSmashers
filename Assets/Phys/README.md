@@ -543,12 +543,15 @@ and a random `Spread` seeded per step. A spent projectile (anything touched, or 
 
 **Hit effects** (`HitEffectConfig`). Where a projectile with one lands (its first contact, at its read-back position),
 `world.Blast` goes off: every snap anchored within `PulverizeRadius` breaks unconditionally, every body within
-`ImpactRadius` is thrown away from the impact with `Impulse (1 - d / R) / mass` biased upward by `Lift`, units within the
-impact radius die (`KillUnits`), and the effect's mesh (the spell explosions of the pack) is drawn at the impact for
-`LifeSteps`, growing from `StartScale` to `EndScale`, fading and spinning, lit or as a flat glow (`Unlit`). The defaults:
-explosive arrows (1.2 / 3 m, 6 N s), rocks (0.8 / 2.5 m, 8 N s), fire (2 / 5 m, 12 N s, the starburst), frost (0.8 / 6 m,
-16 N s, the shock ring) and arcane (3 / 3 m, 6 N s, the puff); a 1 kg brick at the centre of a 12 N s blast leaves at
-12 m/s. Plain arrows have no effect: they kill by their impact.
+`ImpactRadius` is thrown away from the impact with `Impulse (1 - d / R) / mass` biased upward by `Lift`, units within
+`KillRadius` die (kept well inside the impact radius: a blast that tosses bricks six metres around should not wipe out a
+rank of figures; the impulse tosses the survivors either way), and the effect's mesh (the spell explosions of the pack) is
+drawn at the impact for `LifeSteps`, growing from `StartScale` to `EndScale`, fading and spinning, lit or as a flat glow
+(`Unlit`). The defaults (pulverize / impact / kill radius, impulse): explosive arrows (1.2 / 3 / 2 m, 6 N s), rocks (0.8 /
+2.5 / 1.5 m, 8 N s), fire (2 / 5 / 3 m, 12 N s, the starburst), frost (0.8 / 6 / 2.5 m, 16 N s, the shock ring) and arcane
+(3 / 3 / 2 m, 6 N s, the puff); a 1 kg brick at the centre of a 12 N s blast leaves at 12 m/s. Plain arrows have no effect:
+they kill by their impact, like every projectile faster than 2 m/s that meets a unit (a spell flying through a rank hits
+everyone in its path).
 
 **Under the hood.** `SiegeDemo.BuildScene` parses the document, levels the plateau (the level margin of the terrain holds
 the formation: a warning when it does not), builds the castle like the preview demo, scatters the vegetation clear of the

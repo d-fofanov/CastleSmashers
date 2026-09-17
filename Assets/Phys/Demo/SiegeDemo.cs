@@ -120,7 +120,7 @@ namespace Phys.Demo
 
         protected override int SceneCount => math.max(1, m_Configs.Length);
         protected override string SceneName(int index) => index < m_Configs.Length ? ConfigName(m_Configs[index]) : "no config";
-        protected override float HudHeight => 330f;
+        protected override float HudHeight => 346f;
         protected override float3 ShotSize => ShotCube * BrickScale;
         protected override float ShotDensity => ShotMass / math.pow(ShotCube * BrickScale, 3f);
         protected override float ShotSpeed => ShotVelocity * math.sqrt(BrickScale);
@@ -716,9 +716,9 @@ namespace Phys.Demo
                 float unit = PieceCatalog.GridToUnity * BrickScale;
                 float3 e = m_Assembly.Extent;
                 int walls = 0; foreach (var p in m_Occupancy.Posts) if (p.OnWall) walls++;
-                castle = $"{m_Assembly.Parts.Count} pieces, {e.x:F0} x {e.z:F0} studs, {e.y:F1} tall = {e.x * unit:F1} x {e.z * unit:F1} x {e.y * unit:F1} m; {m_Occupancy.Posts.Count} posts ({walls} on the walls{(m_Occupancy.ExplicitPosts ? ", from the document" : ", derived")})  -  " +
-                         (Snap ? $"<color=#88ddff>snapped</color>: {m_SnapJoints} joints ({SnapFractureLateral:F0} / {SnapFractureTension:F0} N)" : "dry-stacked") +
-                         (m_Diagnostics.Clean ? "" : $"  <color=#ffcc55>{m_Diagnostics.Floating} floating, {m_Diagnostics.PoorlySupported} poorly supported, {m_Diagnostics.Intersections} intersecting</color>") + "\n";
+                castle = $"{m_Assembly.Parts.Count} pieces, {e.x:F0} x {e.z:F0} studs, {e.y:F1} tall = {e.x * unit:F1} x {e.z * unit:F1} x {e.y * unit:F1} m; {m_Occupancy.Posts.Count} posts ({walls} on the walls{(m_Occupancy.ExplicitPosts ? ", from the document" : ", derived")})\n" +
+                         (Snap ? $"<color=#88ddff>snapped</color>: {m_SnapJoints} joints; a snap breaks at {SnapFractureLateral:F0} N sideways, {SnapFractureTension:F0} N upward" : "dry-stacked (friction only)") +
+                         (m_Diagnostics.Clean ? "" : $"  -  <color=#ffcc55>{m_Diagnostics.Floating} floating, {m_Diagnostics.PoorlySupported} poorly supported, {m_Diagnostics.Intersections} intersecting</color>") + "\n";
             }
             string deaths = m_LastDeath.Length > 0 ? $"  -  last death: {m_LastDeath}" : "";
             string selection = m_Battle == null ? "" : m_Selected >= 0

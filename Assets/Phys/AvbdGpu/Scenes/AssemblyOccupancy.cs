@@ -288,7 +288,7 @@ namespace Phys.AvbdGpu.Scenes
                         v[k] = (float)d;
                     }
                     var position = new float3(v[0], v[1], v[2]);
-                    o.Posts.Add(new AssemblyPost { Position = position, Yaw = math.radians(v[3]), OnWall = position.y > 0.5f });
+                    o.Posts.Add(new AssemblyPost { Position = position, Yaw = math.radians(v[3]), OnWall = position.y >= PostRules.Default.MinWallHeight });   // a raised courtyard floor is not a wall
                 }
             }
             return o;

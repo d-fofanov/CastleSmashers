@@ -48,11 +48,13 @@ namespace Phys.Demo.Editor
             if (!ok) { if (Application.isBatchMode) EditorApplication.Exit(1); return; }
 
             // ---- hit effects
-            var explosive = Effect("Explosive", 1.2f, 3f, 6f, 0.4f, explosion3, new Color32(255, 150, 60, 220), 2f, 8f, 36, 60f);
-            var rock = Effect("Rock", 0.8f, 2.5f, 8f, 0.5f, explosion3, new Color32(150, 140, 120, 200), 2f, 7f, 30, 40f);
-            var fire = Effect("Fire", 2f, 5f, 12f, 0.4f, explosion1, new Color32(255, 90, 30, 230), 3f, 12f, 45, 120f);
-            var frost = Effect("Frost", 0.8f, 6f, 16f, 0.7f, explosion2, new Color32(130, 200, 255, 220), 3f, 14f, 45, 30f);
-            var arcane = Effect("Arcane", 3f, 3f, 6f, 0.3f, explosion3, new Color32(190, 110, 255, 230), 3f, 10f, 45, 200f);
+            // pulverize / impact / impulse / lift / kill radius; the kill radius stays well inside the impact radius (a blast that
+            // tosses bricks six metres around should not wipe out a rank of figures)
+            var explosive = Effect("Explosive", 1.2f, 3f, 6f, 0.4f, 2f, explosion3, new Color32(255, 150, 60, 220), 2f, 8f, 36, 60f);
+            var rock = Effect("Rock", 0.8f, 2.5f, 8f, 0.5f, 1.5f, explosion3, new Color32(150, 140, 120, 200), 2f, 7f, 30, 40f);
+            var fire = Effect("Fire", 2f, 5f, 12f, 0.4f, 3f, explosion1, new Color32(255, 90, 30, 230), 3f, 12f, 45, 120f);
+            var frost = Effect("Frost", 0.8f, 6f, 16f, 0.7f, 2.5f, explosion2, new Color32(130, 200, 255, 220), 3f, 14f, 45, 30f);
+            var arcane = Effect("Arcane", 3f, 3f, 6f, 0.3f, 2f, explosion3, new Color32(190, 110, 255, 230), 3f, 10f, 45, 200f);
 
             // ---- units
             var archer = Unit("Archer", u =>
@@ -99,7 +101,7 @@ namespace Phys.Demo.Editor
                 u.ProjectileUnlit = 1f;
                 u.Trajectory = Trajectory.Homing; u.LaunchSpeed = 22f; u.Thrust = 8f; u.Spread = 0f;
                 u.LaunchPoint = new Vector3(0.1f, 0.5f, 0.1f); u.LaunchOffset = 2.6f;
-                u.Range = 40f; u.CooldownSteps = 300; u.AutoEngage = true; u.ProjectileRetireDelay = 0; u.HitEffect = effect;
+                u.Range = 36f; u.CooldownSteps = 300; u.AutoEngage = true; u.ProjectileRetireDelay = 0; u.HitEffect = effect;   // a stud beyond the archers: the front rank at 38 m stays out of the garrison's reach
             });
             var mageFire = Mage("MageFire", new Color32(200, 70, 40, 255), new Color32(255, 120, 40, 255), fire);
             var mageFrost = Mage("MageFrost", new Color32(80, 140, 220, 255), new Color32(150, 220, 255, 255), frost);
@@ -138,10 +140,10 @@ namespace Phys.Demo.Editor
             u.ProjectileBoundsCenter = b.center; u.ProjectileBoundsSize = b.size;
         }
 
-        static HitEffectConfig Effect(string name, float pulverize, float impact, float impulse, float lift, Mesh mesh, Color32 color, float start, float end, int life, float spin)
+        static HitEffectConfig Effect(string name, float pulverize, float impact, float impulse, float lift, float kill, Mesh mesh, Color32 color, float start, float end, int life, float spin)
         {
             var e = LoadOrCreate<HitEffectConfig>($"{EffectsDir}/{name}.asset");
-            e.PulverizeRadius = pulverize; e.ImpactRadius = impact; e.Impulse = impulse; e.Lift = lift; e.KillUnits = true;
+            e.PulverizeRadius = pulverize; e.ImpactRadius = impact; e.Impulse = impulse; e.Lift = lift; e.KillRadius = kill;
             e.Mesh = mesh; e.Color = color; e.StartScale = start; e.EndScale = end; e.LifeSteps = life; e.SpinDegPerSec = spin; e.Unlit = 1f;
             EditorUtility.SetDirty(e);
             return e;
