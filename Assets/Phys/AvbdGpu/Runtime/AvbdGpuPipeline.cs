@@ -28,6 +28,11 @@ namespace Phys.AvbdGpu
         public CommandBuffer RebuildCommandBuffer => m_RebuildCb;
         /// <summary>The cold store compaction (gated on the GPU: nothing runs unless enough of the store was thawed or it is nearly full).</summary>
         public CommandBuffer CompactCommandBuffer => m_CompactCb;
+        /// <summary>Dispatches recorded in one step command buffer (a substep), in the rebuild and in the compaction buffers.</summary>
+        public int StepDispatches { get; private set; }
+        public int RebuildDispatches { get; private set; }
+        public int CompactDispatches { get; private set; }
+        int m_Dispatches;
 
         static readonly int s_Params = Shader.PropertyToID("AvbdParams");
         static readonly int s_Phase = Shader.PropertyToID("_Phase");
@@ -85,10 +90,10 @@ namespace Phys.AvbdGpu
                 && terrain == m_Terrain && terrainVersion == m_TerrainVersion && sleep == m_Sleep && labelRounds == m_LabelRounds && sleepHops == m_SleepHops) return;
             m_Iterations = iterations; m_ActiveColors = activeColors; m_PostStabilize = postStabilize; m_ColorRounds = colorRounds; m_Alpha = alpha;
             m_Terrain = terrain; m_TerrainVersion = terrainVersion; m_Sleep = sleep; m_LabelRounds = labelRounds; m_SleepHops = sleepHops;
-            Record(0);
+            m_Dispatches = 0; Record(0); StepDispatches = m_Dispatches;
             Record(1);
-            RecordRebuild();
-            RecordCompact();
+            m_Dispatches = 0; RecordRebuild(); RebuildDispatches = m_Dispatches;
+            m_Dispatches = 0; RecordCompact(); CompactDispatches = m_Dispatches;
         }
 
         float m_Alpha = -1f;
@@ -100,9 +105,9 @@ namespace Phys.AvbdGpu
             foreach (var (name, buffer) in bindings) Bind(cs, kernel, name, buffer);
         }
 
-        void Indirect(ComputeShader cs, int kernel, int argSlot) => m_Rec.DispatchCompute(cs, kernel, m_B.DispatchArgs, (uint)(argSlot * 12));
+        void Indirect(ComputeShader cs, int kernel, int argSlot) { m_Rec.DispatchCompute(cs, kernel, m_B.DispatchArgs, (uint)(argSlot * 12)); m_Dispatches++; }
 
-        void Direct(ComputeShader cs, int kernel, int groups) => m_Rec.DispatchCompute(cs, kernel, groups, 1, 1);
+        void Direct(ComputeShader cs, int kernel, int groups) { m_Rec.DispatchCompute(cs, kernel, groups, 1, 1); m_Dispatches++; }
 
         /// <summary>Exclusive scan of <paramref name="n"/> entries; with arg slots the three dispatches are indirect (the rebuild
         /// gate writes them, zero when nothing is due).</summary>

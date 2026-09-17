@@ -1,0 +1,28 @@
+# The mining charges of the README video (Castle.exe -avbd-scene 9 -avbd-blasts Tools/video/undermining.txt): the Royal citadel's
+# keep and the two corner towers nearest the camera (yaw 18: the camera stands south-south-west, the gatehouse side) are
+# undermined - each charge breaks the snaps within its pulverize radius, throws the bricks within its impact radius and digs a
+# crater of the pulverize radius into the plateau, so that what stood on it drops away. A tower keeps its footing only along the
+# wall farthest from the camera and topples towards it.
+#
+# Columns: step  x y z  impactRadius impulse lift pulverizeRadius craterDepth; metres from the castle's centre at ground level,
+# steps at 60 per second of simulation. Royal citadel geometry (stud 0.504 m, course 0.605 m at the brick scale of 5):
+#   corner towers 22 studs (11.1 m) square, 50 courses (30 m), centred at (+-37.3, +-37.3); the keep 42 studs (21.2 m) square,
+#   66 courses (40 m), centred at (0, 21.7): south face z = 11.1, side walls x = +-10.6, north wall z = 31.5.
+
+# south-west tower: the two flanks first (the tower's junctions with the curtain walls), then the main charge under the south face
+90   -43.5 -0.5 -38.0   6  40 0.7  6  3
+96   -31.0 -0.5 -38.0   6  40 0.7  6  3
+104  -37.3 -0.5 -43.5   8  50 0.7  9  5
+
+# south-east tower, a second and a half later
+180   43.5 -0.5 -38.0   6  40 0.7  6  3
+186   31.0 -0.5 -38.0   6  40 0.7  6  3
+194   37.3 -0.5 -43.5   8  50 0.7  9  5
+
+# the keep: the side walls, the two southern corners, then the south face; the north wall keeps its footing and the keep falls
+# southward over the front wall
+300  -10.6 -0.5  20.0   8  50 0.7  9  5
+308   10.6 -0.5  20.0   8  50 0.7  9  5
+318   -9.0 -0.5  12.0   8  50 0.7  9  5
+326    9.0 -0.5  12.0   8  50 0.7  9  5
+336    0.0 -0.5  11.5  10  45 0.7 12  6

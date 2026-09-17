@@ -96,6 +96,12 @@ namespace Phys.Demo
         // -avbd-yaw <deg> -avbd-pitch <deg> -avbd-distance <m> override the camera; -avbd-shoot <n> fires a box at frame n;
         // -avbd-nosleep runs without sleeping; -avbd-colormode <n> starts in that colour mode (3 = sleep); -avbd-norangeculling draws
         // every range with world-sized bounds (no frustum or cascade culling).
+        // Bench dissection: -avbd-substeps <n> -avbd-iterations <n> override the solver parameters; -avbd-nophysics skips the world step
+        // (the scene stays as loaded), -avbd-nobodies the body draws, -avbd-noterrain the terrain draw, -avbd-noattach the demo's own
+        // rendering (attachments), -avbd-nohud the HUD; -avbd-profile <file> writes a Profiler capture (.raw, development builds) of the
+        // bench window and -avbd-gpusamples reads the step's command buffer samples through Profiler recorders (development builds,
+        // Profiler on): the CPU time the render thread spends replaying each section, and the GPU time where the GPU profiler
+        // supports it (not on D3D12 here: that column reads 0).
         string m_ScreenshotPath;
         int m_ScreenshotFrame = 150;
         int m_ShootFrame = -1;
@@ -103,12 +109,35 @@ namespace Phys.Demo
         bool m_RangeCulling = true;
         double m_BenchMs; int m_BenchFrames;
         float? m_Yaw, m_Pitch, m_Distance;
+        int m_ForceSubsteps, m_ForceIterations;
+        bool m_NoPhysics, m_NoBodies, m_NoTerrain, m_NoAttach, m_NoHud, m_GpuSamples;
+        string m_ProfilePath, m_BenchCsvPath;
+        System.IO.StreamWriter m_BenchCsv;
+        readonly System.Collections.Generic.List<float> m_FrameTimes = new System.Collections.Generic.List<float>();
+        // CPU time of the frame's parts over the bench window (ms), and the GPU time of the step's samples (Profiler recorders)
+        readonly System.Diagnostics.Stopwatch m_Clock = new System.Diagnostics.Stopwatch();
+        double m_TickMs, m_StepMs, m_SubmitMs, m_BodiesMs, m_TerrainMs, m_AttachMs, m_HudMs, m_GpuFrameMs;
+        int m_HudCalls;
+        double m_LastTickMs, m_LastStepMs;
+        static readonly string[] s_StepSamples = { "AVBD hot list", "AVBD broadphase", "AVBD narrowphase", "AVBD wake", "AVBD constraints", "AVBD islands", "AVBD coloring", "AVBD solve", "AVBD sleep", "AVBD freeze", "AVBD sleeping grid", "AVBD cold store" };
+        UnityEngine.Profiling.Recorder[] m_Recorders;
+        double[] m_SampleGpuMs, m_SampleCpuMs;
+        // Video: -avbd-record <dir> writes the frames as <dir>/frame_00000.png (from -avbd-record-from <n>, every -avbd-record-every <n>th)
+        // until -avbd-frames <n>, then quits, with the HUD off and the game clock fixed at the solver's step (Time.captureFramerate: the run
+        // takes as long as the captures take, the footage plays at the solver's rate); -avbd-supersize <n> renders the captures at n times
+        // the window size (downscaled afterwards, that is the anti-aliasing); -avbd-orbit <deg/s> turns the camera about its target and
+        // -avbd-dolly <m/s> moves it in while the run lasts.
+        string m_RecordDir;
+        int m_RecordFrom, m_RecordEvery = 1, m_SuperSize = 1, m_Recorded;
+        float m_Orbit, m_Dolly;
 
         public AvbdGpuWorld World => m_World;
         public AvbdGpuRenderer Renderer => m_Renderer;
         public TerrainView TerrainView => m_TerrainView;
         public int Scene => m_Scene;
         public bool Paused { get => m_Paused; set => m_Paused = value; }
+        /// <summary>Frames rendered since the start (what -avbd-frames, -avbd-shoot and the recording count).</summary>
+        public int Frame => m_Frames;
 
         /// <summary>Number of scenes selectable with the digit keys and , . </summary>
         protected abstract int SceneCount { get; }
@@ -162,6 +191,16 @@ namespace Phys.Demo
                 if (args[i] == "-avbd-terrain" && TryParseTerrain(args[i + 1], out var preset)) TerrainParams.Preset = preset;
                 if (args[i] == "-avbd-terrain-seed" && uint.TryParse(args[i + 1], out uint seed)) TerrainParams.Seed = seed;
                 if (args[i] == "-avbd-terrain-style" && System.Enum.TryParse(args[i + 1], true, out TerrainStyle style)) TerrainParams.Style = style;
+                if (args[i] == "-avbd-substeps" && int.TryParse(args[i + 1], out int ss)) m_ForceSubsteps = ss;
+                if (args[i] == "-avbd-iterations" && int.TryParse(args[i + 1], out int its)) m_ForceIterations = its;
+                if (args[i] == "-avbd-profile") m_ProfilePath = args[i + 1];
+                if (args[i] == "-avbd-benchcsv") m_BenchCsvPath = args[i + 1];
+                if (args[i] == "-avbd-record") m_RecordDir = args[i + 1];
+                if (args[i] == "-avbd-record-from" && int.TryParse(args[i + 1], out int from)) m_RecordFrom = math.max(from, 0);
+                if (args[i] == "-avbd-record-every" && int.TryParse(args[i + 1], out int every)) m_RecordEvery = math.max(every, 1);
+                if (args[i] == "-avbd-supersize" && int.TryParse(args[i + 1], out int super)) m_SuperSize = math.clamp(super, 1, 4);
+                if (args[i] == "-avbd-orbit" && float.TryParse(args[i + 1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float orbit)) m_Orbit = orbit;
+                if (args[i] == "-avbd-dolly" && float.TryParse(args[i + 1], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float dolly)) m_Dolly = dolly;
             }
             TerrainParams = TerrainParams.WithDefaults();
             ParseArgs(args);
@@ -173,15 +212,34 @@ namespace Phys.Demo
                 if (args[i] == "-avbd-nosleep") sleep = false;
                 if (args[i] == "-avbd-colormode" && i + 1 < args.Length && int.TryParse(args[i + 1], out int cm)) colorMode = cm;
                 if (args[i] == "-avbd-norangeculling") m_RangeCulling = false;
+                if (args[i] == "-avbd-nophysics") m_NoPhysics = true;
+                if (args[i] == "-avbd-nobodies") m_NoBodies = true;
+                if (args[i] == "-avbd-noterrain") m_NoTerrain = true;
+                if (args[i] == "-avbd-noattach") m_NoAttach = true;
+                if (args[i] == "-avbd-nohud") m_NoHud = true;
+                if (args[i] == "-avbd-gpusamples") m_GpuSamples = true;
             }
+            if (m_NoHud) ShowHud = false;
             if (!AvbdGpuKernels.Supported) { Debug.LogError("Compute shaders are not supported on this device"); enabled = false; return; }
             m_World = new AvbdGpuWorld(CreateConfig()) { ReadbackPoses = true };
             m_World.Params.Sleep = sleep;
+            if (m_RecordDir != null)
+            {
+                System.IO.Directory.CreateDirectory(m_RecordDir);
+                Time.captureFramerate = (int)math.round(1f / m_World.Params.Dt);   // one step per frame: the frames play back at the solver's rate
+                ShowHud = false;
+                Debug.Log($"AVBD record: {m_RecordDir}, frames {m_RecordFrom + 1} .. {m_ScreenshotFrame} every {m_RecordEvery}, {Screen.width * m_SuperSize} x {Screen.height * m_SuperSize}");
+            }
             m_Renderer = new AvbdGpuRenderer(m_World) { RangeCulling = m_RangeCulling };
             if (colorMode >= 0) m_Renderer.ColorMode = (AvbdGpuRenderer.ColorModes)(colorMode % AvbdGpuRenderer.ColorModeCount);
             m_TerrainView = new TerrainView();
             Configure();
             Load(StartScene);
+            if (m_Bench && m_BenchCsvPath != null)
+            {
+                m_BenchCsv = new System.IO.StreamWriter(m_BenchCsvPath);
+                m_BenchCsv.WriteLine("frame,frame_ms,tick_ms,step_ms,bodies_draw_ms,terrain_draw_ms,attach_ms,gpu_frame_ms,step_index,active,hot,woken,pairs,manifolds,contacts,frozen,thawed,rebuilds,joints");
+            }
         }
 
         void OnDestroy()
@@ -226,6 +284,8 @@ namespace Phys.Demo
                 for (int i = 0; i < SettleSteps; i++) m_World.Step();
                 m_World.Params.Substeps = substeps;
             }
+            if (m_ForceSubsteps > 0) m_World.Params.Substeps = m_ForceSubsteps;
+            if (m_ForceIterations > 0) m_World.Params.Iterations = m_ForceIterations;
             if (m_Camera != null)
             {
                 if (m_Yaw.HasValue) m_Camera.Yaw = m_Yaw.Value;
@@ -234,48 +294,145 @@ namespace Phys.Demo
             }
         }
 
+        /// <summary>Whether this frame is inside the bench window (the second half of the run).</summary>
+        bool Benching => m_Bench && m_Frames >= m_ScreenshotFrame / 2 && m_Frames < m_ScreenshotFrame + 20;
+
+        double Lap()
+        {
+            double ms = m_Clock.Elapsed.TotalMilliseconds;
+            m_Clock.Restart();
+            return ms;
+        }
+
         void Update()
         {
             if (m_World == null) return;
+            bool bench = Benching;
             HandleKeys();
             HandleMouse();
             HandleSceneMouse();
-            if (!m_Paused || m_StepOnce)
+            if (m_Camera != null && (m_Orbit != 0f || m_Dolly != 0f))
             {
+                m_Camera.Yaw += m_Orbit * Time.deltaTime;
+                m_Camera.Distance = math.max(m_Camera.Distance - m_Dolly * Time.deltaTime, 0.5f);
+            }
+            if ((!m_Paused || m_StepOnce) && !m_NoPhysics)
+            {
+                m_Clock.Restart();
                 OnStep();
+                double tick = Lap();
                 m_World.Step();
+                double step = Lap();
+                m_LastTickMs = tick; m_LastStepMs = step;
+                if (bench) { m_TickMs += tick; m_StepMs += step; m_SubmitMs += m_World.Stats.LastStepMs; }
                 m_StepOnce = false;
             }
             if (FrameTimingManager.IsFeatureEnabled())
             {
                 FrameTimingManager.CaptureFrameTimings();
                 if (FrameTimingManager.GetLatestTimings(1, m_Timings) > 0) m_GpuMs = (float)m_Timings[0].gpuFrameTime;
+                if (bench) m_GpuFrameMs += m_GpuMs;
             }
+            if (bench && m_Recorders != null)
+                for (int i = 0; i < m_Recorders.Length; i++)
+                {
+                    var r = m_Recorders[i];
+                    if (!r.isValid) continue;
+                    m_SampleGpuMs[i] += r.gpuElapsedNanoseconds * 1e-6;
+                    m_SampleCpuMs[i] += r.elapsedNanoseconds * 1e-6;
+                }
         }
 
         void LateUpdate()
         {
             if (m_World == null) return;
-            m_Renderer.Render();
-            m_TerrainView.Render();
-            OnRender(Camera.main);
+            bool bench = Benching;
+            m_Clock.Restart();
+            if (!m_NoBodies) m_Renderer.Render();
+            double bodies = Lap();
+            if (!m_NoTerrain) m_TerrainView.Render();
+            double terrain = Lap();
+            if (!m_NoAttach) OnRender(Camera.main);
+            double attach = Lap();
+            if (bench) { m_BodiesMs += bodies; m_TerrainMs += terrain; m_AttachMs += attach; }
             m_Frames++;
             if (m_Frames == m_ShootFrame) Shoot();
-            if (m_ScreenshotPath == null && !m_Bench) return;
-            if (m_Bench && m_Frames > m_ScreenshotFrame / 2) { m_BenchMs += Time.unscaledDeltaTime * 1000.0; m_BenchFrames++; }
+            if (m_RecordDir != null && m_Frames > m_RecordFrom && m_Frames <= m_ScreenshotFrame && (m_Frames - 1 - m_RecordFrom) % m_RecordEvery == 0)
+                ScreenCapture.CaptureScreenshot(System.IO.Path.Combine(m_RecordDir, $"frame_{m_Recorded++:D5}.png"), m_SuperSize);
+            if (m_ScreenshotPath == null && !m_Bench && m_RecordDir == null) return;
+            if (m_Bench && m_Frames == m_ScreenshotFrame / 2) StartProfiling();
+            if (m_Bench && m_Frames > m_ScreenshotFrame / 2) { m_BenchMs += Time.unscaledDeltaTime * 1000.0; m_BenchFrames++; m_FrameTimes.Add(Time.unscaledDeltaTime * 1000f); }
+            if (m_BenchCsv != null)
+            {
+                var st = m_World.Stats;
+                m_BenchCsv.WriteLine(string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0},{1:F3},{2:F3},{3:F3},{4:F3},{5:F3},{6:F3},{7:F3},{8},{9},{10},{11},{12},{13},{14},{15},{16},{17},{18}",
+                    m_Frames, Time.unscaledDeltaTime * 1000f, m_LastTickMs, m_LastStepMs, bodies, terrain, attach, m_GpuMs, m_World.StepIndex, st.Active, st.Hot, st.Woken, st.Pairs, st.Manifolds, st.Contacts, st.Frozen, st.Thawed, st.Rebuilds, m_World.JointCount));
+            }
             if (m_ScreenshotPath != null && m_Frames == m_ScreenshotFrame) ScreenCapture.CaptureScreenshot(m_ScreenshotPath);
             if (m_Frames == m_ScreenshotFrame + 20)
             {
                 if (m_Bench)
                 {
+                    StopProfiling();
                     var st = m_World.Stats;
+                    int n = math.max(m_BenchFrames, 1);
                     Debug.Log($"AVBD bench: scene {m_Scene} '{SceneName(m_Scene)}' bodies {m_World.BodyCount} iterations {m_World.Params.Iterations} substeps {m_World.Params.Substeps}: " +
-                        $"frame {m_BenchMs / math.max(m_BenchFrames, 1):F2} ms ({m_BenchFrames / (m_BenchMs / 1000.0):F0} fps), submit {st.AvgStepMs:F2} ms, gpu render {(FrameTimingManager.IsFeatureEnabled() ? $"{m_GpuMs:F2} ms" : "n/a")}, draws {m_Renderer.LastDraws} ({m_Renderer.BoundedDraws} with own bounds), " +
+                        $"frame {m_BenchMs / n:F2} ms ({m_BenchFrames / (m_BenchMs / 1000.0):F0} fps), submit {st.AvgStepMs:F2} ms, gpu render {(FrameTimingManager.IsFeatureEnabled() ? $"{m_GpuFrameMs / n:F2} ms" : "n/a")}, draws {m_Renderer.LastDraws} ({m_Renderer.BoundedDraws} with own bounds), " +
                         $"pairs {st.Pairs} manifolds {st.Manifolds} ({st.ColdManifolds} cold) contacts {st.Contacts} colours {st.ColorsUsed}/{st.ActiveColors} overflow bodies {st.OverflowBodies} flags {st.OverflowFlags} " +
                         $"sleep {(m_World.Params.Sleep ? "on" : "off")} asleep {st.Sleeping} hot {st.Hot} active {st.Active} grid {st.SleepGrid} rebuilds {st.Rebuilds}");
+                    m_FrameTimes.Sort();
+                    float Pct(float p) => m_FrameTimes.Count == 0 ? 0f : m_FrameTimes[math.clamp((int)(p * (m_FrameTimes.Count - 1)), 0, m_FrameTimes.Count - 1)];
+                    Debug.Log($"AVBD bench frames (ms): p50 {Pct(0.5f):F2}  p90 {Pct(0.9f):F2}  p99 {Pct(0.99f):F2}  max {Pct(1f):F2}  min {Pct(0f):F2}");
+                    Debug.Log($"AVBD bench dispatches: {m_World.DispatchesPerSubstep} per substep x {m_World.Params.Substeps} substeps (+{m_World.RebuildDispatches} sleeping grid rebuild, +{m_World.CompactDispatches} cold store compaction every few steps), colours {m_World.ActiveColors}");
+                    Debug.Log($"AVBD bench cpu (ms per frame, main thread): tick {m_TickMs / n:F3}  step {m_StepMs / n:F3} (of which submit {m_SubmitMs / n:F3})  bodies draw {m_BodiesMs / n:F3}  terrain draw {m_TerrainMs / n:F3}  " +
+                        $"attachments {m_AttachMs / n:F3}  hud {m_HudMs / n:F3} ({(float)m_HudCalls / n:F1} calls)  sum {(m_TickMs + m_StepMs + m_BodiesMs + m_TerrainMs + m_AttachMs + m_HudMs) / n:F3} of frame {m_BenchMs / n:F2}");
+                    if (m_Recorders != null)
+                    {
+                        var sb = new System.Text.StringBuilder("AVBD bench step samples (ms per frame, gpu / render-thread cpu): ");
+                        double gpuTotal = 0, cpuTotal = 0;
+                        for (int i = 0; i < m_Recorders.Length; i++)
+                        {
+                            if (!m_Recorders[i].isValid) { sb.Append(s_StepSamples[i]).Append(" n/a  "); continue; }
+                            sb.Append(s_StepSamples[i].Substring(5)).Append(' ').Append((m_SampleGpuMs[i] / n).ToString("F3")).Append('/').Append((m_SampleCpuMs[i] / n).ToString("F3")).Append("  ");
+                            gpuTotal += m_SampleGpuMs[i]; cpuTotal += m_SampleCpuMs[i];
+                        }
+                        sb.Append($"total {gpuTotal / n:F3}/{cpuTotal / n:F3}");
+                        Debug.Log(sb.ToString());
+                    }
                 }
                 Application.Quit();
             }
+        }
+
+        void StartProfiling()
+        {
+            if (m_ProfilePath != null)
+            {
+                UnityEngine.Profiling.Profiler.logFile = m_ProfilePath;
+                UnityEngine.Profiling.Profiler.enableBinaryLog = true;
+            }
+            if (m_ProfilePath != null || m_GpuSamples)
+            {
+                UnityEngine.Profiling.Profiler.SetAreaEnabled(UnityEngine.Profiling.ProfilerArea.GPU, true);
+                UnityEngine.Profiling.Profiler.enabled = true;
+                Debug.Log($"AVBD bench: profiler {(UnityEngine.Profiling.Profiler.enabled ? "on" : "unavailable (not a development build?)")}, log {m_ProfilePath ?? "none"}");
+            }
+            if (m_GpuSamples)
+            {
+                m_Recorders = new UnityEngine.Profiling.Recorder[s_StepSamples.Length];
+                m_SampleGpuMs = new double[s_StepSamples.Length];
+                m_SampleCpuMs = new double[s_StepSamples.Length];
+                for (int i = 0; i < s_StepSamples.Length; i++) { m_Recorders[i] = UnityEngine.Profiling.Recorder.Get(s_StepSamples[i]); m_Recorders[i].enabled = true; }
+            }
+        }
+
+        void StopProfiling()
+        {
+            m_BenchCsv?.Dispose(); m_BenchCsv = null;
+            if (m_ProfilePath == null && !m_GpuSamples) return;
+            UnityEngine.Profiling.Profiler.enabled = false;
+            UnityEngine.Profiling.Profiler.enableBinaryLog = false;
+            UnityEngine.Profiling.Profiler.logFile = "";
         }
 
         void HandleKeys()
@@ -488,8 +645,11 @@ namespace Phys.Demo
         void OnGUI()
         {
             if (!ShowHud || m_World == null) return;
+            bool bench = Benching;
+            if (bench) m_Clock.Restart();
             var box = new GUIStyle(GUI.skin.box) { alignment = TextAnchor.UpperLeft, fontSize = 13, richText = true, padding = new RectOffset(10, 10, 8, 8) };
             GUI.Box(new Rect(10, 10, 900, HudHeight), HudText(), box);
+            if (bench) { m_HudMs += Lap(); m_HudCalls++; }
         }
     }
 }

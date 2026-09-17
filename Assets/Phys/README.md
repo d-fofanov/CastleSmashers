@@ -12,7 +12,7 @@ sweeps, dual updates, velocities — runs on the GPU and nothing is read back fo
 models built from the construction-piece pack are exchanged with other agents.
 
 * **Runtime** (`Phys.AvbdGpu`) — `AvbdGpuWorld` (bodies, joints, springs, links, drives, terrain, sleeping, `Step()`),
-  `BodyPool` (retired slots reused by later spawns), buffers, command-buffer recording, eight `.compute` files
+  `BodyPool` (retired slots reused by later spawns), buffers, command-buffer recording, twelve `.compute` files
   (`Resources/AvbdGpu`).
 * **Reference** (`Phys.AvbdRef`) — line-for-line C# port of `avbd-demo3d` (the test oracle), plus the terrain extension.
 * **Scenes** (`Phys.AvbdGpu.Scenes`) — the 14 reference scenes, 3 GPU benchmark scenes and a terrain scene behind an
@@ -64,6 +64,7 @@ Tools/rebond_castle.py                 re-tiles the courses of a brick-assembly 
                                        citadel as the agent designed it, the tool's input)
 Tools/generate_trees.py                designs the trees course by course under a corbel rule and tiles them with the re-bonding tool's tiler
 Tools/generate_foliage.py              tiles the foliage's stepped height fields with plates, course by course in alternating directions
+Tools/video                            undermining.txt (the mining charges of the README video) and record_undermining.ps1 (records and encodes it)
 Assets/Models/ConstructorBlock2x3      the 2 x 3 construction brick (FBX, Tools/generate_constructor_block.py)
 Assets/Models/ConstructorFigure, ConstructorArrow   the toy figure and the arrow (Tools/generate_constructor_accessories.py)
 Assets/Models/construction_pieces      the 27-piece pack (bricks, plates, tiles, ramps, prisms; generate_models.py, Blender 5.2),
@@ -109,7 +110,8 @@ var field = Heightfield.Generate(TerrainPreset.Hills, seed: 7, res: 513, cell: 1
 field.Flatten(min, max, field.MeanHeight(min, max), skirt: 8f);   // a plateau for a building
 int terrain = world.SetTerrain(field, friction: 0.6f);             // one per world; a static body slot at the identity pose
 field.Sample(xz, out float height, out float3 normal);            // what the solver sees (gameplay: spawn heights)
-world.UpdateTerrain();                                            // after editing field.Heights in place (BuildMaxMip first)
+world.UpdateTerrain();                                            // after editing field.Heights in place (BuildMaxMip first); wakes the world
+field.Crater(xz, radius: 9f, depth: 5f); world.UpdateTerrain(wakeAll: false);   // a paraboloid crater; the caller wakes what stood on it (a blast does)
 var view = new TerrainView(); view.Show(field);                   // Unity terrain renderer; view.Show(field, sceneTerrain) draws on a scene terrain
 view.Style = TerrainStyle.Tiled; view.Show(field); view.Render(); // as tiles instead (Render once per frame); view.TileSettings: size, step, colours
 ```
@@ -291,6 +293,24 @@ Player flags: `-avbd-scene n`, `-avbd-screenshot file [-avbd-frames n]` (screens
 `-avbd-yaw deg -avbd-pitch deg -avbd-distance m` (camera), `-avbd-shoot n` (fire a box at frame n), `-avbd-nosleep`,
 `-avbd-colormode n` (start in colour mode n; 3 = sleep).
 
+Video: `-avbd-record dir` writes every frame as `dir/frame_00000.png` ... until `-avbd-frames n`, then quits, with the HUD off and the
+game clock fixed at the solver's step (`Time.captureFramerate`: the run takes as long as the captures take, and the footage plays at
+the solver's rate — encode it at 30 fps for half speed); `-avbd-record-from n` and `-avbd-record-every n` skip frames,
+`-avbd-supersize n` renders the captures at n times the window size (downscale them afterwards: that is the anti-aliasing),
+`-avbd-orbit deg/s` turns the camera about its target and `-avbd-dolly m/s` moves it in (negative: out) while the run lasts.
+`Tools/video/record_undermining.ps1` records the README video this way (`ffmpeg` encodes the frames).
+
+Bench dissection (with `-avbd-bench`): the bench logs the frame time percentiles, the main-thread time of each part of the
+frame (the demo's tick, the step and its command buffer submission, the body / terrain / attachment draws, the HUD) and the
+compute dispatches per substep; `-avbd-substeps n` and `-avbd-iterations n` override the solver, `-avbd-nophysics`,
+`-avbd-nobodies`, `-avbd-noterrain`, `-avbd-noattach` and `-avbd-nohud` switch parts of the frame off (the GPU cost of a
+part is the frame time difference — `FrameTimingManager`'s GPU time does not include the compute), `-avbd-benchcsv file`
+writes one row per frame (times, active / hot / woken bodies, pairs, manifolds ...). A development build (`BuildDemo.Build
+-buildDev`) takes `-avbd-profile file` (a Profiler capture of the bench window, dumped as text by
+`Unity.exe -batchmode -quit -executeMethod Phys.Demo.Editor.ProfileDump.Dump -profile file.raw [-profileThreads Main,Render
+-profileDepth 12 -profileMin 0.05]`). Check the power state before trusting numbers: on battery the GPU is capped at a
+few tens of watts and the frame times double.
+
 ## Castle demo
 
 `Assets/Phys/Demo/Castle.unity` (`Phys / Build Castle Player`, or `-executeMethod Phys.Demo.Editor.BuildDemo.Build
@@ -342,7 +362,15 @@ outlying copies (0 / 4 / 8), `F` trees (0 / 10 / 20 / 30, with six clumps of fol
 `B` / `Enter` fires a 30 kg cannonball at 24 model m/s (× √5 in the solver). Flags: `-avbd-scene 0..9`, `-avbd-snap`,
 `-avbd-outlying n`, `-avbd-trees n`, `-avbd-foliage n` (clumps per tree), `-avbd-noshadows`, `-avbd-meshshadows`, `-avbd-norangeculling`, `-avbd-terrain hills|valley|ridge|none`,
 `-avbd-terrain-seed n`, `-avbd-terrain-style tiled|smooth`, and the screenshot / bench / camera flags above (a demo's own flags are read by
-`ParseArgs` before the world is created, so that the outlying, tree and foliage reserves follow them). The bench log reports the GPU
+`ParseArgs` before the world is created, so that the outlying, tree and foliage reserves follow them). `-avbd-blasts file` scripts
+explosions: one per line as `step x y z impactRadius impulse lift pulverizeRadius [craterDepth]` (`#` comments; metres from the
+castle's centre at ground level, N s, the radii of `AvbdGpuWorld.Blast`), going off at their steps after every load of the scene;
+with a crater depth the charge also digs a crater of the pulverize radius into the terrain (`Heightfield.Crater`, a paraboloid,
+uploaded with `UpdateTerrain` without waking the rest of the world: the blast wakes what stands on it), so what stood on the
+crater drops into it — a mining charge. A blast alone hardly moves a wall: the impulse of the bricks it hits diffuses into the
+structure through the contacts within a step (a 30 N s charge under a tower leaves its bricks at 14 m/s after the step and 6 m/s
+fifteen steps later), so the towers of `Tools/video/undermining.txt` are toppled by taking the ground from under the side facing the
+camera and leaving the far wall its footing. The bench log reports the GPU
 render time and the draw count next to the frame and step times. What twenty trees cost is their shadows: they are 13 M
 triangles per pass (23 000 pieces with all their studs, three times the castle) and the PC pipeline draws every piece once
 more per shadow cascade, so with the meshes casting (`-avbd-meshshadows`) the Castle preset renders in 12.7 ms instead of

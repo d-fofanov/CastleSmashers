@@ -74,9 +74,21 @@ namespace Phys.Demo
                  "where at a kilogram it blows half of it out and the rest stands).")]
         public float FoliageMass = 0.25f;
 
+        /// <summary>A scripted explosion (<c>-avbd-blasts file</c>): <see cref="AvbdGpuWorld.Blast"/> at a step of the scene, placed in metres
+        /// from the castle's centre at ground level (y up from the plateau), with a crater of the pulverize radius dug into the terrain
+        /// under it when <see cref="CraterDepth"/> is set (a mining charge: what stood on the crater falls into it).</summary>
+        public struct ScriptedBlast
+        {
+            public int Step;
+            public float3 Position;
+            public float ImpactRadius, Impulse, Lift, PulverizeRadius, CraterDepth;
+        }
+
         BrickLayout m_Layout;
         BrickSpec m_Spec;
         int m_FirstBrick, m_SnapJoints;
+        readonly List<ScriptedBlast> m_Blasts = new List<ScriptedBlast>();
+        int m_Step, m_BlastsFired;
         int m_OutlyingCount, m_OutlyingBricks;
         float2[] m_OutlyingCentres = new float2[0];
         Vegetation m_Vegetation;
@@ -104,6 +116,11 @@ namespace Phys.Demo
         public int FirstOutlyingBrick => m_FirstBrick + BrickCount;
         /// <summary>The trees and the foliage around the castle (their pieces contiguous after the outlying copies' bricks).</summary>
         public Vegetation Vegetation => m_Vegetation;
+        /// <summary>The scripted explosions, in step order; <see cref="BlastsFired"/> of them have gone off since the scene was loaded.</summary>
+        public IReadOnlyList<ScriptedBlast> Blasts => m_Blasts;
+        public int BlastsFired => m_BlastsFired;
+        /// <summary>Steps run since the scene was loaded (the settle steps not counted).</summary>
+        public int Step => m_Step;
 
         protected override int SceneCount => CastlePlan.Presets.Length;
         protected override string SceneName(int index) => CastlePlan.Presets[index].Name;
@@ -150,7 +167,64 @@ namespace Phys.Demo
                 if (args[i] == "-avbd-foliage" && i + 1 < args.Length && int.TryParse(args[i + 1], out int foliage)) FoliagePerTree = foliage;
                 if (args[i] == "-avbd-noshadows") Shadows = false;
                 if (args[i] == "-avbd-meshshadows") BoxShadows = false;
+                if (args[i] == "-avbd-blasts" && i + 1 < args.Length) LoadBlasts(args[i + 1]);
             }
+        }
+
+        /// <summary>Reads a blast script: one explosion per line as <c>step x y z impactRadius impulse lift pulverizeRadius [craterDepth]</c>
+        /// (metres from the castle's centre at ground level, N s, see <see cref="AvbdGpuWorld.Blast"/>; a crater of the pulverize
+        /// radius and that depth is dug under the blast when the ninth number is given), <c>#</c> comments; the explosions go off at
+        /// their steps after every load of the scene.</summary>
+        public void LoadBlasts(string path)
+        {
+            m_Blasts.Clear();
+            var culture = System.Globalization.CultureInfo.InvariantCulture;
+            string[] lines;
+            try { lines = System.IO.File.ReadAllLines(path); }
+            catch (System.Exception e) { Debug.LogError($"CastleDemo: cannot read the blast script {path}: {e.Message}"); return; }
+            foreach (string raw in lines)
+            {
+                string line = raw.Split('#')[0].Trim();
+                if (line.Length == 0) continue;
+                var f = line.Split(new[] { ' ', '\t', ',' }, System.StringSplitOptions.RemoveEmptyEntries);
+                if (f.Length < 8) { Debug.LogWarning($"CastleDemo: blast script line ignored (8 or 9 numbers expected): {raw}"); continue; }
+                var v = new float[9];
+                bool ok = true;
+                for (int k = 0; k < math.min(f.Length, 9); k++) ok &= float.TryParse(f[k], System.Globalization.NumberStyles.Float, culture, out v[k]);
+                if (!ok) { Debug.LogWarning($"CastleDemo: blast script line ignored (not a number): {raw}"); continue; }
+                AddBlast(new ScriptedBlast { Step = (int)v[0], Position = new float3(v[1], v[2], v[3]), ImpactRadius = v[4], Impulse = v[5], Lift = v[6], PulverizeRadius = v[7], CraterDepth = v[8] });
+            }
+            Debug.Log($"CastleDemo: {m_Blasts.Count} scripted blasts from {path}");
+        }
+
+        /// <summary>Queues a scripted explosion (kept in step order; one queued for a step already run goes off at the next step).</summary>
+        public void AddBlast(ScriptedBlast blast)
+        {
+            int at = m_Blasts.Count;
+            while (at > 0 && m_Blasts[at - 1].Step > blast.Step) at--;
+            m_Blasts.Insert(at, blast);
+            if (at < m_BlastsFired) m_BlastsFired = at;
+        }
+
+        protected override void OnStep()
+        {
+            bool cratered = false;
+            while (m_BlastsFired < m_Blasts.Count && m_Blasts[m_BlastsFired].Step <= m_Step)
+            {
+                var b = m_Blasts[m_BlastsFired++];
+                float3 centre = new float3(b.Position.x, m_Plateau + b.Position.y, b.Position.z);
+                m_World.Blast(centre, b.ImpactRadius, b.Impulse, b.Lift, b.PulverizeRadius);
+                // the crater: the blast wakes everything within the pulverize radius, so the terrain update leaves the rest asleep
+                if (b.CraterDepth > 0f && b.PulverizeRadius > 0f && m_World.Terrain != null) { m_World.Terrain.Crater(centre.xz, b.PulverizeRadius, b.CraterDepth); cratered = true; }
+                Debug.Log($"CastleDemo: blast {m_BlastsFired} at step {m_Step} ({b.Position.x:F1}, {b.Position.y:F1}, {b.Position.z:F1}) impact {b.ImpactRadius:F1} m x {b.Impulse:F0} N s lift {b.Lift:F2}, pulverize {b.PulverizeRadius:F1} m" +
+                    (b.CraterDepth > 0f ? $", crater {b.CraterDepth:F1} m deep" : ""));
+            }
+            if (cratered)
+            {
+                m_World.UpdateTerrain(wakeAll: false);
+                m_TerrainView.Show(m_World.Terrain, SceneTerrain);
+            }
+            m_Step++;
         }
 
         protected override void Configure()
@@ -175,6 +249,7 @@ namespace Phys.Demo
         protected override void BuildScene(int index, out float3 cameraTarget, out float cameraDistance)
         {
             var plan = CastlePlan.Presets[index];
+            m_Step = 0; m_BlastsFired = 0;   // the scripted explosions go off again after a rebuild
             m_Layout = BrickCastle.Generate(plan);
             float2 c = BrickCastle.Center(plan) * Brick.Pitch * BrickScale;
             float volume = Brick.Width * Brick.BodyHeight * Brick.Length * BrickScale * BrickScale * BrickScale;

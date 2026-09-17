@@ -162,6 +162,11 @@ namespace Phys.AvbdGpu
         public int SpringCount => m_SpringCount;
         public AvbdGpuStats Stats => m_Stats;
         public int ActiveColors => m_ActiveColors;
+        /// <summary>Compute dispatches recorded per substep (the step's command buffer), and in the sleeping grid rebuild / cold store
+        /// compaction buffers (run every few steps).</summary>
+        public int DispatchesPerSubstep => m_Pipeline.StepDispatches;
+        public int RebuildDispatches => m_Pipeline.RebuildDispatches;
+        public int CompactDispatches => m_Pipeline.CompactDispatches;
         public int StepIndex { get; private set; }
         /// <summary>The manifold pool (0 or 1) holding the last step's manifolds, contacts and hash: what the debug draw and the
         /// synchronous readbacks read.</summary>
@@ -271,13 +276,15 @@ namespace Phys.AvbdGpu
 
         /// <summary>Re-uploads the terrain's samples and max mip after they were edited in place (call <see cref="Heightfield.BuildMaxMip"/>
         /// or an editing method first).</summary>
-        public void UpdateTerrain()
+        public void UpdateTerrain(bool wakeAll = true)
         {
             if (m_Terrain == null) return;
             Buffers.EnsureTerrain(m_Terrain.SampleCount, m_Terrain.MaxMip.Length);
             Buffers.TerrainHeights.SetData(m_Terrain.Heights);
             Buffers.TerrainMaxMip.SetData(m_Terrain.MaxMip);
-            WakeAll();   // sleeping bodies may now hang above (or sit below) the new surface
+            // sleeping bodies may now hang above (or sit below) the new surface; a caller that changed a known patch (a crater under
+            // a blast, which wakes what stands there) keeps the rest of the world asleep
+            if (wakeAll) WakeAll();
         }
 
         // ------------------------------------------------------------------------------------------------ body pools

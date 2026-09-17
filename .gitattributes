@@ -32,3 +32,5 @@
 *.dll binary
 *.so binary
 *.dylib binary
+*.mp4 binary
+*.gif binary

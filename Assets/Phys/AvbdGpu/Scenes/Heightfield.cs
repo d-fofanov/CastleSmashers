@@ -225,6 +225,25 @@ namespace Phys.AvbdGpu.Scenes
             BuildMaxMip();
         }
 
+        /// <summary>Digs a crater: the samples within <paramref name="radius"/> of <paramref name="centre"/> drop by
+        /// <paramref name="depth"/> at the centre, less towards the rim (a paraboloid, level with the terrain at the rim). Only the
+        /// samples within the radius are visited; a world using the field re-uploads it with <c>UpdateTerrain</c>.</summary>
+        public void Crater(float2 centre, float radius, float depth)
+        {
+            if (radius <= 0f || depth <= 0f) return;
+            int x0 = math.clamp((int)math.floor((centre.x - radius - Origin.x) / Cell.x), 0, ResX - 1), x1 = math.clamp((int)math.ceil((centre.x + radius - Origin.x) / Cell.x), 0, ResX - 1);
+            int z0 = math.clamp((int)math.floor((centre.y - radius - Origin.y) / Cell.y), 0, ResZ - 1), z1 = math.clamp((int)math.ceil((centre.y + radius - Origin.y) / Cell.y), 0, ResZ - 1);
+            for (int z = z0; z <= z1; z++)
+                for (int x = x0; x <= x1; x++)
+                {
+                    float2 p = Origin + new float2(x * Cell.x, z * Cell.y);
+                    float r = math.distance(p, centre) / radius;
+                    if (r >= 1f) continue;
+                    Heights[z * ResX + x] -= depth * (1f - r * r);
+                }
+            BuildMaxMip();
+        }
+
         // ------------------------------------------------------------------------------------------------ generation
 
         /// <summary>A procedural terrain centred on the world origin: <paramref name="res"/> samples per axis <paramref name="cell"/> metres

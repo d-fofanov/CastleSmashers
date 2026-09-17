@@ -122,6 +122,33 @@ namespace Phys.AvbdGpu.Tests
         }
 
         [Test]
+        public void CraterDropsTheSamplesWithinTheRadiusByAParaboloid()
+        {
+            var f = Heightfield.Generate(TerrainPreset.Hills, 5u, 129, 1f, 8f, 30f);
+            var before = (float[])f.Heights.Clone();
+            float2 centre = new float2(3f, -5f);
+            f.Sample(centre, out _, out float3 slope);
+            f.Crater(centre, 6f, 4f);
+            for (int z = 0; z < f.ResZ; z++)
+                for (int x = 0; x < f.ResX; x++)
+                {
+                    float2 p = f.Origin + new float2(x * f.Cell.x, z * f.Cell.y);
+                    float r = math.distance(p, centre) / 6f;
+                    float expected = r >= 1f ? before[z * f.ResX + x] : before[z * f.ResX + x] - 4f * (1f - r * r);
+                    Assert.AreEqual(expected, f[x, z], 1e-5f, $"at {p}");
+                }
+            f.Sample(centre, out float h, out float3 n);
+            Assert.AreEqual(before[(int)(centre.y - f.Origin.y) * f.ResX + (int)(centre.x - f.Origin.x)] - 4f, h, 1e-5f, "the centre (on a sample) dropped by the depth");
+            Assert.Less(math.distance(n, slope), 1e-4f, "the paraboloid is level at its centre: the hill's own slope remains");
+            float lowest = float.PositiveInfinity;
+            foreach (float s in f.Heights) lowest = math.min(lowest, s);
+            Assert.AreEqual(lowest, f.MinHeight, "the bounds follow the edit");
+            var untouched = (float[])f.Heights.Clone();
+            f.Crater(centre, 0f, 4f); f.Crater(centre, 6f, 0f);
+            CollectionAssert.AreEqual(untouched, f.Heights, "a crater without a radius or a depth changes nothing");
+        }
+
+        [Test]
         public void PresetsAreDeterministicAndBounded()
         {
             foreach (var preset in new[] { TerrainPreset.Hills, TerrainPreset.Valley, TerrainPreset.Ridge })
