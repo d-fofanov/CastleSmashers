@@ -1,0 +1,376 @@
+[
+  {
+    "name": "ConstructorTrebuchet",
+    "triangles": 2160,
+    "bounds": [
+      [
+        -0.3630000054836273,
+        0.3630000352859497
+      ],
+      [
+        0.0,
+        1.0802315473556519
+      ],
+      [
+        -0.46000000834465027,
+        0.8650000095367432
+      ]
+    ],
+    "dimensions": [
+      0.726000040769577,
+      1.0802315473556519,
+      1.3250000178813934
+    ],
+    "note": "Four pivoted meshes: Base \u2192 ActiveBeam \u2192 {HangingLoad, ProjectileBasin}. Rotate each moving part about local X. Base pivot (0,0,0); beam axle (0,0.65,0); load hinge (0,0.47,-0.28); basin suspension (0,1.05,0.65), all in assembled metres. Load includes hanger straps; basin includes suspension ropes. Local positions relative to beam: load (0,-0.18,-0.28), basin (0,0.40,0.65). Zero rotations reproduce the rest pose. Counter-rotate the hanging parts to maintain their world orientation as the beam moves, or animate them independently to swing. Throws toward +Z; accepts rocks around 0.10 m. No baked animation or physics.",
+    "parts": [
+      {
+        "name": "Base",
+        "parent": null,
+        "pivot": [
+          0,
+          0,
+          0
+        ],
+        "triangles": 1548,
+        "local_position": [
+          0,
+          0,
+          0
+        ]
+      },
+      {
+        "name": "ActiveBeam",
+        "parent": "Base",
+        "pivot": [
+          0,
+          0.65,
+          0
+        ],
+        "triangles": 80,
+        "local_position": [
+          0,
+          0.65,
+          0
+        ]
+      },
+      {
+        "name": "HangingLoad",
+        "parent": "ActiveBeam",
+        "pivot": [
+          0,
+          0.47,
+          -0.28
+        ],
+        "triangles": 316,
+        "local_position": [
+          0,
+          -0.18000000000000005,
+          -0.28
+        ]
+      },
+      {
+        "name": "ProjectileBasin",
+        "parent": "ActiveBeam",
+        "pivot": [
+          0,
+          1.05,
+          0.65
+        ],
+        "triangles": 216,
+        "local_position": [
+          0,
+          0.4,
+          0.65
+        ]
+      }
+    ]
+  },
+  {
+    "name": "ConstructorRock01",
+    "triangles": 20,
+    "bounds": [
+      [
+        -0.05314014106988907,
+        0.044204067438840866
+      ],
+      [
+        -0.0475216768682003,
+        0.05228691175580025
+      ],
+      [
+        -0.04600393399596214,
+        0.04914163798093796
+      ]
+    ],
+    "dimensions": [
+      0.09734420850872993,
+      0.09980858862400055,
+      0.0951455719769001
+    ],
+    "note": "Centred projectile pivot. Faceted molded boulder; sized for the trebuchet sling."
+  },
+  {
+    "name": "ConstructorRock02",
+    "triangles": 20,
+    "bounds": [
+      [
+        -0.05796375870704651,
+        0.05662505328655243
+      ],
+      [
+        -0.03683950752019882,
+        0.040799032896757126
+      ],
+      [
+        -0.04156716167926788,
+        0.04166976734995842
+      ]
+    ],
+    "dimensions": [
+      0.11458881199359894,
+      0.07763854041695595,
+      0.0832369290292263
+    ],
+    "note": "Centred projectile pivot. Faceted molded boulder; sized for the trebuchet sling."
+  },
+  {
+    "name": "ConstructorRock03",
+    "triangles": 20,
+    "bounds": [
+      [
+        -0.04418487101793289,
+        0.04568514972925186
+      ],
+      [
+        -0.06352952122688293,
+        0.05077897012233734
+      ],
+      [
+        -0.04084620252251625,
+        0.03918354958295822
+      ]
+    ],
+    "dimensions": [
+      0.08987002074718475,
+      0.11430849134922028,
+      0.08002975210547447
+    ],
+    "note": "Centred projectile pivot. Faceted molded boulder; sized for the trebuchet sling."
+  },
+  {
+    "name": "ConstructorRock04",
+    "triangles": 80,
+    "bounds": [
+      [
+        -0.059314873069524765,
+        0.05513077601790428
+      ],
+      [
+        -0.055479492992162704,
+        0.05151927471160889
+      ],
+      [
+        -0.058070775121450424,
+        0.05459863692522049
+      ]
+    ],
+    "dimensions": [
+      0.11444564908742905,
+      0.10699876770377159,
+      0.11266941204667091
+    ],
+    "note": "Centred projectile pivot. Faceted molded boulder; sized for the trebuchet sling."
+  },
+  {
+    "name": "ConstructorBow",
+    "triangles": 676,
+    "bounds": [
+      [
+        -0.008749720640480518,
+        0.008749720640480518
+      ],
+      [
+        -0.17440086603164673,
+        0.17440086603164673
+      ],
+      [
+        -0.011960165575146675,
+        0.060609765350818634
+      ]
+    ],
+    "dimensions": [
+      0.017499441280961037,
+      0.34880173206329346,
+      0.07256993092596531
+    ],
+    "note": "Grip-centre pivot, Y-up, shoots +Z. 0.34 m tall; 0.017 m grip fits the original figure clip opening. Suggested hand placement (\u00b10.148, 0.197, 0.008) relative to figure."
+  },
+  {
+    "name": "ConstructorBowArrow",
+    "triangles": 98,
+    "bounds": [
+      [
+        -0.017054483294487,
+        0.017054483294487
+      ],
+      [
+        -0.015999997034668922,
+        0.01899999938905239
+      ],
+      [
+        -0.14000001549720764,
+        0.14000001549720764
+      ]
+    ],
+    "dimensions": [
+      0.034108966588974,
+      0.034999996423721313,
+      0.2800000309944153
+    ],
+    "note": "Centre pivot, points +Z. 0.28 m long, three solid molded fins; fits ConstructorBow. Static mesh."
+  },
+  {
+    "name": "ConstructorBowHeavyArrow",
+    "triangles": 98,
+    "bounds": [
+      [
+        -0.02199999988079071,
+        0.02199999988079071
+      ],
+      [
+        -0.021999996155500412,
+        0.02200000360608101
+      ],
+      [
+        -0.14000001549720764,
+        0.14000001549720764
+      ]
+    ],
+    "dimensions": [
+      0.04399999976158142,
+      0.04399999976158142,
+      0.2800000309944153
+    ],
+    "note": "Centre pivot, points +Z. 0.28 m long, three solid molded fins; fits ConstructorBow. Static mesh."
+  },
+  {
+    "name": "ConstructorMage",
+    "triangles": 1502,
+    "bounds": [
+      [
+        -0.1770000010728836,
+        0.1770000010728836
+      ],
+      [
+        0.0,
+        0.656000018119812
+      ],
+      [
+        -0.09399999678134918,
+        0.09399999678134918
+      ]
+    ],
+    "dimensions": [
+      0.3540000021457672,
+      0.656000018119812,
+      0.18799999356269836
+    ],
+    "note": "Original 0.48 m figure body plus robe, beard, pointed hat and staff. Faces +Z; foot-centre pivot. Neutral single mesh, no rig; approximately 0.66 m tall with hat."
+  },
+  {
+    "name": "ConstructorSpellProjectile",
+    "triangles": 60,
+    "bounds": [
+      [
+        -0.048521772027015686,
+        0.05189709737896919
+      ],
+      [
+        -0.047785066068172455,
+        0.05141216889023781
+      ],
+      [
+        -0.1850000023841858,
+        0.10953424870967865
+      ]
+    ],
+    "dimensions": [
+      0.10041886940598488,
+      0.09919723495841026,
+      0.29453425109386444
+    ],
+    "note": "Centre pivot; travels +Z with a tapered trail toward -Z. Assign any opaque, transparent or emissive material in Unity."
+  },
+  {
+    "name": "ConstructorSpellExplosion01",
+    "triangles": 116,
+    "bounds": [
+      [
+        -0.1899999976158142,
+        0.1899999976158142
+      ],
+      [
+        -0.08309486508369446,
+        0.089466892182827
+      ],
+      [
+        -0.19572173058986664,
+        0.19572173058986664
+      ]
+    ],
+    "dimensions": [
+      0.3799999952316284,
+      0.17256175726652145,
+      0.3914434611797333
+    ],
+    "note": "Radial starburst with chunky rays; impact-centre pivot. Neutral material-ready static effect."
+  },
+  {
+    "name": "ConstructorSpellExplosion02",
+    "triangles": 212,
+    "bounds": [
+      [
+        -0.1889999955892563,
+        0.1889999955892563
+      ],
+      [
+        -0.02301909402012825,
+        0.13600000739097595
+      ],
+      [
+        -0.1889999955892563,
+        0.1889999955892563
+      ]
+    ],
+    "dimensions": [
+      0.3779999911785126,
+      0.1590191014111042,
+      0.3779999911785126
+    ],
+    "note": "Horizontal shock ring with crystal fragments; impact-centre pivot, Y-up. Neutral material-ready static effect."
+  },
+  {
+    "name": "ConstructorSpellExplosion03",
+    "triangles": 320,
+    "bounds": [
+      [
+        -0.14124278724193573,
+        0.16970276832580566
+      ],
+      [
+        -0.04701079800724983,
+        0.18139730393886566
+      ],
+      [
+        -0.1616838276386261,
+        0.1597575694322586
+      ]
+    ],
+    "dimensions": [
+      0.3109455555677414,
+      0.2284081019461155,
+      0.3214413970708847
+    ],
+    "note": "Faceted puff cloud with flying fragments; impact-centre pivot. Neutral material-ready static effect."
+  }
+]
