@@ -124,6 +124,12 @@ namespace Phys.Demo
         protected virtual void Configure() { }
         /// <summary>Extra keys of the derived demo.</summary>
         protected virtual void HandleSceneKeys() { }
+        /// <summary>Extra mouse handling of the derived demo, every frame after the base mouse handling (paused too).</summary>
+        protected virtual void HandleSceneMouse() { }
+        /// <summary>Whether the left mouse button drags bodies with a soft joint (a demo that uses the button otherwise turns it off).</summary>
+        protected virtual bool MouseDrag => true;
+        /// <summary>Extra rendering of the derived demo, every frame after the bodies and the terrain are drawn.</summary>
+        protected virtual void OnRender(Camera camera) { }
         protected virtual float3 ShotSize => new float3(1, 1, 1);
         protected virtual float ShotDensity => 1f;
         protected virtual float ShotSpeed => 25f;
@@ -233,6 +239,7 @@ namespace Phys.Demo
             if (m_World == null) return;
             HandleKeys();
             HandleMouse();
+            HandleSceneMouse();
             if (!m_Paused || m_StepOnce)
             {
                 OnStep();
@@ -251,6 +258,7 @@ namespace Phys.Demo
             if (m_World == null) return;
             m_Renderer.Render();
             m_TerrainView.Render();
+            OnRender(Camera.main);
             m_Frames++;
             if (m_Frames == m_ShootFrame) Shoot();
             if (m_ScreenshotPath == null && !m_Bench) return;
@@ -424,7 +432,7 @@ namespace Phys.Demo
 #if ENABLE_INPUT_SYSTEM
             var mouse = Mouse.current;
             var cam = Camera.main;
-            if (mouse == null || cam == null) return;
+            if (mouse == null || cam == null || !MouseDrag) return;
             Vector2 mp = mouse.position.ReadValue();
             if (mouse.leftButton.wasPressedThisFrame && m_DragJoint < 0)
             {
